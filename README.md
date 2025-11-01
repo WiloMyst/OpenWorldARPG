@@ -1,6 +1,6 @@
 # 开放世界ARPG原型
 
-一个受《原神》、《鸣潮》启发，使用UE5、C++和GAS开发的个人项目。
+一个受《原神》、《鸣潮》等启发，使用UE5、C++和GAS开发的个人项目。
 
 
 
@@ -15,9 +15,10 @@
 
 ## 版本
 
-Unreal Engine 5.2,
+- Unreal Engine 5.2,
 
-Visual Studio 2022, MSVC 14.34
+- Visual Studio 2022, MSVC 14.34
+
 
 
 
@@ -27,3 +28,22 @@ Visual Studio 2022, MSVC 14.34
 - SPCRJointDynamics
 - UnLua
 
+
+
+
+
+
+
+
+
+
+
+
+
+---
+
+## LICENSE
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+© 2025 WiloMyst
