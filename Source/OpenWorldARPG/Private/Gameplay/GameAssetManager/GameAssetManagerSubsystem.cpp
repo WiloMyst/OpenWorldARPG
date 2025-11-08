@@ -2,9 +2,9 @@
 
 
 #include "Gameplay/GameAssetManager/GameAssetManagerSubsystem.h"
-#include "UI/LoadingScreenWidget.h"
 #include "Data/CharacterDataAsset.h"
 #include "Data/CharacterInfoRow.h"
+#include "UI/LoadingScreenWidget.h"
 #include "Utils/GASBlueprintLibrary.h"
 #include "GameplayTagContainer.h"
 #include "Engine/StreamableManager.h"
@@ -118,14 +118,6 @@ void UGameAssetManagerSubsystem::StartLevelLoading()
     }
 }
 
-void UGameAssetManagerSubsystem::OnLevelLoadCompleted()
-{
-    UE_LOG(LogTemp, Log, TEXT("Phase 1 Complete: Level preload finished."));
-
-    UGameplayStatics::OpenLevel(GetWorld(), TargetLevelName);
-
-}
-
 // ####################################################################
 // #                        阶段二：队伍资产加载                         #
 // ####################################################################
@@ -135,6 +127,7 @@ void UGameAssetManagerSubsystem::StartTeamAssetLoading(const TArray<FGameplayTag
     CurrentLoadingPhase = ELoadingPhase::LoadingTeamAssets;
     TeamAssetLoadHandles.Empty();
     CompletedAssetLoads = 0;
+	FailedAssetLoads = 0;
 
     CurrentTeamToLoad = TeamCharacterTags;
 
@@ -195,6 +188,10 @@ void UGameAssetManagerSubsystem::StartTeamAssetLoading(const TArray<FGameplayTag
 
 
                     }
+                    else
+                    {
+                        UE_LOG(LogTemp, Warning, TEXT("DataAsset is null for Tag: %s."), *CharTag.ToString());
+					}
                 }
                 else
                 {
@@ -202,7 +199,15 @@ void UGameAssetManagerSubsystem::StartTeamAssetLoading(const TArray<FGameplayTag
                 }
             }
         }
+        else
+        {
+            UE_LOG(LogTemp, Error, TEXT("Failed to load CharacterInfoTable."));
+		}
     }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("CharacterInfoTable is not valid! Cannot load team assets."));
+	}
 
     TeamAssetLoadNum = AssetPathsToLoad.Num();
     if (TeamAssetLoadNum == 0)
@@ -223,6 +228,10 @@ void UGameAssetManagerSubsystem::StartTeamAssetLoading(const TArray<FGameplayTag
             );
             TeamAssetLoadHandles.Add(Handle);
         }
+        else
+        {
+			FailedAssetLoads++;
+        }
     }
 }
 
@@ -230,7 +239,7 @@ void UGameAssetManagerSubsystem::OnSingleTeamAssetLoaded()
 {
     CompletedAssetLoads++;
     UE_LOG(LogTemp, Log, TEXT("No.%d team asset async loaded successfully!"), CompletedAssetLoads);
-    if (CompletedAssetLoads >= TeamAssetLoadNum)
+    if (CompletedAssetLoads + FailedAssetLoads >= TeamAssetLoadNum)
     {
         OnAllTeamAssetsLoaded();
     }
@@ -243,6 +252,8 @@ void UGameAssetManagerSubsystem::OnAllTeamAssetsLoaded()
     CurrentLoadingPhase = ELoadingPhase::Complete;
     UE_LOG(LogTemp, Log, TEXT("Phase 2 Complete: All team assets loaded."));
 
+    UGameplayStatics::OpenLevel(GetWorld(), TargetLevelName);
+
     // 广播总完成事件
     //OnLoadComplete.Broadcast();
 }
@@ -253,7 +264,7 @@ void UGameAssetManagerSubsystem::OnAllTeamAssetsLoaded()
 
 void UGameAssetManagerSubsystem::ShowLoadingScreen()
 {
-    // 检查是否在服务器上，服务器不需要创建UI
+    // 服务器不需要创建UI
     if (GetWorld()->GetNetMode() == NM_DedicatedServer)
     {
         return;
@@ -269,14 +280,6 @@ void UGameAssetManagerSubsystem::ShowLoadingScreen()
                 LoadingScreenInstance->TakeWidget(),
                 100 // Z-Order
             );
-   //         if(APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0))
-   //         {
-   //             PC->bShowMouseCursor = false;
-   //             FInputModeUIOnly InputMode;
-   //             InputMode.SetWidgetToFocus(LoadingScreenInstance->TakeWidget());
-   //             InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-   //             PC->SetInputMode(InputMode);
-			//}
         }
     }
 }
@@ -293,19 +296,11 @@ void UGameAssetManagerSubsystem::HideLoadingScreen()
             );
         }
 
-        // 标记为待回收，而不是直接置空，以防万一还有引用
-        LoadingScreenInstance->MarkAsGarbage();
+        LoadingScreenInstance->MarkAsGarbage(); // 标记为待回收
         LoadingScreenInstance = nullptr;
-        //if (APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0))
-        //{
-        //    PC->bShowMouseCursor = false;
-        //    FInputModeGameOnly InputMode;
-        //    PC->SetInputMode(InputMode);
-        //}
     }
 }
 
-// CleanupAfterLoad() 必须在新世界被调用。
 void UGameAssetManagerSubsystem::CleanupAfterLoad()
 {
     HideLoadingScreen();

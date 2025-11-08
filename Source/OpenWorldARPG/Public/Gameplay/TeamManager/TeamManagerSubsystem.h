@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/WorldSubsystem.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "GameplayTagContainer.h"
 #include "TeamManagerSubsystem.generated.h"
 
@@ -18,12 +18,11 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnTeamMembersChanged);
 
 
 UCLASS(Blueprintable)
-class OPENWORLDARPG_API UTeamManagerSubsystem : public UWorldSubsystem
+class OPENWORLDARPG_API UTeamManagerSubsystem : public UGameInstanceSubsystem
 {
     GENERATED_BODY()
 
 public:
-    // ---- UWorldSubsystem overrides ----
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
@@ -91,7 +90,7 @@ public:
     // --- 公共Getters (蓝图可读) ---
 
     UFUNCTION(BlueprintPure, Category = "Team Management")
-    TArray<FGameplayTag> GetCurrentTeamTags() const { return CurrentTeamCharacters; }
+    TArray<FGameplayTag> GetCurrentTeamCharacterTags() const { return CurrentTeamCharacters; }
 
     UFUNCTION(BlueprintPure, Category = "Team Management")
     FGameplayTag GetActiveCharacterTag() const { return CurrentTeamCharacters.IsValidIndex(ActiveCharacterIndex) ? CurrentTeamCharacters[ActiveCharacterIndex] : FGameplayTag::EmptyTag; }

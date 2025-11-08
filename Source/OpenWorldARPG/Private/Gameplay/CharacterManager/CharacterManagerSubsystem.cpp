@@ -14,7 +14,6 @@ void UCharacterManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection
     PreloadAndProcessCharacterDataTable();
 
     UE_LOG(LogTemp, Log, TEXT("CharacterManagerSubsystem Initialized."));
-    OnSubsystemInitialized();
 }
 
 void UCharacterManagerSubsystem::Deinitialize()

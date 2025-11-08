@@ -7,6 +7,7 @@
 #include "GameAssetManagerSubsystem.generated.h"
 
 class ULoadingScreenWidget;
+class UDataTable;
 struct FStreamableManager;
 struct FStreamableHandle;
 
@@ -88,18 +89,21 @@ protected:
 
     // 关卡加载阶段
     void StartLevelLoading();
+
+	UFUNCTION(BlueprintImplementableEvent, BlueprintCallable, Category = "Asset Loading")
     void OnLevelLoadCompleted();    // 关卡加载完成的回调
 
+protected:
     // ----- 配置与状态 -----
-
-    UPROPERTY(EditDefaultsOnly, Category = "Config")
-    TSoftObjectPtr<UDataTable> CharacterInfoTable;
 
     UPROPERTY(EditDefaultsOnly, Category = "Config")
     TSubclassOf<ULoadingScreenWidget> LoadingScreenWidgetClass;
 
     UPROPERTY()
     TObjectPtr<ULoadingScreenWidget> LoadingScreenInstance;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Config")
+    TSoftObjectPtr<UDataTable> CharacterInfoTable;
 
     // 真正执行流式加载的管理器
     FStreamableManager* StreamableManager;
@@ -110,8 +114,8 @@ protected:
     ELoadingPhase CurrentLoadingPhase = ELoadingPhase::None;
 
     // 加载阶段的权重
-    float LevelLoadWeight = 0.7f;     // 关卡加载占70%
-    float TeamAssetLoadWeight = 0.3f; // 队伍资产加载占30%
+    float LevelLoadWeight = 0.2f;     // 关卡加载占20%
+    float TeamAssetLoadWeight = 0.8f; // 队伍资产加载占80%
 
     // 存储本次加载流程的数据
     TArray<FGameplayTag> CurrentTeamToLoad;
@@ -122,6 +126,7 @@ protected:
     TArray<TSharedPtr<FStreamableHandle>> TeamAssetLoadHandles;
     int32 TeamAssetLoadNum = 0;
     int32 CompletedAssetLoads = 0;
+    int32 FailedAssetLoads = 0;
 
     // 用于跟踪关卡加载的句柄
     TSharedPtr<FStreamableHandle> LevelLoadHandle;

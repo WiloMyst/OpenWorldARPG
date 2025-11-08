@@ -3,12 +3,12 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/WorldSubsystem.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "Data/CharacterData.h"
 #include "GameplayTagContainer.h"
 #include "CharacterManagerSubsystem.generated.h"
 
 class USaveGame;
-class ACharacterData;
 class APlayerCharacter;
 class UDataTable;
 struct FCharacterInfoRow;
@@ -16,27 +16,18 @@ struct FCharacterInfoRow;
 /**
  * @class UCharacterManagerSubsystem
  * @brief 角色系统的“大脑中枢”和数据中心。
- * 负责管理玩家拥有的所有角色数据、队伍配置、角色切换逻辑，并提供统一的数据访问接口。
- * 继承自UWorldSubsystem，确保全局唯一且生命周期贯穿整个游戏。
+ * 负责管理玩家拥有的所有角色数据，并提供统一的数据访问接口。
  */
 UCLASS(Blueprintable)
-class OPENWORLDARPG_API UCharacterManagerSubsystem : public UWorldSubsystem
+class OPENWORLDARPG_API UCharacterManagerSubsystem : public UGameInstanceSubsystem
 {
 	GENERATED_BODY()
 
 public:
-	// ---- UWorldSubsystem overrides ----
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
 
 	// ---- 核心API (可在C++和蓝图中调用) ----
-
-	/**
-	 * @brief [蓝图可实现] 当C++部分的初始化完成后被调用。
-	 * 这是蓝图逻辑的真正入口点。
-	 */
-	UFUNCTION(BlueprintImplementableEvent, Category = "CharacterManager|Initialization")
-	void OnSubsystemInitialized();
 
 	/**
 	 * @brief [核心API] 从一个SaveGame对象初始化整个角色管理器。
@@ -82,8 +73,14 @@ protected:
 	// ---- 核心数据容器 ----
 
 	/**
-	 * @brief [核心] 角色仓库。存储玩家拥有的所有UCharacterData实例。
-	 * Key是角色的唯一Tag, Value是对应的UCharacterData对象。
+	 * @brief [核心] 角色存档数据列表。存储玩家拥有的所有角色的动态进度数据。
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CharacterManager|Data")
+	TArray<FCharacterSaveData> OwnedCharactersSaveData;
+
+	/**
+	 * @brief [核心] 角色仓库。存储玩家拥有的所有ACharacterData实例。
+	 * Key是角色的唯一Tag, Value是对应的ACharacterData对象。
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CharacterManager|Data")
 	TMap<FGameplayTag, TObjectPtr<ACharacterData>> OwnedCharacterData;

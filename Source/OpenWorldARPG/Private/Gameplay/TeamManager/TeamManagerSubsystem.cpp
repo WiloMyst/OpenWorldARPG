@@ -12,17 +12,17 @@ void UTeamManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
     if (CharacterManagerClass)
     {
-        const TArray<UCharacterManagerSubsystem*> Subsystems = GetWorld()->GetSubsystemArray<UCharacterManagerSubsystem>();
-        for (UCharacterManagerSubsystem* Subsystem : Subsystems)
+        CharacterManager = GetGameInstance()->GetSubsystem<UCharacterManagerSubsystem>();
+        if (!CharacterManager)
         {
-            if (Subsystem && Subsystem->GetClass() == CharacterManagerClass)
-            {
-                CharacterManager = Subsystem;
-                UE_LOG(LogTemp, Log, TEXT("CharacterManager from TeamManagerSubsystem set up!"));
-                break;
-            }
+            UE_LOG(LogTemp, Error, TEXT("TeamManagerSubsystem::Initialize - Failed to get CharacterManagerSubsystem."));
         }
+        UE_LOG(LogTemp, Log, TEXT("TeamManagerSubsystem::Initialize - CharacterManagerSubsystem initialized."));
     }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("TeamManagerSubsystem::Initialize - CharacterManagerClass is not set."));
+	}
 }
 
 void UTeamManagerSubsystem::Deinitialize()
@@ -79,16 +79,5 @@ bool UTeamManagerSubsystem::IsCharacterSwitchable(int32 Index) const
     const FGameplayTag& CharacterTag = CurrentTeamCharacters[Index];
     if (!CharacterTag.IsValid()) return false;
 
-    ACharacterData* CharacterData = CharacterManager->GetOwnedCharacterDataByTag(CharacterTag);
-    if (!CharacterData) return false;
-
-    UAbilitySystemComponent* ASC = CharacterData->GetAbilitySystemComponent();
-    if (!ASC) return false;
-
-    // 检查是否拥有不可以进行角色切换的状态标签
-    FGameplayTagContainer UnswitchableStates;
-    UnswitchableStates.AddTag(FGameplayTag::RequestGameplayTag(FName("Character.State.Dead")));
-    UnswitchableStates.AddTag(FGameplayTag::RequestGameplayTag(FName("Character.State.Unswitchable")));
-
-    return !ASC->HasAnyMatchingGameplayTags(UnswitchableStates);
+    return true;
 }

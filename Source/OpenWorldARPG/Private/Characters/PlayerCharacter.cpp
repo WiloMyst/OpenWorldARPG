@@ -32,16 +32,16 @@ APlayerCharacter::APlayerCharacter()
     FollowCamera->bUsePawnControlRotation = false; // Camera does not rotate relative to arm
 }
 
-void APlayerCharacter::BindData(ACharacterData* DataToBind)
+void APlayerCharacter::BindData(ACharacterData* InCharacterData)
 {
-    if (!DataToBind)
+    if (!InCharacterData)
     {
-        UE_LOG(LogTemp, Error, TEXT("APlayerCharacter::BindData - DataToBind is nullptr."));
+        UE_LOG(LogTemp, Error, TEXT("APlayerCharacter::BindData - InCharacterData is nullptr."));
         return;
     }
 
     // 1. 保存对数据核心的引用
-    CharacterData = DataToBind;
+    CharacterData = InCharacterData;
 
     // 2. 初始化ASC
     UAbilitySystemComponent* AbilitySystemComponent = GetAbilitySystemComponent();
@@ -109,6 +109,11 @@ void APlayerCharacter::OnMeshLoaded(const UCharacterDataAsset* DataAsset)
     {
         MeshComponent->SetAnimInstanceClass(DataAsset->AnimationBlueprint);
     }
+}
+
+UAbilitySystemComponent* APlayerCharacter::GetAbilitySystemComponent() const
+{
+    return CharacterData ? CharacterData->GetAbilitySystemComponent() : nullptr;
 }
 
 void APlayerCharacter::SetStandbyMode(bool bNewStandbyState)

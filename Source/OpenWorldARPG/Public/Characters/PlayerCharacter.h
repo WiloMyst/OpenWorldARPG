@@ -8,6 +8,7 @@
 #include "PlayerCharacter.generated.h"
 
 class ACharacterData;
+class UCharacterDataAsset;
 
 /**
  * 
@@ -36,7 +37,7 @@ public:
      * @param DataToBind 要绑定的角色数据。
      */
     UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|Initialization")
-    void BindData(ACharacterData* DataToBind);
+    void BindData(ACharacterData* InCharacterData);
 
     // ======== 角色状态管理 ========
     /**
@@ -90,7 +91,7 @@ public:
      * @brief 获取角色的CharacterData上的ASC指针。实现IAbilitySystemInterface接口。
      */
     UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|GAS")
-	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override { return CharacterData ? CharacterData->GetAbilitySystemComponent() : nullptr; }
+    virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
 	
     /**
      * @brief 获取角色的CharacterData指针。
