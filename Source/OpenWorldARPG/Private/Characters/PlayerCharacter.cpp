@@ -51,7 +51,7 @@ void APlayerCharacter::BindData(ACharacterData* InCharacterData)
         AbilitySystemComponent->InitAbilityActorInfo(CharacterData, this);
 
         // 将AttributeSet添加到ASC的管理列表
-        AbilitySystemComponent->GetSpawnedAttributes_Mutable().Add(CharacterData->GetAttributeSet());
+        AbilitySystemComponent->AddSpawnedAttribute(CharacterData->GetAttributeSet());
 
         // ...后续逻辑，如赋予能力等
     }
@@ -137,10 +137,16 @@ void APlayerCharacter::SetStandbyMode(bool bNewStandbyState)
         if (UCapsuleComponent* Capsule = GetCapsuleComponent())
         {
             Capsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-            Capsule->SetCollisionProfileName(TEXT("Spectator")); // "Spectator"预设通常只与世界碰撞
+            //Capsule->SetCollisionProfileName(TEXT("Spectator")); // "Spectator"预设通常只与世界碰撞
             // 明确设置对Visibility通道的响应为忽略，这将防止AI的视线追踪被此角色阻挡
             Capsule->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
         }
+        if (USkeletalMeshComponent* SKMesh = GetMesh())
+        {
+            SKMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+            SKMesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
+		}
+
 
         // 3. 接着关闭所有更新，优化性能。
         SetActorTickEnabled(false);
@@ -167,9 +173,14 @@ void APlayerCharacter::SetStandbyMode(bool bNewStandbyState)
         if (UCapsuleComponent* Capsule = GetCapsuleComponent())
         {
             Capsule->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-            Capsule->SetCollisionProfileName(TEXT("Pawn"));
+            //Capsule->SetCollisionProfileName(TEXT("Pawn"));
             // 将对Visibility通道的响应恢复为阻挡
             Capsule->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+        }
+        if (USkeletalMeshComponent* SKMesh = GetMesh())
+        {
+            SKMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+            SKMesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
         }
 
         // 2. 再让角色可见。
