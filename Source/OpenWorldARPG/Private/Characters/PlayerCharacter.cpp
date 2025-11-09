@@ -144,10 +144,10 @@ void APlayerCharacter::SetStandbyMode(bool bNewStandbyState)
 
         // 3. 接着关闭所有更新，优化性能。
         SetActorTickEnabled(false);
-        if (GetMesh())
-        {
-            GetMesh()->SetComponentTickEnabled(false);
-        }
+        //if (GetMesh())
+        //{
+        //    GetMesh()->SetComponentTickEnabled(false);
+        //}
         MoveComp->SetComponentTickEnabled(false);
 
         // 4. 最后隐藏视觉。
@@ -178,12 +178,12 @@ void APlayerCharacter::SetStandbyMode(bool bNewStandbyState)
         // 3. 激活移动能力。此时角色会受重力影响并站稳在地面上。
         MoveComp->SetMovementMode(MOVE_Walking);
 
-        // 4. 最后开启所有更新。
+        // 4. 开启所有更新。
         SetActorTickEnabled(true);
-        if (GetMesh())
-        {
-            GetMesh()->SetComponentTickEnabled(true);
-        }
+        //if (GetMesh())
+        //{
+        //    GetMesh()->SetComponentTickEnabled(true);
+        //}
         MoveComp->SetComponentTickEnabled(true);
     }
 }

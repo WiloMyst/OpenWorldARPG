@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
+#include "GameplayTagContainer.h"
 #include "GameAssetManagerSubsystem.generated.h"
 
 class ULoadingScreenWidget;
