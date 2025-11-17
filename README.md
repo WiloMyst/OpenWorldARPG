@@ -32,6 +32,8 @@
 
   
 
+- 自主使用**Blender及相关插件**将模之屋的多个MMD带骨骼角色模型修整为Unreal引擎中干净可使用的**骨骼网格体**资源，并完成细致的**骨骼动画重定向**。基于开源的风动物理骨骼插件，为每位角色添加**布料、头发模拟运动**效果。
+
 - **可扩展的动画架构:**
 
   - **分层设计**: 构建了L1-基础层到L5-修饰层的多层动画蓝图架构，确保了逻辑的清晰和可维护性。
@@ -98,6 +100,7 @@ Plugins：
 - [KawaiiPhysics](https://github.com/pafuhana1213/KawaiiPhysics)
 - [SPCRJointDynamics](https://github.com/SPARK-inc/SPCRJointDynamics)
 - [UnLua](https://github.com/Tencent/UnLua)
+- [cats-blender-plugin](https://github.com/absolute-quantum/cats-blender-plugin)
 
 Models：
 
