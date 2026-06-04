@@ -1,10 +1,12 @@
 ﻿// Copyright 2025 WiloMyst. All Rights Reserved.
 
-
 #include "Characters/PlayerCharacter.h"
-#include "Data/CharacterData.h"
 #include "Data/CharacterDataAsset.h"
+#include "Data/CharacterGeneralDataAsset.h"
 #include "GAS/AttributeSets/AS_Player.h"
+#include "Components/OpenWorldARPGCharacterMovementComponent.h"
+#include "Components/CharacterWeaponComponent.h"
+#include "Weapons/WeaponBase.h"
 #include "Camera/CameraComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -12,257 +14,478 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/StreamableManager.h"
 #include "Engine/AssetManager.h"
+#include "AbilitySystemComponent.h"
+#include "GameFramework/GameModeBase.h"
+#include "GameFramework/PlayerStart.h"
+#include "Managers/GameAssetManagerSubsystem.h"
 
-APlayerCharacter::APlayerCharacter()
+APlayerCharacter::APlayerCharacter(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer.SetDefaultSubobjectClass<UOpenWorldARPGCharacterMovementComponent>(ACharacter::CharacterMovementComponentName))
 {
-    // Don't rotate when the controller rotates. Let that just affect the camera.
-    bUseControllerRotationPitch = false;
-    bUseControllerRotationYaw = false;
-    bUseControllerRotationRoll = false;
+	// 恢复被删掉的 Tick 启用，否则平滑摄像机和跌落检测彻底失效！
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = true;
 
-    // Create a camera boom (pulls in towards the player if there is a collision)
-    CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
-    CameraBoom->SetupAttachment(RootComponent);
-    CameraBoom->TargetArmLength = 400.0f; // The camera follows at this distance behind the character	
-    CameraBoom->bUsePawnControlRotation = true; // Rotate the arm based on the controller
+	bUseControllerRotationPitch = false;
+	bUseControllerRotationYaw = false;
+	bUseControllerRotationRoll = false;
 
-    // Create a follow camera
-    FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
-    FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName); // Attach the camera to the end of the boom and let the boom adjust to match the controller orientation
-    FollowCamera->bUsePawnControlRotation = false; // Camera does not rotate relative to arm
+	// 恢复被删掉的核心移动设置，解决鼠标无法转向和角色不转身的问题！
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		MoveComp->bOrientRotationToMovement = true;
+		MoveComp->RotationRate = FRotator(0.0f, 500.0f, 0.0f);
+	}
+
+	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
+	CameraBoom->SetupAttachment(RootComponent);
+	CameraBoom->TargetArmLength = 400.0f;
+	CameraBoom->bUsePawnControlRotation = true;
+
+	FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
+	FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
+	FollowCamera->bUsePawnControlRotation = false;
+
+	WeaponSpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("WeaponSpringArm"));
+	WeaponSpringArm->SetupAttachment(RootComponent);
+	// 恢复被删掉的武器摇臂参数
+	WeaponSpringArm->bDoCollisionTest = false;
+	WeaponSpringArm->bEnableCameraLag = true;
+	WeaponSpringArm->CameraLagSpeed = 10.0f;
+
+	WeaponRestSocket = CreateDefaultSubobject<USceneComponent>(TEXT("WeaponRestSocket"));
+	WeaponRestSocket->SetupAttachment(WeaponSpringArm);
+
+	AbilitySystemComponent = CreateDefaultSubobject<UAbilitySystemComponent>(TEXT("AbilitySystemComponent"));
+	AbilitySystemComponent->SetIsReplicated(true);
+	AbilitySystemComponent->SetReplicationMode(EGameplayEffectReplicationMode::Mixed);
+
+	AttributeSet = CreateDefaultSubobject<UAS_Player>(TEXT("AttributeSet"));
 }
 
-void APlayerCharacter::BindData(ACharacterData* InCharacterData)
+void APlayerCharacter::InitializeCharacter(const FCharacterSaveData& InSaveData, UCharacterDataAsset* InDataAsset)
 {
-    if (!InCharacterData)
-    {
-        UE_LOG(LogTemp, Error, TEXT("APlayerCharacter::BindData - InCharacterData is nullptr."));
-        return;
-    }
+	if (!InDataAsset) return;
 
-    // 1. 保存对数据核心的引用
-    CharacterData = InCharacterData;
+	RuntimeData = InSaveData;
+	DataSourceAsset = InDataAsset;
 
-    // 2. 初始化ASC
-    UAbilitySystemComponent* AbilitySystemComponent = GetAbilitySystemComponent();
-    if (AbilitySystemComponent)
-    {
-        // 初始化Owner和Avatar
-        AbilitySystemComponent->InitAbilityActorInfo(CharacterData, this);
+	if (AbilitySystemComponent)
+	{
+		AbilitySystemComponent->InitAbilityActorInfo(this, this);
 
-        // 将AttributeSet添加到ASC的管理列表
-        AbilitySystemComponent->AddSpawnedAttribute(CharacterData->GetAttributeSet());
+		if (AttributeSet)
+		{
+			AbilitySystemComponent->AddSpawnedAttribute(AttributeSet);
+		}
 
-        // ...后续逻辑，如赋予能力等
-    }
+		// [被恢复的逻辑]: 添加角色类型 Tag（解决 A-Pose 的核心原因）
+		if (InDataAsset->ElementType.IsValid())
+		{
+			AbilitySystemComponent->AddLooseGameplayTag(InDataAsset->ElementType, 1);
+		}
+		if (InDataAsset->WeaponType.IsValid())
+		{
+			AbilitySystemComponent->AddLooseGameplayTag(InDataAsset->WeaponType, 1);
+		}
 
-    // 3. 从DataAsset更新外观
-    if (const UCharacterDataAsset* DataAsset = CharacterData->GetDataSourceAsset())
-    {
-        if (USkeletalMeshComponent* MeshComponent = GetMesh())
-        {
-            // 异步加载骨骼网格体模型资源
-            TSoftObjectPtr<USkeletalMesh> MeshToLoad = DataAsset->CharacterMesh;
-            if (MeshToLoad.IsPending())
-            {
-                FStreamableManager& StreamableManager = UAssetManager::Get().GetStreamableManager();
-                StreamableManager.RequestAsyncLoad(MeshToLoad.ToSoftObjectPath(), FStreamableDelegate::CreateUObject(this, &APlayerCharacter::OnMeshLoaded, DataAsset));
-            }
-            else
-            {
-                // 如果模型已经加载，则直接同步处理
-                OnMeshLoaded(DataAsset);
-            }
-        }
+		// [被恢复的逻辑]: 赋予通用的基础技能（跑、跳等，也是脱离A-Pose的关键）
+		if (UGameInstance* GI = GetGameInstance())
+		{
+			if (UGameAssetManagerSubsystem* AssetManager = GI->GetSubsystem<UGameAssetManagerSubsystem>())
+			{
+				if (UCharacterGeneralDataAsset* GeneralData = AssetManager->GetPlayerCharacterGeneralAbilityDataAsset())
+				{
+					for (TSubclassOf<UGameplayAbility> AbilityClass : GeneralData->GeneralPermanentAbilityClasses)
+					{
+						if (AbilityClass)
+						{
+							AbilitySystemComponent->GiveAbility(FGameplayAbilitySpec(AbilityClass, 1, INDEX_NONE, this));
+							PermanentAbilitiesToActivate.Add(AbilityClass);
+						}
+					}
+					for (TSubclassOf<UGameplayAbility> AbilityClass : GeneralData->GeneralAbilityClasses)
+					{
+						if (AbilityClass) AbilitySystemComponent->GiveAbility(FGameplayAbilitySpec(AbilityClass, 1, INDEX_NONE, this));
+					}
+				}
+			}
+		}
 
-        // ===== 绑定属性值 =====
-        
+		if (InDataAsset->BaseAttributesEffect)
+		{
+			FGameplayEffectContextHandle EffectContext = AbilitySystemComponent->MakeEffectContext();
+			EffectContext.AddSourceObject(this);
+			FGameplayEffectSpecHandle SpecHandle = AbilitySystemComponent->MakeOutgoingSpec(InDataAsset->BaseAttributesEffect, 1.0f, EffectContext);
+			if (SpecHandle.IsValid()) AbilitySystemComponent->ApplyGameplayEffectSpecToSelf(*SpecHandle.Data.Get());
+		}
 
+		for (const auto& Pair : InDataAsset->AscensionBonusEffects)
+		{
+			if (Pair.Key <= RuntimeData.AscensionLevel && Pair.Value)
+			{
+				FGameplayEffectContextHandle EffectContext = AbilitySystemComponent->MakeEffectContext();
+				EffectContext.AddSourceObject(this);
+				FGameplayEffectSpecHandle SpecHandle = AbilitySystemComponent->MakeOutgoingSpec(Pair.Value, 1.0f, EffectContext);
+				if (SpecHandle.IsValid()) AbilitySystemComponent->ApplyGameplayEffectSpecToSelf(*SpecHandle.Data.Get());
+			}
+		}
 
-    }
+		auto GrantTalentAbilities = [&](const FTalentConfig& Talent)
+			{
+				for (const TSubclassOf<UGameplayAbility>& AbilityClass : Talent.AbilityClasses)
+				{
+					if (AbilityClass)
+					{
+						FGameplayAbilitySpec AbilitySpec(AbilityClass, 1, INDEX_NONE, this);
+						AbilitySpec.DynamicAbilityTags.AddTag(Talent.TalentTag);
+						AbilitySystemComponent->GiveAbility(AbilitySpec);
+					}
+				}
+			};
 
-    // 在蓝图中执行额外的绑定后逻辑
-    OnDataBound();
-}
+		GrantTalentAbilities(InDataAsset->NormalAttack);
+		GrantTalentAbilities(InDataAsset->HeavyAttack);
+		GrantTalentAbilities(InDataAsset->PlungeAttack);
+		GrantTalentAbilities(InDataAsset->SkillAttack);
+		GrantTalentAbilities(InDataAsset->UltimateAttack);
 
-void APlayerCharacter::OnDataBound_Implementation()
-{
-    SetupBaseBehaviorAnimLayers();
-    SetupAimAnimLayers();
-    SetupPhysicsAnimLayers();
+		for (const FTalentConfig& PassiveTalent : InDataAsset->PassiveTalents)
+		{
+			for (const TSubclassOf<UGameplayAbility>& AbilityClass : PassiveTalent.AbilityClasses)
+			{
+				if (AbilityClass)
+				{
+					FGameplayAbilitySpec AbilitySpec(AbilityClass, 1, INDEX_NONE, this);
+					AbilitySpec.DynamicAbilityTags.AddTag(PassiveTalent.TalentTag);
+					AbilitySystemComponent->GiveAbility(AbilitySpec);
+					PermanentAbilitiesToActivate.Add(AbilityClass);
+				}
+			}
+		}
 
+		for (const TSubclassOf<UGameplayAbility>& AbilityClass : PermanentAbilitiesToActivate)
+		{
+			if (AbilityClass)
+			{
+				for (const FGameplayAbilitySpec& Spec : AbilitySystemComponent->GetActivatableAbilities())
+				{
+					if (Spec.Ability && Spec.Ability->GetClass() == AbilityClass && !Spec.IsActive())
+					{
+						AbilitySystemComponent->TryActivateAbility(Spec.Handle);
+					}
+				}
+			}
+		}
+	}
+
+	if (USkeletalMeshComponent* MeshComponent = GetMesh())
+	{
+		TSoftObjectPtr<USkeletalMesh> MeshToLoad = InDataAsset->CharacterMesh;
+		if (MeshToLoad.IsPending())
+		{
+			FStreamableManager& StreamableManager = UAssetManager::Get().GetStreamableManager();
+			UCharacterDataAsset* CapturedDataAsset = InDataAsset;
+			StreamableManager.RequestAsyncLoad(MeshToLoad.ToSoftObjectPath(),
+				FStreamableDelegate::CreateLambda([this, CapturedDataAsset]()
+					{
+						OnMeshLoaded(CapturedDataAsset);
+					}));
+		}
+		else if (MeshToLoad.IsValid())
+		{
+			OnMeshLoaded(InDataAsset);
+		}
+	}
+
+	if (AbilitySystemComponent && AttributeSet)
+	{
+		AbilitySystemComponent->GetGameplayAttributeValueChangeDelegate(
+			UAS_Player::GetHealthAttribute()).AddUObject(this, &APlayerCharacter::OnHealthAttributeChanged);
+	}
+
+	if (UCharacterWeaponComponent* WeaponComp = FindComponentByClass<UCharacterWeaponComponent>())
+	{
+		WeaponComp->InitializeCharacterWeapon();
+	}
 }
 
 void APlayerCharacter::OnMeshLoaded(const UCharacterDataAsset* DataAsset)
 {
-    USkeletalMeshComponent* MeshComponent = GetMesh();
-    if (!MeshComponent || !DataAsset) return;
+	USkeletalMeshComponent* MeshComponent = GetMesh();
+	if (!MeshComponent || !DataAsset) return;
 
-    USkeletalMesh* LoadedMesh = DataAsset->CharacterMesh.Get();
-    if (!LoadedMesh) return;
+	USkeletalMesh* LoadedMesh = DataAsset->CharacterMesh.Get();
+	if (!LoadedMesh) return;
 
-    // 设置模型
-    MeshComponent->SetSkeletalMesh(LoadedMesh);
+	MeshComponent->SetSkeletalMesh(LoadedMesh);
+	if (DataAsset->AnimationBlueprint)
+	{
+		MeshComponent->SetAnimInstanceClass(DataAsset->AnimationBlueprint);
+	}
 
-    // 设置动画蓝图类
-    if (DataAsset->AnimationBlueprint)
-    {
-        MeshComponent->SetAnimInstanceClass(DataAsset->AnimationBlueprint);
-    }
+	SetupBaseBehaviorAnimLayers();
+	SetupAimAnimLayers();
+	SetupPhysicsAnimLayers();
 }
 
 UAbilitySystemComponent* APlayerCharacter::GetAbilitySystemComponent() const
 {
-    return CharacterData ? CharacterData->GetAbilitySystemComponent() : nullptr;
+	return AbilitySystemComponent;
 }
 
 void APlayerCharacter::SetStandbyMode(bool bNewStandbyState)
 {
-    UCharacterMovementComponent* MoveComp = GetCharacterMovement();
-    if (!MoveComp)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("APlayerCharacter::SetStandbyMode - CharacterMovementComponent is null."));
-        return;
-    }
+	UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+	if (!MoveComp) return;
 
-    if (bNewStandbyState)
-    {
-        // ----- 进入待机模式 -----
+	if (bNewStandbyState)
+	{
+		MoveComp->StopMovementImmediately();
+		MoveComp->DisableMovement();
 
-        // 1. 首先冻结物理，杜绝掉落风险。
-        MoveComp->StopMovementImmediately();
-        MoveComp->DisableMovement();
-
-        // 2. 然后安全地移除碰撞。
-        if (UCapsuleComponent* Capsule = GetCapsuleComponent())
-        {
-            Capsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-            //Capsule->SetCollisionProfileName(TEXT("Spectator")); // "Spectator"预设通常只与世界碰撞
-            // 明确设置对Visibility通道的响应为忽略，这将防止AI的视线追踪被此角色阻挡
-            Capsule->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
-        }
-        if (USkeletalMeshComponent* SKMesh = GetMesh())
-        {
-            SKMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-            SKMesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
+		if (UCapsuleComponent* Capsule = GetCapsuleComponent())
+		{
+			Capsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			Capsule->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
+		}
+		if (USkeletalMeshComponent* SKMesh = GetMesh())
+		{
+			SKMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			SKMesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
 		}
 
+		TickingComponentsSnapshot.Empty();
+		TArray<UActorComponent*> AllComponents;
+		GetComponents(AllComponents);
+		for (UActorComponent* Comp : AllComponents)
+		{
+			if (Comp->PrimaryComponentTick.bCanEverTick && Comp != MoveComp && Comp->IsActive() && Comp->IsComponentTickEnabled())
+			{
+				TickingComponentsSnapshot.Add(Comp);
+				Comp->SetComponentTickEnabled(false);
+			}
+		}
+		SetActorTickEnabled(false);
+		MoveComp->SetComponentTickEnabled(false);
 
-        // 3. 接着关闭所有更新，优化性能。
-        SetActorTickEnabled(false);
-        //if (GetMesh())
-        //{
-        //    GetMesh()->SetComponentTickEnabled(false);
-        //}
-        MoveComp->SetComponentTickEnabled(false);
+		if (UCharacterWeaponComponent* WeaponComp = FindComponentByClass<UCharacterWeaponComponent>())
+		{
+			WeaponComp->SetWeaponHidden(true);
+		}
 
-        // 4. 最后隐藏视觉。
-        SetActorHiddenInGame(true);
+		SetActorHiddenInGame(true);
 
-        // 停止动画蒙太奇
-        if (GetMesh() && GetMesh()->GetAnimInstance())
-        {
-            GetMesh()->GetAnimInstance()->StopAllMontages(0.1f);
-        }
-    }
-    else
-    {
-        // ----- 进入活动模式 -----
+		if (GetMesh() && GetMesh()->GetAnimInstance())
+		{
+			GetMesh()->GetAnimInstance()->StopAllMontages(0.1f);
+		}
+	}
+	else
+	{
+		if (UCapsuleComponent* Capsule = GetCapsuleComponent())
+		{
+			Capsule->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+			Capsule->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+		}
+		if (USkeletalMeshComponent* SKMesh = GetMesh())
+		{
+			SKMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+			SKMesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+		}
 
-        // 1. 先让角色在物理世界中有实体。
-        if (UCapsuleComponent* Capsule = GetCapsuleComponent())
-        {
-            Capsule->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-            //Capsule->SetCollisionProfileName(TEXT("Pawn"));
-            // 将对Visibility通道的响应恢复为阻挡
-            Capsule->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
-        }
-        if (USkeletalMeshComponent* SKMesh = GetMesh())
-        {
-            SKMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-            SKMesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
-        }
+		SetActorHiddenInGame(false);
 
-        // 2. 再让角色可见。
-        SetActorHiddenInGame(false);
+		if (UCharacterWeaponComponent* WeaponComp = FindComponentByClass<UCharacterWeaponComponent>())
+		{
+			WeaponComp->SetWeaponHidden(false);
+		}
 
-        // 3. 激活移动能力。此时角色会受重力影响并站稳在地面上。
-        MoveComp->SetMovementMode(MOVE_Walking);
+		MoveComp->SetMovementMode(MOVE_Walking);
 
-        // 4. 开启所有更新。
-        SetActorTickEnabled(true);
-        //if (GetMesh())
-        //{
-        //    GetMesh()->SetComponentTickEnabled(true);
-        //}
-        MoveComp->SetComponentTickEnabled(true);
-    }
+		for (const TWeakObjectPtr<UActorComponent>& WeakComp : TickingComponentsSnapshot)
+		{
+			if (UActorComponent* Comp = WeakComp.Get())
+			{
+				Comp->SetComponentTickEnabled(true);
+			}
+		}
+		TickingComponentsSnapshot.Empty();
+		SetActorTickEnabled(true);
+		MoveComp->SetComponentTickEnabled(true);
+	}
+}
+
+void APlayerCharacter::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	CheckKillZAndRespawn();
+	AdjustAimingCamera(DeltaTime);
+}
+
+void APlayerCharacter::HandleMovementInput(float InputX, float InputY)
+{
+	CurrentInputX = InputX;
+	CurrentInputY = InputY;
+
+	if (!Controller || !GetCharacterMovement()) return;
+
+	OnPlayerMovementInput.Broadcast(InputX, InputY);
+
+	uint8 Mode = GetCharacterMovement()->MovementMode;
+	if (Mode == MOVE_Walking || Mode == MOVE_NavWalking || Mode == MOVE_Falling)
+	{
+		NormalMovement(InputX, InputY);
+	}
+}
+
+void APlayerCharacter::HandleMovementInputCompleted()
+{
+	CurrentInputX = 0.0f;
+	CurrentInputY = 0.0f;
+	OnPlayerMovementInput.Broadcast(0.0f, 0.0f);
+}
+
+void APlayerCharacter::NormalMovement(float InputX, float InputY)
+{
+	if (!Controller) return;
+
+	const FRotator Rotation = Controller->GetControlRotation();
+	const FRotator YawRotation(0, Rotation.Yaw, 0);
+
+	const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
+	const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
+
+	AddMovementInput(ForwardDirection, InputY);
+	AddMovementInput(RightDirection, InputX);
 }
 
 void APlayerCharacter::SetupBaseBehaviorAnimLayers()
 {
-    if (CharacterData)
-    {
-        if (const UCharacterDataAsset* DataSource = CharacterData->GetDataSourceAsset())
-        {
-            if (TSubclassOf<UAnimInstance> BaseBehaviorAnimLayerClass = DataSource->BaseBehaviorAnimLayers)
-            {
-                if (USkeletalMeshComponent* CharacterMesh = GetMesh())
-                {
-                    CharacterMesh->LinkAnimClassLayers(BaseBehaviorAnimLayerClass);
-                }
-            }
-        }
-    }
+	if (DataSourceAsset && DataSourceAsset->BaseBehaviorAnimLayers)
+	{
+		if (USkeletalMeshComponent* CharacterMesh = GetMesh())
+		{
+			CharacterMesh->LinkAnimClassLayers(DataSourceAsset->BaseBehaviorAnimLayers);
+		}
+	}
 }
 
 void APlayerCharacter::SetupAimAnimLayers()
 {
-    if (CharacterData)
-    {
-        if (const UCharacterDataAsset* DataSource = CharacterData->GetDataSourceAsset())
-        {
-            if (TSubclassOf<UAnimInstance> AimAnimLayerClass = DataSource->AimAnimLayers)
-            {
-                if (USkeletalMeshComponent* CharacterMesh = GetMesh())
-                {
-                    CharacterMesh->LinkAnimClassLayers(AimAnimLayerClass);
-                }
-            }
-        }
-    }
+	if (DataSourceAsset && DataSourceAsset->AimAnimLayers)
+	{
+		if (USkeletalMeshComponent* CharacterMesh = GetMesh())
+		{
+			CharacterMesh->LinkAnimClassLayers(DataSourceAsset->AimAnimLayers);
+		}
+	}
 }
 
 void APlayerCharacter::SetupPhysicsAnimLayers()
 {
-    if (CharacterData)
-    {
-        if (const UCharacterDataAsset* DataSource = CharacterData->GetDataSourceAsset())
-        {
-            if (TSubclassOf<UAnimInstance> PhysicsLayerClass = DataSource->PhysicsAnimLayers)
-            {
-                if (USkeletalMeshComponent* CharacterMesh = GetMesh())
-                {
-                    CharacterMesh->LinkAnimClassLayers(PhysicsLayerClass);
-                }
-            }
-        }
-    }
+	if (DataSourceAsset && DataSourceAsset->PhysicsAnimLayers)
+	{
+		if (USkeletalMeshComponent* CharacterMesh = GetMesh())
+		{
+			CharacterMesh->LinkAnimClassLayers(DataSourceAsset->PhysicsAnimLayers);
+		}
+	}
 }
 
 void APlayerCharacter::ClearPhysicsAnimLayers()
 {
-    if (CharacterData)
-    {
-        if (const UCharacterDataAsset* DataSource = CharacterData->GetDataSourceAsset())
-        {
-            if (TSubclassOf<UAnimInstance> PhysicsLayerClass = DataSource->PhysicsAnimLayers)
-            {
-                if (USkeletalMeshComponent* CharacterMesh = GetMesh())
-                {
-                    CharacterMesh->UnlinkAnimClassLayers(PhysicsLayerClass);
-                }
-            }
-        }
-    }
+	if (DataSourceAsset && DataSourceAsset->PhysicsAnimLayers)
+	{
+		if (USkeletalMeshComponent* CharacterMesh = GetMesh())
+		{
+			CharacterMesh->UnlinkAnimClassLayers(DataSourceAsset->PhysicsAnimLayers);
+		}
+	}
+}
+
+FGameplayTag APlayerCharacter::GetCharacterTag() const { return RuntimeData.CharacterTag; }
+TSubclassOf<AWeaponBase> APlayerCharacter::GetWeaponBlueprint() const { return DataSourceAsset ? DataSourceAsset->WeaponBlueprint : nullptr; }
+TArray<TSoftObjectPtr<UAnimMontage>> APlayerCharacter::GetNormalAttackMontages() const { return DataSourceAsset ? DataSourceAsset->NormalAttack.Montages : TArray<TSoftObjectPtr<UAnimMontage>>(); }
+TArray<TSoftObjectPtr<UAnimMontage>> APlayerCharacter::GetHeavyAttackMontages() const { return DataSourceAsset ? DataSourceAsset->HeavyAttack.Montages : TArray<TSoftObjectPtr<UAnimMontage>>(); }
+TArray<TSoftObjectPtr<UAnimMontage>> APlayerCharacter::GetPlungeAttackMontages() const { return DataSourceAsset ? DataSourceAsset->PlungeAttack.Montages : TArray<TSoftObjectPtr<UAnimMontage>>(); }
+int32 APlayerCharacter::GetCharacterLevel() const { return RuntimeData.CharacterLevel; }
+int32 APlayerCharacter::GetConstellationLevel() const { return RuntimeData.ConstellationLevel; }
+UOpenWorldARPGCharacterMovementComponent* APlayerCharacter::GetCustomMovementComp() const { return Cast<UOpenWorldARPGCharacterMovementComponent>(GetCharacterMovement()); }
+
+void APlayerCharacter::OnHealthAttributeChanged(const FOnAttributeChangeData& Data)
+{
+	// 恢复丢失的激活死亡能力的逻辑
+	if (Data.NewValue <= 0.0f && Data.OldValue > 0.0f)
+	{
+		if (AbilitySystemComponent && DeathAbilityTag.IsValid())
+		{
+			FGameplayTagContainer TagContainer(DeathAbilityTag);
+			AbilitySystemComponent->TryActivateAbilitiesByTag(TagContainer, true);
+		}
+		HandleDeath();
+	}
+	OnHealthUpdated.Broadcast();
+}
+
+void APlayerCharacter::CheckKillZAndRespawn()
+{
+	// 恢复整个庞大的跌落保护、清空速度与返回出生点的流水线
+	if (GetActorLocation().Z <= KillZThreshold)
+	{
+		if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+		{
+			MoveComp->Velocity = FVector::ZeroVector;
+		}
+
+		if (AGameModeBase* GameMode = GetWorld()->GetAuthGameMode())
+		{
+			if (AActor* PlayerStart = GameMode->FindPlayerStart(GetController(), RespawnPlayerStartTag.ToString()))
+			{
+				FTransform StartTransform = PlayerStart->GetActorTransform();
+				SetActorLocationAndRotation(
+					StartTransform.GetLocation(),
+					StartTransform.GetRotation(),
+					false, nullptr, ETeleportType::TeleportPhysics
+				);
+
+				if (AController* PC = GetController())
+				{
+					PC->SetControlRotation(StartTransform.Rotator());
+				}
+
+				if (AbilitySystemComponent && RespawnCancelAbilityTags.IsValid())
+				{
+					AbilitySystemComponent->CancelAbilities(&RespawnCancelAbilityTags);
+				}
+			}
+		}
+	}
+}
+
+void APlayerCharacter::AdjustAimingCamera(float DeltaTime)
+{
+	if (!CameraBoom) return;
+
+	bool bIsAiming = false;
+	if (AbilitySystemComponent && AimingStateTag.IsValid())
+	{
+		bIsAiming = AbilitySystemComponent->HasMatchingGameplayTag(AimingStateTag);
+	}
+
+	const float TargetArmLength = bIsAiming ? AimingTargetArmLength : NormalTargetArmLength;
+	const FVector TargetSocketOffset = bIsAiming ? AimingSocketOffset : NormalSocketOffset;
+
+	CameraBoom->TargetArmLength = FMath::FInterpTo(CameraBoom->TargetArmLength, TargetArmLength, DeltaTime, CameraInterpSpeed);
+	CameraBoom->SocketOffset = FMath::VInterpTo(CameraBoom->SocketOffset, TargetSocketOffset, DeltaTime, CameraInterpSpeed);
+}
+
+void APlayerCharacter::HandleDeath()
+{
+	// 恢复武器的隐形逻辑
+	if (UCharacterWeaponComponent* WeaponComp = FindComponentByClass<UCharacterWeaponComponent>())
+	{
+		WeaponComp->SetWeaponHidden(true);
+	}
 }

@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 
 #include "Characters/AI/EnemyCharacter.h"
@@ -14,4 +14,13 @@ AEnemyCharacter::AEnemyCharacter()
 
 	// 创建属性集(AttributeSet)。
 	AttributeSet = CreateDefaultSubobject<UAS_Enemy>(TEXT("AttributeSet"));
+}
+
+void AEnemyCharacter::PostInitializeComponents()
+{
+	Super::PostInitializeComponents();
+
+	// 初始化 ASC：AddSpawnedAttribute 必须在 InitAbilityActorInfo 之前调用
+	AbilitySystemComponent->AddSpawnedAttribute(AttributeSet);
+	AbilitySystemComponent->InitAbilityActorInfo(this, this);
 }

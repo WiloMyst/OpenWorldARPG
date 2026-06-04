@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #pragma once
 
@@ -7,13 +7,22 @@
 #include "GenericTeamAgentInterface.h"
 #include "OpenWorldARPGCharacter.generated.h"
 
+UENUM(BlueprintType)
+enum class ECustomMovementMode : uint8
+{
+	None = 0,
+	Climbing = 1,  // 攀爬模式
+	Gliding = 2,   // 滑翔模式
+	Swimming = 3   // 游泳模式
+};
+
 UCLASS(config=Game)
 class AOpenWorldARPGCharacter : public ACharacter, public IGenericTeamAgentInterface
 {
 	GENERATED_BODY()
 
 public:
-	AOpenWorldARPGCharacter();
+	AOpenWorldARPGCharacter(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
 
 protected:
 	// 声明一个用于存储队伍ID的属性

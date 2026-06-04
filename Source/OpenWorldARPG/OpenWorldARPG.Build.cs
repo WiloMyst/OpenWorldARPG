@@ -22,7 +22,8 @@ public class OpenWorldARPG : ModuleRules
             "GameplayAbilities",
 			"GameplayTags",
 			"GameplayTasks",
-			"AIModule"
+			"AIModule",
+            "DeveloperSettings"
         });
 	}
 }

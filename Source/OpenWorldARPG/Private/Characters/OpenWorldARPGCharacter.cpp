@@ -4,7 +4,8 @@
 #include "Components/CapsuleComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 
-AOpenWorldARPGCharacter::AOpenWorldARPGCharacter()
+AOpenWorldARPGCharacter::AOpenWorldARPGCharacter(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
 {
 	// Set size for collision capsule
 	GetCapsuleComponent()->InitCapsuleSize(42.f, 96.0f);

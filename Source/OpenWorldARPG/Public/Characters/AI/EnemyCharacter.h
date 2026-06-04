@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #pragma once
 
@@ -27,6 +27,9 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Enemy|GAS")
 	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override { return AbilitySystemComponent; }
+
+	// ======== 生命周期 ========
+	virtual void PostInitializeComponents() override;
 
 protected:
 	// ======== GAS核心组件 ========

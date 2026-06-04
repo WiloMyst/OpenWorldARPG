@@ -1,24 +1,13 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #pragma once
 
 #include "CoreMinimal.h"
-#include "AttributeSet.h"
-#include "AbilitySystemComponent.h"
+#include "GAS/AttributeSets/AS_Base.h"
 #include "AS_Enemy.generated.h"
 
-// 自动生成属性的访问器函数get/set/init等
-#define ATTRIBUTE_ACCESSORS(ClassName, PropertyName) \
-    GAMEPLAYATTRIBUTE_PROPERTY_GETTER(ClassName, PropertyName) \
-    GAMEPLAYATTRIBUTE_VALUE_GETTER(PropertyName) \
-    GAMEPLAYATTRIBUTE_VALUE_SETTER(PropertyName) \
-    GAMEPLAYATTRIBUTE_VALUE_INITTER(PropertyName)
-
-/**
- * 
- */
 UCLASS()
-class OPENWORLDARPG_API UAS_Enemy : public UAttributeSet
+class OPENWORLDARPG_API UAS_Enemy : public UAS_Base
 {
 	GENERATED_BODY()
 
