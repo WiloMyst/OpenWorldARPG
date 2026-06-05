@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "UI/Inventory/ItemSlotPanelWidget.h"
 #include "UI/Inventory/ItemSlotWidget.h"
@@ -14,6 +14,10 @@ void UItemSlotPanelWidget::NativeConstruct()
     {
         InventoryManager->OnInventoryUpdated.AddDynamic(this, &UItemSlotPanelWidget::RefreshInventoryGrid);
     }
+
+    // 不在 NativeConstruct 中主动刷新！
+    // 初始刷新由 InventoryWidget::HandleSelectCategoryTab → RefreshInventoryGrid 触发
+    // 避免在 ItemCategory 未设置时创建空白格子
 }
 
 void UItemSlotPanelWidget::NativeDestruct()
@@ -28,42 +32,56 @@ void UItemSlotPanelWidget::NativeDestruct()
 
 void UItemSlotPanelWidget::RefreshInventoryGrid()
 {
-    if (!WrapBox || !ItemSlotClass) return;
+    if (!ItemWrapBox || !ItemSlotClass) return;
 
     UInventoryManagerSubsystem* InventoryManager = GetGameInstance()->GetSubsystem<UInventoryManagerSubsystem>();
     if (!InventoryManager) return;
 
-    WrapBox->ClearChildren();
     SelectedItemSlot = nullptr;
-    SelectedItemID = -1;
+    SelectedItemGUID = FGuid();
 
-    // 使用 Subsystem 的分类查询接口，避免本地重复过滤逻辑
-    TArray<FItemInstance> FilteredItems = InventoryManager->GetItemsByCategory(ItemCategory);
+    // 使用 Subsystem 的筛选+排序接口
+    CachedFilteredItems.Empty();
+    InventoryManager->GetItemsByFilter(ItemCategory, SortMode, RarityFilter, CachedFilteredItems);
 
-    for (int32 i = 0; i < FilteredItems.Num(); ++i)
+    // 清空旧条目并重建
+    ItemWrapBox->ClearChildren();
+    for (int32 i = 0; i < CachedFilteredItems.Num(); ++i)
     {
-        const FItemInstance& Instance = FilteredItems[i];
-
         UItemSlotWidget* NewSlot = CreateWidget<UItemSlotWidget>(this, ItemSlotClass);
         if (NewSlot)
         {
-            NewSlot->ItemInstance = Instance;
+            NewSlot->ItemInstance = CachedFilteredItems[i];
             NewSlot->ItemArrayIndex = i;
-
             NewSlot->OnSlotClicked.AddDynamic(this, &UItemSlotPanelWidget::HandleSelectedSlot);
-
-            WrapBox->AddChildToWrapBox(NewSlot);
+            ItemWrapBox->AddChildToWrapBox(NewSlot);
         }
     }
 
-    HandleSelectFirstSlot();
+    // 只在有物品时才选中第一个
+    if (CachedFilteredItems.Num() > 0)
+    {
+        HandleSelectFirstSlot();
+    }
+}
+
+void UItemSlotPanelWidget::SetSortMode(EItemSortMode NewSortMode)
+{
+    SortMode = NewSortMode;
+    RefreshInventoryGrid();
+}
+
+void UItemSlotPanelWidget::SetRarityFilter(EItemRarity NewFilter)
+{
+    RarityFilter = NewFilter;
+    RefreshInventoryGrid();
 }
 
 void UItemSlotPanelWidget::HandleSelectFirstSlot()
 {
-    if (WrapBox && WrapBox->GetChildrenCount() > 0)
+    if (ItemWrapBox && ItemWrapBox->GetChildrenCount() > 0)
     {
-        UItemSlotWidget* FirstSlot = Cast<UItemSlotWidget>(WrapBox->GetChildAt(0));
+        UItemSlotWidget* FirstSlot = Cast<UItemSlotWidget>(ItemWrapBox->GetChildAt(0));
         if (FirstSlot)
         {
             HandleSelectedSlot(FirstSlot->ItemArrayIndex, FirstSlot->ItemInstance, FirstSlot->GetCachedItemData(), FirstSlot);
@@ -73,8 +91,8 @@ void UItemSlotPanelWidget::HandleSelectFirstSlot()
 
 void UItemSlotPanelWidget::HandleSelectedSlot(int32 Index, const FItemInstance& Instance, const FItemData& Data, UItemSlotWidget* SlotWidget)
 {
-    // 缓存 ItemID 而非全局索引，丢弃时通过 ItemID 实时查找
-    SelectedItemID = Instance.ItemID;
+    // 使用 GUID 而非 ItemID 作为选中标识
+    SelectedItemGUID = Instance.ItemGUID;
     SelectedItemInstance = Instance;
 
     if (SelectedItemSlot)
@@ -90,6 +108,6 @@ void UItemSlotPanelWidget::HandleSelectedSlot(int32 Index, const FItemInstance& 
 
     if (OnItemSelectedInGrid.IsBound())
     {
-        OnItemSelectedInGrid.Broadcast(SelectedItemID, SelectedItemInstance, Data);
+        OnItemSelectedInGrid.Broadcast(SelectedItemGUID, Instance.ItemID, SelectedItemInstance);
     }
 }

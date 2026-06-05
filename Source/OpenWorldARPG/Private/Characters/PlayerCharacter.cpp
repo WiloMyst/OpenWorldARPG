@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Characters/PlayerCharacter.h"
 #include "Data/CharacterDataAsset.h"
@@ -6,6 +6,7 @@
 #include "GAS/AttributeSets/AS_Player.h"
 #include "Components/OpenWorldARPGCharacterMovementComponent.h"
 #include "Components/CharacterWeaponComponent.h"
+#include "Characters/PlayerCharacterAnimInstance.h"
 #include "Weapons/WeaponBase.h"
 #include "Camera/CameraComponent.h"
 #include "GameFramework/SpringArmComponent.h"
@@ -219,9 +220,17 @@ void APlayerCharacter::OnMeshLoaded(const UCharacterDataAsset* DataAsset)
 	if (!LoadedMesh) return;
 
 	MeshComponent->SetSkeletalMesh(LoadedMesh);
+
+	// 设置动画蓝图：优先使用 DataAsset 配置的 AnimBP，
+	// 并确保其父类为 UPlayerCharacterAnimInstance 以启用多线程动画更新
 	if (DataAsset->AnimationBlueprint)
 	{
 		MeshComponent->SetAnimInstanceClass(DataAsset->AnimationBlueprint);
+	}
+	else
+	{
+		// 没有配置 AnimBP 时，直接使用 C++ 原生 AnimInstance（纯 C++ 驱动，无蓝图开销）
+		MeshComponent->SetAnimInstanceClass(UPlayerCharacterAnimInstance::StaticClass());
 	}
 
 	SetupBaseBehaviorAnimLayers();
@@ -274,12 +283,18 @@ void APlayerCharacter::SetStandbyMode(bool bNewStandbyState)
 			WeaponComp->SetWeaponHidden(true);
 		}
 
-		SetActorHiddenInGame(true);
-
-		if (GetMesh() && GetMesh()->GetAnimInstance())
+		// 休眠动画实例：停止所有 Montage，禁用动画更新，压缩后台 CPU 开销
+		if (USkeletalMeshComponent* SKMesh = GetMesh())
 		{
-			GetMesh()->GetAnimInstance()->StopAllMontages(0.1f);
+			if (UAnimInstance* AnimInst = SKMesh->GetAnimInstance())
+			{
+				AnimInst->StopAllMontages(0.1f);
+			}
+			SKMesh->bNoSkeletonUpdate = true;
+			SKMesh->SetUpdateAnimationInEditor(false);
 		}
+
+		SetActorHiddenInGame(true);
 	}
 	else
 	{
@@ -295,6 +310,13 @@ void APlayerCharacter::SetStandbyMode(bool bNewStandbyState)
 		}
 
 		SetActorHiddenInGame(false);
+
+		// 恢复动画更新
+		if (USkeletalMeshComponent* SKMesh = GetMesh())
+		{
+			SKMesh->bNoSkeletonUpdate = false;
+			SKMesh->SetUpdateAnimationInEditor(true);
+		}
 
 		if (UCharacterWeaponComponent* WeaponComp = FindComponentByClass<UCharacterWeaponComponent>())
 		{
@@ -488,4 +510,24 @@ void APlayerCharacter::HandleDeath()
 	{
 		WeaponComp->SetWeaponHidden(true);
 	}
+}
+
+// ==========================================
+// 装备系统实现
+// ==========================================
+
+FGuid APlayerCharacter::GetEquippedArtifactGUID(EArtifactSlot Slot) const
+{
+	const FGuid* Found = EquippedArtifactGUIDs.Find(Slot);
+	return Found ? *Found : FGuid();
+}
+
+void APlayerCharacter::SetEquippedArtifactGUID(EArtifactSlot Slot, FGuid NewArtifactGUID)
+{
+	EquippedArtifactGUIDs.Add(Slot, NewArtifactGUID);
+}
+
+void APlayerCharacter::ClearEquippedArtifactGUID(EArtifactSlot Slot)
+{
+	EquippedArtifactGUIDs.Remove(Slot);
 }

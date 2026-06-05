@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #pragma once
 
@@ -7,6 +7,7 @@
 #include "AbilitySystemInterface.h"
 #include "GameplayEffectTypes.h"
 #include "Managers/CharacterManagerSubsystem.h"
+#include "Types/SharedTypes.h"
 #include "PlayerCharacter.generated.h"
 
 class UCharacterDataAsset;
@@ -147,6 +148,34 @@ public:
 
 	/** 获取运行时数据的只读引用 */
 	const FCharacterSaveData& GetRuntimeData() const { return RuntimeData; }
+
+	// ==========================================
+	// 装备系统 (对标鸣潮：1武器 + 5圣遗物)
+	// ==========================================
+
+	/** 获取当前装备的武器 GUID */
+	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Equipment")
+	FGuid GetEquippedWeaponGUID() const { return EquippedWeaponGUID; }
+
+	/** 获取指定槽位的圣遗物 GUID */
+	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Equipment")
+	FGuid GetEquippedArtifactGUID(EArtifactSlot Slot) const;
+
+	/** 获取所有已装备圣遗物 GUID */
+	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Equipment")
+	const TMap<EArtifactSlot, FGuid>& GetEquippedArtifactGUIDs() const { return EquippedArtifactGUIDs; }
+
+	/** 设置装备武器 (由 InventoryManagerSubsystem 调用) */
+	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|Equipment")
+	void SetEquippedWeaponGUID(FGuid NewWeaponGUID) { EquippedWeaponGUID = NewWeaponGUID; }
+
+	/** 设置指定槽位圣遗物 (由 InventoryManagerSubsystem 调用) */
+	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|Equipment")
+	void SetEquippedArtifactGUID(EArtifactSlot Slot, FGuid NewArtifactGUID);
+
+	/** 清除指定槽位圣遗物 */
+	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|Equipment")
+	void ClearEquippedArtifactGUID(EArtifactSlot Slot);
 
 	const TArray<TSubclassOf<UGameplayAbility>>& GetPermanentAbilitiesToActivate() const { return PermanentAbilitiesToActivate; }
 
@@ -291,4 +320,16 @@ protected:
 	/** 瞄准状态下的摄像机偏移 (例如右移并上抬) */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Camera")
 	FVector AimingSocketOffset = FVector(0.0f, 50.0f, 20.0f);
+
+	// ==========================================
+	// 装备槽位 (GUID 引用 InventoryManagerSubsystem 中的物品实例)
+	// ==========================================
+
+	/** 当前装备的武器 GUID */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlayerCharacter|Equipment")
+	FGuid EquippedWeaponGUID;
+
+	/** 5个圣遗物槽位 (花/羽/沙/杯/头) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlayerCharacter|Equipment")
+	TMap<EArtifactSlot, FGuid> EquippedArtifactGUIDs;
 };

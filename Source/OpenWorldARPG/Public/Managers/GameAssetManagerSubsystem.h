@@ -53,6 +53,9 @@ public:
     /** 物品数据库数据表 */
     UDataTable* GetItemDatabaseTable();
 
+    /** 背包分类标签页数据表 */
+    UDataTable* GetInventoryCategoryTabDataTable();
+
     /** 角色通用技能数据资产 */
     UCharacterGeneralDataAsset* GetPlayerCharacterGeneralAbilityDataAsset();
 
@@ -76,7 +79,7 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Asset Loading")
     void StartTeamAssetLoading(const TArray<FGameplayTag>& TeamCharacterTags);
 
-    /** 加载完成后清理状态并移除加载界面 */
+    /** 加载完成后分帧释放资源句柄，平滑 GC 卡顿 */
     UFUNCTION(BlueprintCallable, Category = "Asset Loading")
     void CleanupAfterLoad();
 
@@ -106,6 +109,14 @@ protected:
     UFUNCTION(BlueprintCallable, Category = "Asset Loading")
     void OnLevelLoadCompleted();
 
+    // --- 分帧释放 ---
+
+    /** 每帧释放一批 StreamableHandle，避免集中 GC Spike */
+    void ReleaseHandlesStaggered();
+
+    /** 分帧释放完毕后的最终清理 */
+    void OnStaggeredReleaseComplete();
+
 protected:
     UPROPERTY()
     TObjectPtr<ULoadingScreenWidget> LoadingScreenInstance;
@@ -117,6 +128,9 @@ protected:
 
     UPROPERTY()
     TObjectPtr<UDataTable> CachedItemDatabaseTable;
+
+    UPROPERTY()
+    TObjectPtr<UDataTable> CachedInventoryCategoryTabDataTable;
 
     UPROPERTY()
     TObjectPtr<UCharacterGeneralDataAsset> CachedPlayerCharacterGeneralAbilityDataAsset;
@@ -143,4 +157,15 @@ protected:
     int32 FailedAssetLoads = 0;
 
     TSharedPtr<FStreamableHandle> LevelLoadHandle;
+
+    // --- 分帧释放状态 ---
+
+    /** 待释放的句柄队列（从 TeamAssetLoadHandles 移入，分帧消耗） */
+    TArray<TSharedPtr<FStreamableHandle>> PendingReleaseHandles;
+
+    /** 每帧释放的句柄数量（可配置，默认 3） */
+    int32 HandlesToReleasePerFrame = 3;
+
+    /** 分帧释放的定时器句柄 */
+    FTimerHandle StaggeredReleaseTimerHandle;
 };

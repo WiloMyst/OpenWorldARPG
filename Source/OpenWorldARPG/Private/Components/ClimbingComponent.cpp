@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Components/ClimbingComponent.h"
 #include "GameFramework/Character.h"
@@ -191,38 +191,52 @@ void UClimbingComponent::DoClimbUp()
     // 1. 开启状态锁，防止翻越期间玩家乱按方向键
     bIsClimbingUp = true;
 
-    // 2. 保持在目前的模式，绝对不要在这里切到 MOVE_Falling
+    // 2. 立即退出攀爬模式，切换到飞行模式（无重力）
+    //    这样蒙太奇结束后动画状态机不会回到攀爬姿态
+    if (CustomMovementComp)
+    {
+        CustomMovementComp->ClearClimbInput();
+    }
+
+    SavedGravityScale = MovementComp->GravityScale;
+    MovementComp->SetMovementMode(MOVE_Flying);
+    MovementComp->GravityScale = 0.0f;
     MovementComp->bOrientRotationToMovement = false;
 
-    // 3. 播放原地翻越蒙太奇，并获取动画的真实总时长
-    float AnimDuration = 0.5f; // 给个兜底默认值
+    // 3. 发送攀爬停止事件（移除攀爬状态Tag，防止动画回到攀爬状态）
+    if (EventClimbStopTag.IsValid())
+    {
+        UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(OwnerCharacter, EventClimbStopTag, FGameplayEventData());
+    }
+
+    // 4. 播放翻越蒙太奇
+    float AnimDuration = 0.5f;
     if (ClimbUpMontage)
     {
         AnimDuration = OwnerCharacter->PlayAnimMontage(ClimbUpMontage);
     }
 
-    // 4. 计算翻越的目标位置：基于角色当前位置，向前和向上偏移
+    // 5. 计算翻越的目标位置：基于角色当前位置，向前和向上偏移
     FVector ForwardDir = OwnerCharacter->GetActorForwardVector();
     FVector UpDir = OwnerCharacter->GetActorUpVector();
 
-    // Target = Current + (Forward * Offset.X) + (Up * Offset.Z)
     FVector TargetLoc = OwnerCharacter->GetActorLocation()
         + (ForwardDir * ClimbUpOffset.X)
         + (UpDir * ClimbUpOffset.Z);
 
-    // 5. 设置延时回调：用 MoveComponentTo 平滑搬运胶囊体
+    // 6. 设置延时回调：用 MoveComponentTo 平滑搬运胶囊体
     FLatentActionInfo LatentInfo;
     LatentInfo.CallbackTarget = this;
-    LatentInfo.ExecutionFunction = FName("OnClimbUpFinished"); // 移动完成后呼叫这个函数
+    LatentInfo.ExecutionFunction = FName("OnClimbUpFinished");
     LatentInfo.Linkage = 0;
     LatentInfo.UUID = FMath::Rand();
 
     UKismetSystemLibrary::MoveComponentTo(
         OwnerCharacter->GetCapsuleComponent(),
         TargetLoc,
-        OwnerCharacter->GetActorRotation(), // 保持朝向不变
+        OwnerCharacter->GetActorRotation(),
         false, false,
-        AnimDuration, // 【核心】：让移动耗时与动画时长完全一致！
+        AnimDuration,
         false,
         EMoveComponentAction::Move,
         LatentInfo
@@ -234,8 +248,14 @@ void UClimbingComponent::OnClimbUpFinished()
     // 1. 解开状态锁
     bIsClimbingUp = false;
 
-    // 2. 安全退出攀爬模式，重力重新接管，角色完美落地！
-    ExitClimb();
+    // 2. 恢复重力并切换到掉落模式，角色自然落地
+    MovementComp->GravityScale = SavedGravityScale;
+    MovementComp->SetMovementMode(MOVE_Falling);
+    MovementComp->bOrientRotationToMovement = true;
+
+    // 3. 修正角色朝向
+    FRotator CurrentRot = OwnerCharacter->GetActorRotation();
+    OwnerCharacter->SetActorRotation(FRotator(0.0f, CurrentRot.Yaw, 0.0f));
 }
 
 void UClimbingComponent::HandleOwnerMovementInput(float InputX, float InputY)

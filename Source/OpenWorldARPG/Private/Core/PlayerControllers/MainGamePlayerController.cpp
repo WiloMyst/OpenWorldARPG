@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Core/PlayerControllers/MainGamePlayerController.h"
 #include "Characters/PlayerCharacter.h"
@@ -48,17 +48,7 @@ void AMainGamePlayerController::HandleSwitchCharacter(int32 TargetIndex)
     if (!OldCharacter) return;
 
     // ------------------------------------------
-    // 拦截点 1：GAS 状态标签拦截
-    // ------------------------------------------
-    UAbilitySystemComponent* ASC = OldCharacter->GetAbilitySystemComponent();
-    if (ASC && ASC->HasAnyMatchingGameplayTags(PreventSwitchTags))
-    {
-        UE_LOG(LogTemp, Log, TEXT("HandleSwitchCharacter: 当前状态（Tag）禁止切换角色！"));
-        return;
-    }
-
-    // ------------------------------------------
-    // 拦截点 2：运动模式拦截
+    // 拦截点 1：运动模式拦截（检查当前角色）
     // ------------------------------------------
     if (UCharacterMovementComponent* MoveComp = OldCharacter->GetCharacterMovement())
     {
@@ -69,7 +59,7 @@ void AMainGamePlayerController::HandleSwitchCharacter(int32 TargetIndex)
         }
     }
 
-    // 3. 从 TeamManager 获取纯数据 (Tags)，从 GameMode 获取 Actor 引用
+    // 2. 从 TeamManager 获取纯数据 (Tags)，从 GameMode 获取 Actor 引用
     TArray<FGameplayTag> TeamTags = TeamManager->GetCurrentTeamCharacterTags();
     if (!TeamTags.IsValidIndex(TargetIndex)) return;
 
@@ -79,6 +69,16 @@ void AMainGamePlayerController::HandleSwitchCharacter(int32 TargetIndex)
     APlayerCharacter* NewCharacter = GameMode->GetTeamCharacterByTag(TargetTag);
 
     if (!NewCharacter || NewCharacter == OldCharacter) return;
+
+    // ------------------------------------------
+    // 拦截点 2：GAS 状态标签拦截（检查目标角色）
+    // ------------------------------------------
+    UAbilitySystemComponent* TargetASC = NewCharacter->GetAbilitySystemComponent();
+    if (TargetASC && TargetASC->HasAnyMatchingGameplayTags(PreventSwitchTags))
+    {
+        UE_LOG(LogTemp, Log, TEXT("HandleSwitchCharacter: 目标角色状态（Tag）禁止切换！"));
+        return;
+    }
 
     // ==========================================
     // 执行角色切换流水线

@@ -120,7 +120,7 @@ protected:
     // ==========================================
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Animation")
-    float WallSnapZOffset = -65.0f;
+    float WallSnapZOffset = 0.0f;
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Animation")
     float WallSnapTime = 0.2f;
@@ -130,7 +130,7 @@ protected:
 
     // 翻越时，胶囊体需要向前和向上移动的偏移量
     UPROPERTY(EditDefaultsOnly, Category = "Config|Animation")
-    FVector ClimbUpOffset = FVector(40.0f, 0.0f, 110.0f);
+    FVector ClimbUpOffset = FVector(80.0f, 0.0f, 86.0f);
 
 private:
     UPROPERTY()
@@ -147,4 +147,7 @@ private:
 
     // 状态锁：是否正在执行翻越动作
     bool bIsClimbingUp = false;
+
+    // 翻越期间保存原始重力缩放，用于恢复
+    float SavedGravityScale = 1.0f;
 };

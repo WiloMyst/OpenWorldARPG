@@ -50,7 +50,7 @@ protected:
     FVector SwapFXScale = FVector(0.5f, 0.5f, 0.5f);
 
     // --- 状态拦截配置 ---
-    // 包含这些 Tag 时禁止切人 (例如：死亡、处于不可取消的硬直中)
+    // 目标角色包含这些 Tag 时禁止切换到该角色 (例如：死亡、处于不可取消的硬直中)
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
     FGameplayTagContainer PreventSwitchTags;
 

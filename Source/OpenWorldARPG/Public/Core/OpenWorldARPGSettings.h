@@ -42,6 +42,10 @@ public:
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Data Tables", meta=(ToolTip="物品数据库数据表"))
 	TSoftObjectPtr<UDataTable> ItemDatabaseTable;
 
+	/** 背包分类标签页数据表 (DT_InventoryCategoryTabData) */
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Data Tables", meta=(ToolTip="背包分类标签页数据表"))
+	TSoftObjectPtr<UDataTable> InventoryCategoryTabDataTable;
+
 	// ==========================================
 	// 角色通用配置
 	// ==========================================

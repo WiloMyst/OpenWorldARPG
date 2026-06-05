@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Managers/GameAssetManagerSubsystem.h"
 #include "Core/OpenWorldARPGSettings.h"
@@ -51,6 +51,20 @@ UDataTable* UGameAssetManagerSubsystem::GetItemDatabaseTable()
         }
     }
     return CachedItemDatabaseTable;
+}
+
+UDataTable* UGameAssetManagerSubsystem::GetInventoryCategoryTabDataTable()
+{
+    if (!CachedInventoryCategoryTabDataTable)
+    {
+        const UOpenWorldARPGSettings& Settings = UOpenWorldARPGSettings::Get();
+        CachedInventoryCategoryTabDataTable = Settings.InventoryCategoryTabDataTable.LoadSynchronous();
+        if (!CachedInventoryCategoryTabDataTable)
+        {
+            UE_LOG(LogTemp, Error, TEXT("GameAssetManager: InventoryCategoryTabDataTable 未配置或加载失败！请在项目设置中检查。"));
+        }
+    }
+    return CachedInventoryCategoryTabDataTable;
 }
 
 UCharacterGeneralDataAsset* UGameAssetManagerSubsystem::GetPlayerCharacterGeneralAbilityDataAsset()
@@ -290,8 +304,9 @@ void UGameAssetManagerSubsystem::OnSingleTeamAssetLoaded()
 
 void UGameAssetManagerSubsystem::OnAllTeamAssetsLoaded()
 {
+    // 注意：不在此时清空 TeamAssetLoadHandles！
+    // 句柄保持持有引用，直到 CleanupAfterLoad 分帧释放，防止资产在 OpenLevel 前被 GC 回收
     TeamAssetLoadNum = 0;
-    TeamAssetLoadHandles.Empty();
     CurrentLoadingPhase = ELoadingPhase::Complete;
     UE_LOG(LogTemp, Log, TEXT("Phase 2 Complete: All team assets loaded."));
 
@@ -345,11 +360,68 @@ void UGameAssetManagerSubsystem::CleanupAfterLoad()
     CurrentTeamToLoad.Empty();
     CurrentLevelToLoad.Reset();
 
+    // 将所有待释放的句柄移入分帧释放队列
+    PendingReleaseHandles.Append(MoveTemp(TeamAssetLoadHandles));
     TeamAssetLoadHandles.Empty();
+
     if (LevelLoadHandle.IsValid())
     {
+        PendingReleaseHandles.Add(LevelLoadHandle);
         LevelLoadHandle.Reset();
     }
 
-    UE_LOG(LogTemp, Log, TEXT("GameAssetManagerSubsystem has been cleaned up after level load."));
+    // 启动分帧释放定时器（每 0.05s 释放一批，约每秒 20 批）
+    if (!PendingReleaseHandles.IsEmpty())
+    {
+        UWorld* World = GetWorld();
+        if (World && World->GetTimerManager().IsTimerActive(StaggeredReleaseTimerHandle))
+        {
+            World->GetTimerManager().ClearTimer(StaggeredReleaseTimerHandle);
+        }
+        if (World)
+        {
+            World->GetTimerManager().SetTimer(
+                StaggeredReleaseTimerHandle,
+                FTimerDelegate::CreateUObject(this, &UGameAssetManagerSubsystem::ReleaseHandlesStaggered),
+                0.05f,   // 间隔 50ms
+                true      // 循环
+            );
+        }
+    }
+    else
+    {
+        OnStaggeredReleaseComplete();
+    }
+}
+
+void UGameAssetManagerSubsystem::ReleaseHandlesStaggered()
+{
+    int32 ReleasedThisFrame = 0;
+    while (!PendingReleaseHandles.IsEmpty() && ReleasedThisFrame < HandlesToReleasePerFrame)
+    {
+        TSharedPtr<FStreamableHandle> Handle = PendingReleaseHandles.Pop();
+        if (Handle.IsValid())
+        {
+            // 显式取消请求，释放引用计数
+            Handle->CancelHandle();
+        }
+        ReleasedThisFrame++;
+    }
+
+    // 全部释放完毕
+    if (PendingReleaseHandles.IsEmpty())
+    {
+        UWorld* World = GetWorld();
+        if (World)
+        {
+            World->GetTimerManager().ClearTimer(StaggeredReleaseTimerHandle);
+        }
+        OnStaggeredReleaseComplete();
+    }
+}
+
+void UGameAssetManagerSubsystem::OnStaggeredReleaseComplete()
+{
+    PendingReleaseHandles.Empty();
+    UE_LOG(LogTemp, Log, TEXT("GameAssetManagerSubsystem: Staggered release complete. All handles freed."));
 }

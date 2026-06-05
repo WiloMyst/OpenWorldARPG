@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #pragma once
 
@@ -11,7 +11,7 @@
 class UItemSlotPanelWidget;
 class UItemDetailPanelWidget;
 class UItemCategoryTabWidget;
-class UHorizontalBox;
+class UVerticalBox;
 class UButton;
 class UDataTable;
 struct FItemInstance;
@@ -45,7 +45,7 @@ protected:
 
     // 对应图1：响应格子的点击事件，更新详情面板
     UFUNCTION()
-    void HandleOnItemSelectedInGrid(int32 SelectedItemID, const FItemInstance& SelectedItemInstance, const FItemData& SelectedItemData);
+    void HandleOnItemSelectedInGrid(FGuid SelectedItemGUID, int32 SelectedItemID, const FItemInstance& SelectedItemInstance);
 
     // ==========================================
     // 按钮响应逻辑
@@ -68,9 +68,9 @@ protected:
     UPROPERTY(meta = (BindWidget))
     TObjectPtr<UItemDetailPanelWidget> WBP_ItemDetailPanel;
 
-    // 对应截图中的 Category Box (假设是 HorizontalBox，如果是 WrapBox 请替换)
+    // 对应截图中的 Category Box
     UPROPERTY(meta = (BindWidget))
-    TObjectPtr<UHorizontalBox> CategoryBox;
+    TObjectPtr<UVerticalBox> CategoryBox;
 
     UPROPERTY(meta = (BindWidget))
     TObjectPtr<UButton> CloseButton;
@@ -95,5 +95,5 @@ private:
     UPROPERTY()
     TObjectPtr<UItemCategoryTabWidget> SelectedCategoryTab;
 
-    int32 CachedSelectedItemID = -1;
+    FGuid CachedSelectedItemGUID;
 };
