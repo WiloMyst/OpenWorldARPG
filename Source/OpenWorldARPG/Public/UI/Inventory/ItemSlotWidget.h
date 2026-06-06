@@ -1,17 +1,18 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
-#include "Managers/InventoryManagerSubsystem.h"
-#include "Types/SharedTypes.h" 
+#include "Types/ItemData.h"
+#include "Types/ItemInstance.h"
 #include "ItemSlotWidget.generated.h"
 
 class UButton;
 class UImage;
 class UTextBlock;
 class UItemSlotWidget;
+class UInventoryManagerSubsystem;
 struct FItemInstance;
 
 // ==========================================

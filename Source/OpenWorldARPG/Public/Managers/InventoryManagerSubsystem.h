@@ -4,7 +4,11 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
-#include "Types/SharedTypes.h"
+#include "Types/ItemTypes.h"
+#include "Types/ArtifactTypes.h"
+#include "Types/WeaponTypes.h"
+#include "Types/ItemData.h"
+#include "Types/ItemInstance.h"
 #include "InventoryManagerSubsystem.generated.h"
 
 // --- 委托 ---

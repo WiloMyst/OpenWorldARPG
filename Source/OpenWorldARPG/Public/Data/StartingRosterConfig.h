@@ -1,10 +1,10 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
-#include "Managers/CharacterManagerSubsystem.h" // 包含 FCharacterSaveData
+#include "Data/CharacterSaveData.h"
 #include "GameplayTagContainer.h"
 #include "StartingRosterConfig.generated.h"
 

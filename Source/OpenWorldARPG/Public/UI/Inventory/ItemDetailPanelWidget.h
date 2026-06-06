@@ -1,10 +1,10 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
-#include "Types/SharedTypes.h" 
+#include "Types/ItemInstance.h"
 #include "ItemDetailPanelWidget.generated.h"
 
 class UTextBlock;

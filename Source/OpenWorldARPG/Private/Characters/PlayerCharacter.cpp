@@ -5,9 +5,9 @@
 #include "Data/CharacterGeneralDataAsset.h"
 #include "GAS/AttributeSets/AS_Player.h"
 #include "Components/OpenWorldARPGCharacterMovementComponent.h"
+#include "Components/MovementStateMachineComponent.h"
 #include "Components/CharacterWeaponComponent.h"
-#include "Characters/PlayerCharacterAnimInstance.h"
-#include "Weapons/WeaponBase.h"
+
 #include "Camera/CameraComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -16,14 +16,11 @@
 #include "Engine/StreamableManager.h"
 #include "Engine/AssetManager.h"
 #include "AbilitySystemComponent.h"
-#include "GameFramework/GameModeBase.h"
-#include "GameFramework/PlayerStart.h"
 #include "Managers/GameAssetManagerSubsystem.h"
 
 APlayerCharacter::APlayerCharacter(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer.SetDefaultSubobjectClass<UOpenWorldARPGCharacterMovementComponent>(ACharacter::CharacterMovementComponentName))
 {
-	// 恢复被删掉的 Tick 启用，否则平滑摄像机和跌落检测彻底失效！
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = true;
 
@@ -31,7 +28,6 @@ APlayerCharacter::APlayerCharacter(const FObjectInitializer& ObjectInitializer)
 	bUseControllerRotationYaw = false;
 	bUseControllerRotationRoll = false;
 
-	// 恢复被删掉的核心移动设置，解决鼠标无法转向和角色不转身的问题！
 	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
 	{
 		MoveComp->bOrientRotationToMovement = true;
@@ -49,13 +45,14 @@ APlayerCharacter::APlayerCharacter(const FObjectInitializer& ObjectInitializer)
 
 	WeaponSpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("WeaponSpringArm"));
 	WeaponSpringArm->SetupAttachment(RootComponent);
-	// 恢复被删掉的武器摇臂参数
 	WeaponSpringArm->bDoCollisionTest = false;
 	WeaponSpringArm->bEnableCameraLag = true;
 	WeaponSpringArm->CameraLagSpeed = 10.0f;
 
 	WeaponRestSocket = CreateDefaultSubobject<USceneComponent>(TEXT("WeaponRestSocket"));
 	WeaponRestSocket->SetupAttachment(WeaponSpringArm);
+
+	MovementStateMachine = CreateDefaultSubobject<UMovementStateMachineComponent>(TEXT("MovementStateMachine"));
 
 	AbilitySystemComponent = CreateDefaultSubobject<UAbilitySystemComponent>(TEXT("AbilitySystemComponent"));
 	AbilitySystemComponent->SetIsReplicated(true);
@@ -67,6 +64,11 @@ APlayerCharacter::APlayerCharacter(const FObjectInitializer& ObjectInitializer)
 void APlayerCharacter::InitializeCharacter(const FCharacterSaveData& InSaveData, UCharacterDataAsset* InDataAsset)
 {
 	if (!InDataAsset) return;
+
+	if (UOpenWorldARPGCharacterMovementComponent* CustomMC = GetCustomMovementComp())
+	{
+		CustomMC->CacheOwnerReferences();
+	}
 
 	RuntimeData = InSaveData;
 	DataSourceAsset = InDataAsset;
@@ -80,7 +82,6 @@ void APlayerCharacter::InitializeCharacter(const FCharacterSaveData& InSaveData,
 			AbilitySystemComponent->AddSpawnedAttribute(AttributeSet);
 		}
 
-		// [被恢复的逻辑]: 添加角色类型 Tag（解决 A-Pose 的核心原因）
 		if (InDataAsset->ElementType.IsValid())
 		{
 			AbilitySystemComponent->AddLooseGameplayTag(InDataAsset->ElementType, 1);
@@ -90,7 +91,6 @@ void APlayerCharacter::InitializeCharacter(const FCharacterSaveData& InSaveData,
 			AbilitySystemComponent->AddLooseGameplayTag(InDataAsset->WeaponType, 1);
 		}
 
-		// [被恢复的逻辑]: 赋予通用的基础技能（跑、跳等，也是脱离A-Pose的关键）
 		if (UGameInstance* GI = GetGameInstance())
 		{
 			if (UGameAssetManagerSubsystem* AssetManager = GI->GetSubsystem<UGameAssetManagerSubsystem>())
@@ -178,6 +178,13 @@ void APlayerCharacter::InitializeCharacter(const FCharacterSaveData& InSaveData,
 				}
 			}
 		}
+
+		// 注册瞄准 Tag 变化回调 (事件驱动，替代 Tick 中每帧查询)
+		if (AimingStateTag.IsValid())
+		{
+			AbilitySystemComponent->RegisterGameplayTagEvent(AimingStateTag, EGameplayTagEventType::NewOrRemoved)
+				.AddUObject(this, &APlayerCharacter::OnAimingTagChanged);
+		}
 	}
 
 	if (USkeletalMeshComponent* MeshComponent = GetMesh())
@@ -187,11 +194,13 @@ void APlayerCharacter::InitializeCharacter(const FCharacterSaveData& InSaveData,
 		{
 			FStreamableManager& StreamableManager = UAssetManager::Get().GetStreamableManager();
 			UCharacterDataAsset* CapturedDataAsset = InDataAsset;
+			TWeakObjectPtr<APlayerCharacter> WeakThis = this;
 			StreamableManager.RequestAsyncLoad(MeshToLoad.ToSoftObjectPath(),
-				FStreamableDelegate::CreateLambda([this, CapturedDataAsset]()
-					{
-						OnMeshLoaded(CapturedDataAsset);
-					}));
+				FStreamableDelegate::CreateLambda([WeakThis, CapturedDataAsset]() {
+					if (WeakThis.IsValid()) {
+						WeakThis->OnMeshLoaded(CapturedDataAsset);
+					}
+				}));
 		}
 		else if (MeshToLoad.IsValid())
 		{
@@ -221,16 +230,10 @@ void APlayerCharacter::OnMeshLoaded(const UCharacterDataAsset* DataAsset)
 
 	MeshComponent->SetSkeletalMesh(LoadedMesh);
 
-	// 设置动画蓝图：优先使用 DataAsset 配置的 AnimBP，
-	// 并确保其父类为 UPlayerCharacterAnimInstance 以启用多线程动画更新
+	// 必须在 DataAsset 中配置 AnimationBlueprint，不再回退到 PlayerCharacterAnimInstance
 	if (DataAsset->AnimationBlueprint)
 	{
 		MeshComponent->SetAnimInstanceClass(DataAsset->AnimationBlueprint);
-	}
-	else
-	{
-		// 没有配置 AnimBP 时，直接使用 C++ 原生 AnimInstance（纯 C++ 驱动，无蓝图开销）
-		MeshComponent->SetAnimInstanceClass(UPlayerCharacterAnimInstance::StaticClass());
 	}
 
 	SetupBaseBehaviorAnimLayers();
@@ -283,7 +286,6 @@ void APlayerCharacter::SetStandbyMode(bool bNewStandbyState)
 			WeaponComp->SetWeaponHidden(true);
 		}
 
-		// 休眠动画实例：停止所有 Montage，禁用动画更新，压缩后台 CPU 开销
 		if (USkeletalMeshComponent* SKMesh = GetMesh())
 		{
 			if (UAnimInstance* AnimInst = SKMesh->GetAnimInstance())
@@ -311,7 +313,6 @@ void APlayerCharacter::SetStandbyMode(bool bNewStandbyState)
 
 		SetActorHiddenInGame(false);
 
-		// 恢复动画更新
 		if (USkeletalMeshComponent* SKMesh = GetMesh())
 		{
 			SKMesh->bNoSkeletonUpdate = false;
@@ -342,7 +343,7 @@ void APlayerCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
-	CheckKillZAndRespawn();
+	// 仅做摄像机插值，不查 GAS Tag (事件驱动)
 	AdjustAimingCamera(DeltaTime);
 }
 
@@ -353,13 +354,27 @@ void APlayerCharacter::HandleMovementInput(float InputX, float InputY)
 
 	if (!Controller || !GetCharacterMovement()) return;
 
-	OnPlayerMovementInput.Broadcast(InputX, InputY);
-
-	uint8 Mode = GetCharacterMovement()->MovementMode;
-	if (Mode == MOVE_Walking || Mode == MOVE_NavWalking || Mode == MOVE_Falling)
+	// 攀爬状态下：InputY 映射为墙面上下移动（Z轴），InputX 映射为墙面左右移动
+	// CMC 在 PhysClimbing 中通过 ConsumeInputVector 读取，投影到墙面平面
+	// 不广播 OnPlayerMovementInput，避免 ClimbingComponent 在攀爬中触发多余的检测
+	if (MovementStateMachine && MovementStateMachine->IsClimbing())
 	{
-		NormalMovement(InputX, InputY);
+		const FRotator Rotation = Controller->GetControlRotation();
+		const FRotator YawRotation(0, Rotation.Yaw, 0);
+		const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
+
+		// 左右：沿相机朝向的水平右方向
+		AddMovementInput(RightDirection, InputX);
+		// 上下：直接用 Z 轴，投影到墙面后即为墙面垂直方向
+		AddMovementInput(FVector::UpVector, InputY);
+		return;
 	}
+
+	// 始终走引擎原生输入管线 (AddMovementInput)
+	NormalMovement(InputX, InputY);
+
+	// 广播输入事件供 ClimbingComponent 等使用
+	OnPlayerMovementInput.Broadcast(InputX, InputY);
 }
 
 void APlayerCharacter::HandleMovementInputCompleted()
@@ -436,9 +451,10 @@ int32 APlayerCharacter::GetCharacterLevel() const { return RuntimeData.Character
 int32 APlayerCharacter::GetConstellationLevel() const { return RuntimeData.ConstellationLevel; }
 UOpenWorldARPGCharacterMovementComponent* APlayerCharacter::GetCustomMovementComp() const { return Cast<UOpenWorldARPGCharacterMovementComponent>(GetCharacterMovement()); }
 
+UMovementStateMachineComponent* APlayerCharacter::GetMovementStateMachine() const { return MovementStateMachine; }
+
 void APlayerCharacter::OnHealthAttributeChanged(const FOnAttributeChangeData& Data)
 {
-	// 恢复丢失的激活死亡能力的逻辑
 	if (Data.NewValue <= 0.0f && Data.OldValue > 0.0f)
 	{
 		if (AbilitySystemComponent && DeathAbilityTag.IsValid())
@@ -451,38 +467,34 @@ void APlayerCharacter::OnHealthAttributeChanged(const FOnAttributeChangeData& Da
 	OnHealthUpdated.Broadcast();
 }
 
-void APlayerCharacter::CheckKillZAndRespawn()
+// ==========================================
+// 越界处理 (引擎原生回调，替代 Tick 中的 CheckKillZAndRespawn)
+// ==========================================
+
+void APlayerCharacter::FellOutOfWorld(const class UDamageType& dmgType)
 {
-	// 恢复整个庞大的跌落保护、清空速度与返回出生点的流水线
-	if (GetActorLocation().Z <= KillZThreshold)
+	// 引擎在角色跌出 KillZ 边界时自动调用此函数
+	// 不需要每帧检测 Z 坐标，不需要客户端获取 GameMode
+	// 只需通知死亡，重生逻辑由 GameMode / PlayerController 负责
+	HandleDeath();
+}
+
+// ==========================================
+// 瞄准摄像机 (事件驱动，Tick 只做插值)
+// ==========================================
+
+void APlayerCharacter::OnAimingTagChanged(const FGameplayTag Tag, int32 NewCount)
+{
+	// Tag 被添加时 NewCount > 0，被移除时 NewCount == 0
+	if (NewCount > 0)
 	{
-		if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
-		{
-			MoveComp->Velocity = FVector::ZeroVector;
-		}
-
-		if (AGameModeBase* GameMode = GetWorld()->GetAuthGameMode())
-		{
-			if (AActor* PlayerStart = GameMode->FindPlayerStart(GetController(), RespawnPlayerStartTag.ToString()))
-			{
-				FTransform StartTransform = PlayerStart->GetActorTransform();
-				SetActorLocationAndRotation(
-					StartTransform.GetLocation(),
-					StartTransform.GetRotation(),
-					false, nullptr, ETeleportType::TeleportPhysics
-				);
-
-				if (AController* PC = GetController())
-				{
-					PC->SetControlRotation(StartTransform.Rotator());
-				}
-
-				if (AbilitySystemComponent && RespawnCancelAbilityTags.IsValid())
-				{
-					AbilitySystemComponent->CancelAbilities(&RespawnCancelAbilityTags);
-				}
-			}
-		}
+		CurrentTargetArmLength = AimingTargetArmLength;
+		CurrentTargetSocketOffset = AimingSocketOffset;
+	}
+	else
+	{
+		CurrentTargetArmLength = NormalTargetArmLength;
+		CurrentTargetSocketOffset = NormalSocketOffset;
 	}
 }
 
@@ -490,44 +502,15 @@ void APlayerCharacter::AdjustAimingCamera(float DeltaTime)
 {
 	if (!CameraBoom) return;
 
-	bool bIsAiming = false;
-	if (AbilitySystemComponent && AimingStateTag.IsValid())
-	{
-		bIsAiming = AbilitySystemComponent->HasMatchingGameplayTag(AimingStateTag);
-	}
-
-	const float TargetArmLength = bIsAiming ? AimingTargetArmLength : NormalTargetArmLength;
-	const FVector TargetSocketOffset = bIsAiming ? AimingSocketOffset : NormalSocketOffset;
-
-	CameraBoom->TargetArmLength = FMath::FInterpTo(CameraBoom->TargetArmLength, TargetArmLength, DeltaTime, CameraInterpSpeed);
-	CameraBoom->SocketOffset = FMath::VInterpTo(CameraBoom->SocketOffset, TargetSocketOffset, DeltaTime, CameraInterpSpeed);
+	// 纯插值，不查 GAS Tag
+	CameraBoom->TargetArmLength = FMath::FInterpTo(CameraBoom->TargetArmLength, CurrentTargetArmLength, DeltaTime, CameraInterpSpeed);
+	CameraBoom->SocketOffset = FMath::VInterpTo(CameraBoom->SocketOffset, CurrentTargetSocketOffset, DeltaTime, CameraInterpSpeed);
 }
 
 void APlayerCharacter::HandleDeath()
 {
-	// 恢复武器的隐形逻辑
 	if (UCharacterWeaponComponent* WeaponComp = FindComponentByClass<UCharacterWeaponComponent>())
 	{
 		WeaponComp->SetWeaponHidden(true);
 	}
-}
-
-// ==========================================
-// 装备系统实现
-// ==========================================
-
-FGuid APlayerCharacter::GetEquippedArtifactGUID(EArtifactSlot Slot) const
-{
-	const FGuid* Found = EquippedArtifactGUIDs.Find(Slot);
-	return Found ? *Found : FGuid();
-}
-
-void APlayerCharacter::SetEquippedArtifactGUID(EArtifactSlot Slot, FGuid NewArtifactGUID)
-{
-	EquippedArtifactGUIDs.Add(Slot, NewArtifactGUID);
-}
-
-void APlayerCharacter::ClearEquippedArtifactGUID(EArtifactSlot Slot)
-{
-	EquippedArtifactGUIDs.Remove(Slot);
 }

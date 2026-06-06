@@ -6,8 +6,7 @@
 #include "Characters/OpenWorldARPGCharacter.h"
 #include "AbilitySystemInterface.h"
 #include "GameplayEffectTypes.h"
-#include "Managers/CharacterManagerSubsystem.h"
-#include "Types/SharedTypes.h"
+#include "Data/CharacterSaveData.h"
 #include "PlayerCharacter.generated.h"
 
 class UCharacterDataAsset;
@@ -17,6 +16,8 @@ class USceneComponent;
 class UCharacterWeaponComponent;
 class UAS_Player;
 class UOpenWorldARPGCharacterMovementComponent;
+class UMovementStateMachineComponent;
+class AWeaponBase;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnPlayerMovementInput, float, InputX, float, InputY);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnHealthUpdated);
@@ -25,6 +26,12 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnHealthUpdated);
  * @class APlayerCharacter
  * @brief 玩家操控的实体角色基类。
  * 直接持有 ASC、AttributeSet，动态数据通过 FCharacterSaveData 唯一存储，无重复。
+ *
+ * 职责边界：
+ * - 空间表现、物理位移、动画和技能执行
+ * - 不持有装备/背包数据（由 EquipmentComponent 或 PlayerState 管理）
+ * - 不在 Tick 中查询 GAS Tag（改为事件驱动）
+ * - 不自行处理重生逻辑（由 FellOutOfWorld → HandleDeath 委托给 GameMode）
  */
 UCLASS()
 class OPENWORLDARPG_API APlayerCharacter : public AOpenWorldARPGCharacter, public IAbilitySystemInterface
@@ -87,6 +94,13 @@ public:
 	void ClearPhysicsAnimLayers();
 
 	// ==========================================
+	// 越界处理 (替代 Tick 中的 CheckKillZAndRespawn)
+	// ==========================================
+
+	/** 引擎原生越界回调，替代 Tick 中每帧检测 Z 坐标 */
+	virtual void FellOutOfWorld(const class UDamageType& dmgType) override;
+
+	// ==========================================
 	// 公共 Getters
 	// ==========================================
 
@@ -107,6 +121,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Movement")
 	UOpenWorldARPGCharacterMovementComponent* GetCustomMovementComp() const;
 
+	/** 获取移动状态机组件 */
+	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Movement")
+	UMovementStateMachineComponent* GetMovementStateMachine() const;
+
 	/** 获取静态配置数据资产 */
 	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Data")
 	UCharacterDataAsset* GetDataSourceAsset() const { return DataSourceAsset; }
@@ -121,7 +139,7 @@ public:
 
 	/** 获取武器蓝图 (从 DataSourceAsset 读取) */
 	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Data")
-	TSubclassOf<class AWeaponBase> GetWeaponBlueprint() const;
+	TSubclassOf<AWeaponBase> GetWeaponBlueprint() const;
 
 	/** 获取普通攻击蒙太奇 (从 DataSourceAsset 读取) */
 	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Data")
@@ -149,34 +167,6 @@ public:
 	/** 获取运行时数据的只读引用 */
 	const FCharacterSaveData& GetRuntimeData() const { return RuntimeData; }
 
-	// ==========================================
-	// 装备系统 (对标鸣潮：1武器 + 5圣遗物)
-	// ==========================================
-
-	/** 获取当前装备的武器 GUID */
-	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Equipment")
-	FGuid GetEquippedWeaponGUID() const { return EquippedWeaponGUID; }
-
-	/** 获取指定槽位的圣遗物 GUID */
-	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Equipment")
-	FGuid GetEquippedArtifactGUID(EArtifactSlot Slot) const;
-
-	/** 获取所有已装备圣遗物 GUID */
-	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Equipment")
-	const TMap<EArtifactSlot, FGuid>& GetEquippedArtifactGUIDs() const { return EquippedArtifactGUIDs; }
-
-	/** 设置装备武器 (由 InventoryManagerSubsystem 调用) */
-	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|Equipment")
-	void SetEquippedWeaponGUID(FGuid NewWeaponGUID) { EquippedWeaponGUID = NewWeaponGUID; }
-
-	/** 设置指定槽位圣遗物 (由 InventoryManagerSubsystem 调用) */
-	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|Equipment")
-	void SetEquippedArtifactGUID(EArtifactSlot Slot, FGuid NewArtifactGUID);
-
-	/** 清除指定槽位圣遗物 */
-	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|Equipment")
-	void ClearEquippedArtifactGUID(EArtifactSlot Slot);
-
 	const TArray<TSubclassOf<UGameplayAbility>>& GetPermanentAbilitiesToActivate() const { return PermanentAbilitiesToActivate; }
 
 protected:
@@ -186,11 +176,12 @@ protected:
 	void OnMeshLoaded(const UCharacterDataAsset* DataAsset);
 	virtual void OnHealthAttributeChanged(const FOnAttributeChangeData& Data);
 
-	/** 处理跌落保护与重置 */
-	void CheckKillZAndRespawn();
-
-	/** 处理瞄准时的摄像机平滑过渡 */
+	/** 处理瞄准时的摄像机平滑过渡 (Tick 中只做插值，不查 GAS Tag) */
 	void AdjustAimingCamera(float DeltaTime);
+
+	/** 瞄准状态 Tag 变化回调 (事件驱动，替代 Tick 中查询) */
+	UFUNCTION()
+	void OnAimingTagChanged(const FGameplayTag Tag, int32 NewCount);
 
 	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|State")
 	virtual void HandleDeath();
@@ -218,6 +209,10 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlayerCharacter|Weapon")
 	TObjectPtr<USceneComponent> WeaponRestSocket;
+
+	/** 移动状态机组件 (FSM) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlayerCharacter|Movement")
+	TObjectPtr<UMovementStateMachineComponent> MovementStateMachine;
 
 	// ==========================================
 	// 输入缓存变量
@@ -277,18 +272,6 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
 	FGameplayTag DeathAbilityTag;
 
-	// ==========================================
-	// 配置项：跌落与重生 (告别 -4500 硬编码)
-	// ==========================================
-
-	/** 角色跌落重生的 Z 轴高度阈值 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|World")
-	float KillZThreshold = -4500.0f;
-
-	/** 重生时寻找的 PlayerStart 标签 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|World")
-	FName RespawnPlayerStartTag = FName("PlayerStart");
-
 	/** 重生时需要强制取消的技能 Tags (例如: Ability.Category.IsInAir) */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
 	FGameplayTagContainer RespawnCancelAbilityTags;
@@ -322,14 +305,12 @@ protected:
 	FVector AimingSocketOffset = FVector(0.0f, 50.0f, 20.0f);
 
 	// ==========================================
-	// 装备槽位 (GUID 引用 InventoryManagerSubsystem 中的物品实例)
+	// 摄像机运行时状态 (事件驱动，不在 Tick 中查 GAS)
 	// ==========================================
 
-	/** 当前装备的武器 GUID */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlayerCharacter|Equipment")
-	FGuid EquippedWeaponGUID;
+	/** 当前目标臂长 (由 OnAimingTagChanged 事件设置，Tick 只做插值) */
+	float CurrentTargetArmLength = 400.0f;
 
-	/** 5个圣遗物槽位 (花/羽/沙/杯/头) */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlayerCharacter|Equipment")
-	TMap<EArtifactSlot, FGuid> EquippedArtifactGUIDs;
+	/** 当前目标偏移 (由 OnAimingTagChanged 事件设置，Tick 只做插值) */
+	FVector CurrentTargetSocketOffset = FVector::ZeroVector;
 };

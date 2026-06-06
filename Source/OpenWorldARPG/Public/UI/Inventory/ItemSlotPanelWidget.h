@@ -5,13 +5,14 @@
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 #include "GameplayTagContainer.h"
-#include "Managers/InventoryManagerSubsystem.h"
-#include "Types/SharedTypes.h"
+#include "Types/ItemTypes.h"
+#include "Types/ItemInstance.h"
 #include "ItemSlotPanelWidget.generated.h"
 
 class UWrapBox;
 class UListView;
 class UItemSlotWidget;
+class UInventoryManagerSubsystem;
 
 // 选中物品时广播，传递 GUID 用于丢弃/装备/使用
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnItemSelectedInGrid, FGuid, SelectedItemGUID, int32, SelectedItemID, const FItemInstance&, SelectedItemInstance);

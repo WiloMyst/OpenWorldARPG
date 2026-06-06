@@ -5,16 +5,8 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
 #include "GenericTeamAgentInterface.h"
+#include "Types/CustomMovementModeTypes.h"
 #include "OpenWorldARPGCharacter.generated.h"
-
-UENUM(BlueprintType)
-enum class ECustomMovementMode : uint8
-{
-	None = 0,
-	Climbing = 1,  // 攀爬模式
-	Gliding = 2,   // 滑翔模式
-	Swimming = 3   // 游泳模式
-};
 
 UCLASS(config=Game)
 class AOpenWorldARPGCharacter : public ACharacter, public IGenericTeamAgentInterface

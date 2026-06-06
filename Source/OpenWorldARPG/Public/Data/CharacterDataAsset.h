@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #pragma once
 
@@ -194,5 +194,16 @@ public:
      */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "GAS | Abilities", meta = (DisplayName = "角色所有被动天赋"))
     TArray<FTalentConfig> PassiveTalents;
+
+
+    // ======== 角色攀爬动画 ========
+
+    /** 攀爬翻越动画蒙太奇 (从墙沿翻上) */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Visuals | Climbing", meta = (DisplayName = "攀爬翻越蒙太奇"))
+    TSoftObjectPtr<UAnimMontage> ClimbUpMontage;
+
+    /** 攀爬翻越位移偏移 (相对于角色当前朝向) */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Visuals | Climbing", meta = (DisplayName = "攀爬翻越位移偏移"))
+    FVector ClimbUpOffset = FVector(80.0f, 0.0f, 86.0f);
 
 };

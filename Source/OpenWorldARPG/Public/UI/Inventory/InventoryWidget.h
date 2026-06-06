@@ -5,7 +5,8 @@
 #include "CoreMinimal.h"
 #include "UI/BaseMenuWidget.h"
 #include "GameplayTagContainer.h"
-#include "Types/SharedTypes.h"
+#include "Types/ItemTypes.h"
+#include "Types/ItemInstance.h"
 #include "InventoryWidget.generated.h"
 
 class UItemSlotPanelWidget;

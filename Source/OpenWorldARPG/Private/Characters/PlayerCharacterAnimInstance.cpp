@@ -5,6 +5,7 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Characters/OpenWorldARPGCharacter.h"
+#include "Components/MovementStateMachineComponent.h"
 #include "AbilitySystemInterface.h"
 #include "AbilitySystemComponent.h"
 
@@ -44,6 +45,24 @@ void UPlayerCharacterAnimInstance::NativeThreadSafeUpdateAnimation(float DeltaSe
 		}
 	}
 
+	// 3.5 FSM 状态检测 (墙角过渡等)
+	// 注意：FindComponentByClass 不是线程安全的，不能在工作线程调用
+	// 改为在 NativeUpdateAnimation（主线程）中查询，此处仅从 CMC 的 CustomMovementMode 推断
+	ThreadSafe_bIsCornerTransition = false;
+	ThreadSafe_CurrentMovementState = EMovementState::None;
+	if (ThreadSafe_bIsClimbing)
+	{
+		ThreadSafe_CurrentMovementState = EMovementState::Climbing;
+	}
+	else if (ThreadSafe_bIsFalling)
+	{
+		ThreadSafe_CurrentMovementState = EMovementState::Falling;
+	}
+	else if (ThreadSafe_bIsMoving || ThreadSafe_GroundSpeed > 0.0f)
+	{
+		ThreadSafe_CurrentMovementState = EMovementState::Grounded;
+	}
+
 	// 4. 移动方向角计算（纯数学运算，线程安全）
 	if (ThreadSafe_bIsMoving)
 	{
@@ -78,6 +97,18 @@ void UPlayerCharacterAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	bIsMoving = ThreadSafe_bIsMoving;
 	MovementDirection = ThreadSafe_MovementDirection;
 	bIsClimbing = ThreadSafe_bIsClimbing;
+	CurrentMovementState = ThreadSafe_CurrentMovementState;
+
+	// 墙角过渡状态需要在主线程查询 FSM（FindComponentByClass 不是线程安全的）
+	bIsCornerTransition = false;
+	if (const ACharacter* Character = Cast<ACharacter>(TryGetPawnOwner()))
+	{
+		if (const UMovementStateMachineComponent* FSM = Character->FindComponentByClass<UMovementStateMachineComponent>())
+		{
+			bIsCornerTransition = FSM->IsInCornerTransition();
+			CurrentMovementState = FSM->GetCurrentState();
+		}
+	}
 
 	// 瞄准状态需要访问 ASC（GameplayTag 查询必须在主线程）
 	bIsAiming = false;

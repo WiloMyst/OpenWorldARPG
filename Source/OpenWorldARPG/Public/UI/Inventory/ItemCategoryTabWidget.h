@@ -1,11 +1,12 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 #include "GameplayTagContainer.h"
-#include "Types/SharedTypes.h" 
+#include "Types/ItemTypes.h"
+#include "Types/InventoryUITypes.h"
 #include "ItemCategoryTabWidget.generated.h"
 
 class UButton;

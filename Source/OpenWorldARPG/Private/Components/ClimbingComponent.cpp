@@ -1,16 +1,20 @@
 // Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Components/ClimbingComponent.h"
+#include "Components/MovementStateMachineComponent.h"
+#include "Components/OpenWorldARPGCharacterMovementComponent.h"
+#include "Characters/PlayerCharacter.h"
+#include "Data/CharacterDataAsset.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "Components/OpenWorldARPGCharacterMovementComponent.h"
-#include "Characters/PlayerCharacter.h"
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemBlueprintLibrary.h"
-#include "Kismet/KismetSystemLibrary.h"
 #include "Kismet/KismetMathLibrary.h"
+#include "DrawDebugHelpers.h"
+#include "Engine/StreamableManager.h"
+#include "Engine/AssetManager.h"
 
 UClimbingComponent::UClimbingComponent()
 {
@@ -27,35 +31,38 @@ void UClimbingComponent::BeginPlay()
         MovementComp = OwnerCharacter->GetCharacterMovement();
         CustomMovementComp = Player->GetCustomMovementComp();
         ASC = OwnerCharacter->GetAbilitySystemComponent();
+        FSMComp = OwnerCharacter->FindComponentByClass<UMovementStateMachineComponent>();
+
+        // 缓存角色数据资产
+        if (UCharacterDataAsset* DataAsset = Player->GetDataSourceAsset())
+        {
+            CharacterData = DataAsset;
+        }
 
         Player->OnPlayerMovementInput.AddDynamic(this, &UClimbingComponent::HandleOwnerMovementInput);
     }
 }
 
+// ==========================================
+// 核心接口
+// ==========================================
+
 void UClimbingComponent::TryClimb()
 {
     if (!OwnerCharacter || !MovementComp || !ASC) return;
 
-    EMovementMode CurrentMode = MovementComp->MovementMode;
-    if (CurrentMode != MOVE_Walking && CurrentMode != MOVE_NavWalking && CurrentMode != MOVE_Falling && CurrentMode != MOVE_Flying)
-    {
-        return;
-    }
+    if (FSMComp && !FSMComp->IsGrounded() && !FSMComp->IsFalling()) return;
 
-    if (ASC->HasAnyMatchingGameplayTags(BlockClimbingTags))
-    {
-        return;
-    }
+    if (ASC->HasAnyMatchingGameplayTags(BlockClimbingTags)) return;
 
     FHitResult ChestHit;
     FHitResult HeadHit;
     if (PerformClimbTraces(FVector::ZeroVector, ChestHit, HeadHit))
     {
-        if (ChestHit.GetActor() && ChestHit.GetActor()->ActorHasTag(UnclimbableActorTag))
-        {
-            return;
-        }
+        if (ChestHit.GetActor() && ChestHit.GetActor()->ActorHasTag(UnclimbableActorTag)) return;
+        if (!IsWallClimbable(ChestHit.Normal)) return;
 
+        // 从引擎输入管线读取方向
         FVector LastInput = MovementComp->GetLastInputVector();
         float DotResult = FVector::DotProduct(LastInput, ChestHit.Normal);
 
@@ -64,6 +71,40 @@ void UClimbingComponent::TryClimb()
             EnterClimb(ChestHit);
         }
     }
+}
+
+void UClimbingComponent::ExitClimb()
+{
+    if (!OwnerCharacter || !MovementComp) return;
+
+    // 停止攀爬检测定时器
+    GetWorld()->GetTimerManager().ClearTimer(ClimbDetectionTimerHandle);
+
+    if (CustomMovementComp)
+    {
+        CustomMovementComp->ClearClimbState();
+    }
+
+    if (FSMComp)
+    {
+        FSMComp->RequestStateChange(EMovementState::Falling);
+    }
+
+    // 必须显式设置引擎 MovementMode，FSM 的 OnEnterState 不会设置它
+    MovementComp->SetMovementMode(MOVE_Falling);
+    MovementComp->bOrientRotationToMovement = true;
+
+    FRotator CurrentRot = OwnerCharacter->GetActorRotation();
+    OwnerCharacter->SetActorRotation(FRotator(0.0f, CurrentRot.Yaw, 0.0f));
+
+    if (EventClimbStopTag.IsValid())
+    {
+        UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(OwnerCharacter, EventClimbStopTag, FGameplayEventData());
+    }
+
+    CurrentWallNormal = FVector::ZeroVector;
+    bCMCHitWall = false;
+    CMCHitWallNormal = FVector::ZeroVector;
 }
 
 bool UClimbingComponent::PerformClimbTraces(const FVector& TraceOffset, FHitResult& OutChestHit, FHitResult& OutHeadHit)
@@ -91,9 +132,16 @@ void UClimbingComponent::EnterClimb(const FHitResult& WallHit)
 {
     if (!OwnerCharacter || !MovementComp) return;
 
-    // 1. 切换到自定义攀爬模式
+    CurrentWallNormal = WallHit.Normal;
+    bCMCHitWall = false;
+    CMCHitWallNormal = FVector::ZeroVector;
+
+    // 1. 先清零速度，再切换到攀爬模式
+    //    StopMovementImmediately() 内部会调用 SetMovementMode(MOVE_Walking)，
+    //    如果放在 SetMovementMode(MOVE_Custom) 之后，会覆盖刚设置的攀爬模式，
+    //    导致 FSM 检测到模式不匹配而切回 Falling，形成攀爬/下落鬼畜循环
+    MovementComp->Velocity = FVector::ZeroVector;
     MovementComp->SetMovementMode(MOVE_Custom, static_cast<uint8>(ECustomMovementMode::Climbing));
-    MovementComp->StopMovementImmediately();
     MovementComp->bOrientRotationToMovement = false;
 
     // 2. 通知 CMC 当前墙壁法线
@@ -102,61 +150,241 @@ void UClimbingComponent::EnterClimb(const FHitResult& WallHit)
         CustomMovementComp->SetClimbWallNormal(WallHit.Normal);
     }
 
-    // 3. 发送 Gameplay Event
+    // 3. 通过 FSM 切换状态
+    if (FSMComp)
+    {
+        FSMComp->RequestStateChange(EMovementState::Climbing);
+    }
+
+    // 4. 发送 Gameplay Event
     if (EventClimbStartTag.IsValid())
     {
         UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(OwnerCharacter, EventClimbStartTag, FGameplayEventData());
     }
 
-    // 4. 贴墙位移与旋转
+    // 5. 计算吸附目标 (替代 MoveComponentTo)
+    //    吸附由 CMC 的 PhysClimbing 在物理安全框架下执行 VInterpTo
     FRotator TargetRot = UKismetMathLibrary::MakeRotFromX(-WallHit.Normal);
     FRotator FinalRot = FRotator(TargetRot.Pitch, TargetRot.Yaw, 0.0f);
-
     FVector TargetLoc = OwnerCharacter->GetActorLocation() + FVector(0.0f, 0.0f, WallSnapZOffset);
 
-    FLatentActionInfo LatentInfo;
-    LatentInfo.CallbackTarget = this;
-    LatentInfo.ExecutionFunction = FName("NoOp");
-    LatentInfo.Linkage = 0;
-    LatentInfo.UUID = FMath::Rand();
+    if (CustomMovementComp)
+    {
+        CustomMovementComp->SetClimbSnapTarget(TargetLoc, FinalRot, WallSnapTime);
+    }
 
-    UKismetSystemLibrary::MoveComponentTo(
-        OwnerCharacter->GetCapsuleComponent(),
-        TargetLoc,
-        FinalRot,
-        false,
-        false,
-        WallSnapTime,
-        false,
-        EMoveComponentAction::Move,
-        LatentInfo
+    // 6. 启动攀爬低频检测定时器
+    GetWorld()->GetTimerManager().SetTimer(
+        ClimbDetectionTimerHandle,
+        this,
+        &UClimbingComponent::OnClimbDetectionTick,
+        ClimbDetectionInterval,
+        true,
+        0.0f
     );
 }
 
-void UClimbingComponent::ExitClimb()
+// ==========================================
+// 下落转攀爬
+// ==========================================
+
+void UClimbingComponent::CheckFallingToClimb()
 {
-    if (!OwnerCharacter || !MovementComp) return;
+    if (!OwnerCharacter || !MovementComp || !ASC) return;
 
-    // 1. 清除 CMC 攀爬状态
-    if (CustomMovementComp)
+    if (ASC->HasAnyMatchingGameplayTags(BlockClimbingTags)) return;
+
+    // 从引擎输入管线读取方向
+    FVector LastInput = MovementComp->GetLastInputVector();
+    if (LastInput.IsNearlyZero()) return;
+
+    FHitResult ChestHit;
+    FHitResult HeadHit;
+    if (PerformClimbTraces(FVector::ZeroVector, ChestHit, HeadHit))
     {
-        CustomMovementComp->ClearClimbInput();
-    }
+        if (ChestHit.GetActor() && ChestHit.GetActor()->ActorHasTag(UnclimbableActorTag)) return;
+        if (!IsWallClimbable(ChestHit.Normal)) return;
 
-    // 2. 恢复掉落模式
-    MovementComp->SetMovementMode(MOVE_Falling);
-    MovementComp->bOrientRotationToMovement = true;
-
-    // 3. 修正角色朝向
-    FRotator CurrentRot = OwnerCharacter->GetActorRotation();
-    OwnerCharacter->SetActorRotation(FRotator(0.0f, CurrentRot.Yaw, 0.0f));
-
-    // 4. 发送停止事件
-    if (EventClimbStopTag.IsValid())
-    {
-        UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(OwnerCharacter, EventClimbStopTag, FGameplayEventData());
+        float DotResult = FVector::DotProduct(LastInput, ChestHit.Normal);
+        if (DotResult < MinInputDotProduct)
+        {
+            GetWorld()->GetTimerManager().ClearTimer(FallingToClimbTimerHandle);
+            EnterClimb(ChestHit);
+        }
     }
 }
+
+bool UClimbingComponent::IsWallClimbable(const FVector& WallNormal) const
+{
+    return FMath::Abs(WallNormal.Z) < 0.2f;
+}
+
+// ==========================================
+// 攀爬转地面
+// ==========================================
+
+void UClimbingComponent::CheckClimbToGround()
+{
+    if (!OwnerCharacter) return;
+
+    FVector Start = OwnerCharacter->GetActorLocation();
+    float CapsuleHalfHeight = OwnerCharacter->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+    FVector End = Start - FVector(0.0f, 0.0f, GroundDetectDistance + CapsuleHalfHeight);
+
+    FCollisionQueryParams Params;
+    Params.AddIgnoredActor(OwnerCharacter);
+
+    FHitResult HitResult;
+    bool bHit = GetWorld()->LineTraceSingleByChannel(HitResult, Start, End, TraceChannel, Params);
+
+    if (bHit && HitResult.bBlockingHit)
+    {
+        // 计算角色双脚离地高度
+        float FeetHeightAboveGround = HitResult.Distance - CapsuleHalfHeight;
+
+        // 只有双脚离地超过最小高度时才触发攀爬转地面
+        // 防止在墙根处刚进入攀爬就被判定为"已到地面"而退出，导致鬼畜
+        if (FeetHeightAboveGround < MinClimbHeightAboveGround)
+        {
+            return;
+        }
+        GetWorld()->GetTimerManager().ClearTimer(ClimbDetectionTimerHandle);
+
+        if (CustomMovementComp)
+        {
+            CustomMovementComp->ClearClimbState();
+        }
+
+        if (FSMComp)
+        {
+            FSMComp->RequestStateChange(EMovementState::Grounded);
+        }
+
+        MovementComp->SetMovementMode(MOVE_Walking);
+        MovementComp->bOrientRotationToMovement = true;
+
+        FRotator CurrentRot = OwnerCharacter->GetActorRotation();
+        OwnerCharacter->SetActorRotation(FRotator(0.0f, CurrentRot.Yaw, 0.0f));
+
+        if (EventClimbStopTag.IsValid())
+        {
+            UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(OwnerCharacter, EventClimbStopTag, FGameplayEventData());
+        }
+
+        CurrentWallNormal = FVector::ZeroVector;
+        bCMCHitWall = false;
+        CMCHitWallNormal = FVector::ZeroVector;
+    }
+}
+
+// ==========================================
+// 墙角检测与过渡
+// ==========================================
+
+void UClimbingComponent::CheckCornerTransition()
+{
+    if (!OwnerCharacter || !CustomMovementComp || CurrentWallNormal.IsNearlyZero()) return;
+
+    // 从引擎输入管线读取横向输入方向
+    FVector LastInput = MovementComp->GetLastInputVector();
+    if (LastInput.IsNearlyZero()) return;
+
+    // 计算横向输入分量 (角色右方向上的投影)
+    FVector ActorRight = OwnerCharacter->GetActorRightVector();
+    float LateralInput = FVector::DotProduct(LastInput, ActorRight);
+    if (FMath::IsNearlyZero(LateralInput)) return;
+
+    if (FSMComp && FSMComp->IsInCornerTransition()) return;
+    if (CustomMovementComp->IsInCornerTransition()) return;
+
+    FVector ActorLocation = OwnerCharacter->GetActorLocation();
+    FVector SideDir = ActorRight * FMath::Sign(LateralInput);
+    FVector SweepStart = ActorLocation;
+    FVector SweepEnd = ActorLocation + SideDir * CornerSweepDistance;
+
+    FCollisionShape SphereShape = FCollisionShape::MakeSphere(CornerSweepRadius);
+    FCollisionQueryParams Params;
+    Params.AddIgnoredActor(OwnerCharacter);
+
+    FHitResult SweepHit;
+    bool bSweepHit = GetWorld()->SweepSingleByChannel(
+        SweepHit, SweepStart, SweepEnd, FQuat::Identity, TraceChannel, SphereShape, Params
+    );
+
+    if (bSweepHit && SweepHit.bBlockingHit)
+    {
+        if (SweepHit.GetActor() && SweepHit.GetActor()->ActorHasTag(UnclimbableActorTag)) return;
+        if (!IsWallClimbable(SweepHit.Normal)) return;
+
+        float NormalDot = FVector::DotProduct(CurrentWallNormal, SweepHit.Normal);
+
+        if (NormalDot < 0.0f)
+        {
+            HandleConvexCorner(SweepHit);
+        }
+        else if (NormalDot < 0.99f)
+        {
+            HandleConcaveCorner(SweepHit);
+        }
+    }
+}
+
+void UClimbingComponent::HandleConvexCorner(const FHitResult& NewWallHit)
+{
+    if (!OwnerCharacter || !CustomMovementComp || !FSMComp) return;
+
+    FVector CornerPoint = NewWallHit.Location;
+    FVector TargetLocation = CalculateConvexTargetLocation(CornerPoint, CurrentWallNormal, NewWallHit.Normal);
+
+    // SetCornerTransitionTarget 内部会切换 CustomMovementMode 为 ClimbingCornerTransition
+    CustomMovementComp->SetCornerTransitionTarget(TargetLocation, NewWallHit.Normal, ECornerType::Convex);
+    FSMComp->RequestStateChange(EMovementState::CornerTransition);
+}
+
+void UClimbingComponent::HandleConcaveCorner(const FHitResult& NewWallHit)
+{
+    if (!OwnerCharacter || !CustomMovementComp || !FSMComp) return;
+
+    FVector TargetLocation = CalculateConcaveTargetLocation(NewWallHit.Location, NewWallHit.Normal);
+
+    CustomMovementComp->SetCornerTransitionTarget(TargetLocation, NewWallHit.Normal, ECornerType::Concave);
+    FSMComp->RequestStateChange(EMovementState::CornerTransition);
+}
+
+FVector UClimbingComponent::CalculateConvexTargetLocation(const FVector& CornerPoint, const FVector& CurrentNormal, const FVector& NewNormal) const
+{
+    FVector Bisector = (CurrentNormal + NewNormal).GetSafeNormal();
+    FVector TargetLoc = CornerPoint + Bisector * ConvexArcRadius;
+
+    if (OwnerCharacter)
+    {
+        TargetLoc.Z = OwnerCharacter->GetActorLocation().Z;
+    }
+
+    return TargetLoc;
+}
+
+FVector UClimbingComponent::CalculateConcaveTargetLocation(const FVector& NewWallHitLocation, const FVector& NewWallNormal) const
+{
+    FVector TargetLoc = NewWallHitLocation + NewWallNormal * ConcaveSnapDistance;
+
+    if (OwnerCharacter)
+    {
+        TargetLoc.Z = OwnerCharacter->GetActorLocation().Z;
+    }
+
+    return TargetLoc;
+}
+
+void UClimbingComponent::OnCornerTransitionFinished()
+{
+    if (!FSMComp) return;
+    FSMComp->RequestStateChange(EMovementState::Climbing);
+}
+
+// ==========================================
+// 翻越 (CMC PhysClimbUp 驱动位移，蒙太奇驱动动画)
+// ==========================================
 
 void UClimbingComponent::CheckAndClimbUp()
 {
@@ -186,129 +414,222 @@ void UClimbingComponent::CheckAndClimbUp()
 
 void UClimbingComponent::DoClimbUp()
 {
-    if (!OwnerCharacter || !MovementComp) return;
+    if (!OwnerCharacter || !MovementComp || !CustomMovementComp) return;
 
-    // 1. 开启状态锁，防止翻越期间玩家乱按方向键
     bIsClimbingUp = true;
 
-    // 2. 立即退出攀爬模式，切换到飞行模式（无重力）
-    //    这样蒙太奇结束后动画状态机不会回到攀爬姿态
-    if (CustomMovementComp)
+    // 停止攀爬检测定时器
+    GetWorld()->GetTimerManager().ClearTimer(ClimbDetectionTimerHandle);
+
+    // 计算翻越目标位置 (基于角色朝向 + DataAsset 偏移)
+    FVector ClimbUpOffsetToUse = CharacterData ? CharacterData->ClimbUpOffset : FVector(80.0f, 0.0f, 86.0f);
+    FVector TargetLoc = OwnerCharacter->GetActorLocation()
+        + OwnerCharacter->GetActorForwardVector() * ClimbUpOffsetToUse.X
+        + OwnerCharacter->GetActorRightVector() * ClimbUpOffsetToUse.Y
+        + FVector(0.0f, 0.0f, ClimbUpOffsetToUse.Z);
+    FRotator TargetRot = FRotator(0.0f, OwnerCharacter->GetActorRotation().Yaw, 0.0f);
+
+    // 设置翻越目标并切换到 ClimbUp 模式 (CMC 接管位移)
+    CustomMovementComp->SetClimbUpTarget(TargetLoc, TargetRot);
+    MovementComp->SetMovementMode(MOVE_Custom, static_cast<uint8>(ECustomMovementMode::ClimbUp));
+
+    if (FSMComp)
     {
-        CustomMovementComp->ClearClimbInput();
+        FSMComp->ForceStateChange(EMovementState::None);
     }
 
-    SavedGravityScale = MovementComp->GravityScale;
-    MovementComp->SetMovementMode(MOVE_Flying);
-    MovementComp->GravityScale = 0.0f;
-    MovementComp->bOrientRotationToMovement = false;
-
-    // 3. 发送攀爬停止事件（移除攀爬状态Tag，防止动画回到攀爬状态）
     if (EventClimbStopTag.IsValid())
     {
         UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(OwnerCharacter, EventClimbStopTag, FGameplayEventData());
     }
 
-    // 4. 播放翻越蒙太奇
-    float AnimDuration = 0.5f;
-    if (ClimbUpMontage)
+    // 从 CharacterDataAsset 加载攀爬翻越蒙太奇
+    if (CharacterData && !CharacterData->ClimbUpMontage.IsNull())
     {
-        AnimDuration = OwnerCharacter->PlayAnimMontage(ClimbUpMontage);
+        FStreamableManager& StreamableManager = UAssetManager::GetStreamableManager();
+        StreamableManager.RequestAsyncLoad(
+            CharacterData->ClimbUpMontage.ToSoftObjectPath(),
+            FStreamableDelegate::CreateLambda([this]()
+            {
+                if (bIsClimbingUp && CharacterData && !CharacterData->ClimbUpMontage.IsNull())
+                {
+                    UAnimMontage* LoadedMontage = CharacterData->ClimbUpMontage.Get();
+                    if (LoadedMontage && OwnerCharacter)
+                    {
+                        USkeletalMeshComponent* Mesh = OwnerCharacter->GetMesh();
+                        if (Mesh && Mesh->GetAnimInstance())
+                        {
+                            Mesh->GetAnimInstance()->OnMontageEnded.AddDynamic(this, &UClimbingComponent::OnClimbUpMontageEnded);
+                        }
+                        OwnerCharacter->PlayAnimMontage(LoadedMontage);
+                    }
+                }
+            })
+        );
+        return; // 异步加载中，蒙太奇播放在回调中完成
     }
 
-    // 5. 计算翻越的目标位置：基于角色当前位置，向前和向上偏移
-    FVector ForwardDir = OwnerCharacter->GetActorForwardVector();
-    FVector UpDir = OwnerCharacter->GetActorUpVector();
-
-    FVector TargetLoc = OwnerCharacter->GetActorLocation()
-        + (ForwardDir * ClimbUpOffset.X)
-        + (UpDir * ClimbUpOffset.Z);
-
-    // 6. 设置延时回调：用 MoveComponentTo 平滑搬运胶囊体
-    FLatentActionInfo LatentInfo;
-    LatentInfo.CallbackTarget = this;
-    LatentInfo.ExecutionFunction = FName("OnClimbUpFinished");
-    LatentInfo.Linkage = 0;
-    LatentInfo.UUID = FMath::Rand();
-
-    UKismetSystemLibrary::MoveComponentTo(
-        OwnerCharacter->GetCapsuleComponent(),
-        TargetLoc,
-        OwnerCharacter->GetActorRotation(),
-        false, false,
-        AnimDuration,
-        false,
-        EMoveComponentAction::Move,
-        LatentInfo
-    );
+    // 没有蒙太奇：直接完成翻越
+    FinishClimbUp();
 }
 
-void UClimbingComponent::OnClimbUpFinished()
+void UClimbingComponent::OnClimbUpMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 {
-    // 1. 解开状态锁
+    // 解绑委托，防止重复触发
+    if (OwnerCharacter)
+    {
+        USkeletalMeshComponent* Mesh = OwnerCharacter->GetMesh();
+        if (Mesh && Mesh->GetAnimInstance())
+        {
+            Mesh->GetAnimInstance()->OnMontageEnded.RemoveDynamic(this, &UClimbingComponent::OnClimbUpMontageEnded);
+        }
+    }
+
+    // 无论正常结束还是被中断，都必须恢复状态
+    FinishClimbUp();
+}
+
+void UClimbingComponent::FinishClimbUp()
+{
+    if (!bIsClimbingUp) return;
+
     bIsClimbingUp = false;
 
-    // 2. 恢复重力并切换到掉落模式，角色自然落地
-    MovementComp->GravityScale = SavedGravityScale;
-    MovementComp->SetMovementMode(MOVE_Falling);
-    MovementComp->bOrientRotationToMovement = true;
+    // 恢复到下落模式
+    if (MovementComp)
+    {
+        MovementComp->SetMovementMode(MOVE_Falling);
+        MovementComp->bOrientRotationToMovement = true;
+    }
 
-    // 3. 修正角色朝向
-    FRotator CurrentRot = OwnerCharacter->GetActorRotation();
-    OwnerCharacter->SetActorRotation(FRotator(0.0f, CurrentRot.Yaw, 0.0f));
+    if (FSMComp)
+    {
+        FSMComp->ForceStateChange(EMovementState::Falling);
+    }
+
+    if (OwnerCharacter)
+    {
+        FRotator CurrentRot = OwnerCharacter->GetActorRotation();
+        OwnerCharacter->SetActorRotation(FRotator(0.0f, CurrentRot.Yaw, 0.0f));
+    }
+
+    CurrentWallNormal = FVector::ZeroVector;
+    bCMCHitWall = false;
+    CMCHitWallNormal = FVector::ZeroVector;
 }
+
+// ==========================================
+// 降频检测回调
+// ==========================================
+
+void UClimbingComponent::OnClimbDetectionTick()
+{
+    if (!OwnerCharacter || !MovementComp) return;
+
+    EMovementState CurrentFSMState = FSMComp ? FSMComp->GetCurrentState() : EMovementState::None;
+    if (CurrentFSMState != EMovementState::Climbing) return;
+
+    // 1. 检测攀爬转地面
+    CheckClimbToGround();
+
+    if (FSMComp && FSMComp->GetCurrentState() != EMovementState::Climbing) return;
+
+    // 2. 检测墙角过渡
+    CheckCornerTransition();
+
+    if (FSMComp && FSMComp->IsInCornerTransition()) return;
+
+    // 3. 更新墙面法线
+    if (bCMCHitWall && !CMCHitWallNormal.IsNearlyZero())
+    {
+        CurrentWallNormal = CMCHitWallNormal;
+        if (CustomMovementComp)
+        {
+            CustomMovementComp->SetClimbWallNormal(CMCHitWallNormal);
+        }
+        bCMCHitWall = false;
+        CMCHitWallNormal = FVector::ZeroVector;
+    }
+    else
+    {
+        FHitResult ChestHit, HeadHit;
+        if (PerformClimbTraces(FVector::ZeroVector, ChestHit, HeadHit))
+        {
+            CurrentWallNormal = ChestHit.Normal;
+            if (CustomMovementComp)
+            {
+                CustomMovementComp->SetClimbWallNormal(ChestHit.Normal);
+            }
+        }
+    }
+
+    // 4. 检测翻越
+    CheckAndClimbUp();
+}
+
+void UClimbingComponent::OnFallingToClimbTick()
+{
+    if (!OwnerCharacter || !MovementComp) return;
+
+    EMovementState CurrentFSMState = FSMComp ? FSMComp->GetCurrentState() : EMovementState::None;
+    if (CurrentFSMState != EMovementState::Falling)
+    {
+        GetWorld()->GetTimerManager().ClearTimer(FallingToClimbTimerHandle);
+        return;
+    }
+
+    CheckFallingToClimb();
+}
+
+// ==========================================
+// 输入处理 (仅用于检测逻辑，不转发给 CMC)
+// ==========================================
 
 void UClimbingComponent::HandleOwnerMovementInput(float InputX, float InputY)
 {
     if (!MovementComp) return;
 
-    // 如果正在播放翻越动画并位移，直接丢弃所有玩家输入
     if (bIsClimbingUp) return;
 
-    EMovementMode CurrentMode = MovementComp->MovementMode;
+    EMovementState CurrentFSMState = FSMComp ? FSMComp->GetCurrentState() : EMovementState::None;
 
-    // 地面或掉落时尝试检测墙壁触发攀爬
-    if (CurrentMode == MOVE_Walking || CurrentMode == MOVE_NavWalking || CurrentMode == MOVE_Falling)
+    // ==========================================
+    // 下落状态 → 启动/保持低频定时器
+    // ==========================================
+    if (CurrentFSMState == EMovementState::Falling)
+    {
+        if (!FMath::IsNearlyZero(InputX) || !FMath::IsNearlyZero(InputY))
+        {
+            if (!GetWorld()->GetTimerManager().IsTimerActive(FallingToClimbTimerHandle))
+            {
+                GetWorld()->GetTimerManager().SetTimer(
+                    FallingToClimbTimerHandle,
+                    this,
+                    &UClimbingComponent::OnFallingToClimbTick,
+                    FallingToClimbDetectionInterval,
+                    true,
+                    0.0f
+                );
+            }
+        }
+        else
+        {
+            GetWorld()->GetTimerManager().ClearTimer(FallingToClimbTimerHandle);
+        }
+        return;
+    }
+
+    // ==========================================
+    // 地面状态 → 尝试攀爬
+    // ==========================================
+    if (CurrentFSMState == EMovementState::Grounded)
     {
         TryClimb();
+        return;
     }
 
-    // 攀爬模式：将输入和墙壁检测委托给 CMC
-    if (MovementComp->MovementMode == MOVE_Custom &&
-        MovementComp->CustomMovementMode == static_cast<uint8>(ECustomMovementMode::Climbing))
-    {
-        if (CustomMovementComp)
-        {
-            // 1. 更新墙壁法线 (在预测位置做射线检测)
-            FVector ActorLoc = OwnerCharacter->GetActorLocation();
-            FVector PredictedLoc = ActorLoc
-                + (OwnerCharacter->GetActorRightVector() * InputX * ClimbPredictOffset)
-                + (OwnerCharacter->GetActorUpVector() * InputY * ClimbPredictOffset);
-
-            // 检测预测位置是否有空间
-            FCollisionShape SpaceShape = FCollisionShape::MakeCapsule(ClimbSpaceCheckRadius, ClimbSpaceCheckHalfHeight);
-            FCollisionQueryParams Params;
-            Params.AddIgnoredActor(OwnerCharacter);
-
-            FHitResult SpaceHit;
-            bool bHitSpace = GetWorld()->SweepSingleByChannel(SpaceHit, PredictedLoc, PredictedLoc, FQuat::Identity, TraceChannel, SpaceShape, Params);
-
-            if (!bHitSpace)
-            {
-                // 有空间，检测预测位置的墙壁法线
-                FVector RelativeOffset = PredictedLoc - ActorLoc;
-                FHitResult ChestHit, HeadHit;
-                if (PerformClimbTraces(RelativeOffset, ChestHit, HeadHit))
-                {
-                    CustomMovementComp->SetClimbWallNormal(ChestHit.Normal);
-                }
-            }
-
-            // 2. 将输入传递给 CMC (即使没检测到新法线也传输入，CMC 会用上一次的法线)
-            CustomMovementComp->SetClimbInput(InputX, InputY);
-        }
-
-        // 3. 检测翻越
-        CheckAndClimbUp();
-    }
+    // ==========================================
+    // 攀爬状态 → 不需要拦截输入
+    // 输入走引擎原生管线 (AddMovementInput → CMC ConsumeInputVector)
+    // ==========================================
 }

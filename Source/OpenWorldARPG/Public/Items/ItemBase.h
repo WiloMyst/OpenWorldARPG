@@ -1,10 +1,10 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Types/SharedTypes.h" // 包含 FItemData
+#include "Types/ItemData.h"
 #include "ItemBase.generated.h"
 
 UCLASS()

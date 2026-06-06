@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Animation/AnimInstance.h"
+#include "Types/MovementStateTypes.h"
 #include "PlayerCharacterAnimInstance.generated.h"
 
 /**
@@ -60,6 +61,14 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation|Movement", meta = (BlueprintProtected = "true"))
 	bool bIsClimbing = false;
 
+	/** 角色是否在墙角过渡中 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation|Movement", meta = (BlueprintProtected = "true"))
+	bool bIsCornerTransition = false;
+
+	/** 当前移动状态 (来自 FSM) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation|Movement", meta = (BlueprintProtected = "true"))
+	EMovementState CurrentMovementState = EMovementState::None;
+
 	/** 角色是否在瞄准 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation|Combat", meta = (BlueprintProtected = "true"))
 	bool bIsAiming = false;
@@ -74,4 +83,6 @@ private:
 	bool ThreadSafe_bIsMoving = false;
 	float ThreadSafe_MovementDirection = 0.0f;
 	bool ThreadSafe_bIsClimbing = false;
+	bool ThreadSafe_bIsCornerTransition = false;
+	EMovementState ThreadSafe_CurrentMovementState = EMovementState::None;
 };
