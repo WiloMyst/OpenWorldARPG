@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Characters/OpenWorldARPGCharacter.h"
 #include "Components/CapsuleComponent.h"
@@ -33,5 +33,21 @@ AOpenWorldARPGCharacter::AOpenWorldARPGCharacter(const FObjectInitializer& Objec
 FGenericTeamId AOpenWorldARPGCharacter::GetGenericTeamId() const
 {
 	return TeamId;
+}
+
+void AOpenWorldARPGCharacter::HandleDeath_Implementation()
+{
+	// 基类默认实现：禁用碰撞和移动
+	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		MoveComp->DisableMovement();
+	}
+}
+
+void AOpenWorldARPGCharacter::CorrectPawnOrient()
+{
+	FRotator CurrentRot = GetActorRotation();
+	SetActorRotation(FRotator(0.0f, CurrentRot.Yaw, 0.0f));
 }
 

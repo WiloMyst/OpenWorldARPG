@@ -5,40 +5,152 @@
 #include "CoreMinimal.h"
 #include "Characters/AI/AiCharacter.h"
 #include "AbilitySystemInterface.h"
+#include "GameplayTagContainer.h"
+#include "GameplayEffectTypes.h"
 #include "EnemyCharacter.generated.h"
 
 class UAbilitySystemComponent;
 class UAS_Enemy;
+class UWidgetComponent;
+class UAnimMontage;
+class UGameplayEffect;
 
-/**
- * 
- */
+// 委托声明：攻击结束时广播 (对应图: OnAttackFinished)
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnEnemyAttackFinished);
+
 UCLASS()
 class OPENWORLDARPG_API AEnemyCharacter : public AAiCharacter, public IAbilitySystemInterface
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
 public:
-	AEnemyCharacter();
+    AEnemyCharacter();
 
-	// ======== IAbilitySystemInterface 核心实现 ========
-	/**
-	 * @brief 获取EnemyCharacter上的ASC指针。实现IAbilitySystemInterface接口。
-	 */
-	UFUNCTION(BlueprintCallable, Category = "Enemy|GAS")
-	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override { return AbilitySystemComponent; }
+    virtual void PostInitializeComponents() override;
+    virtual void BeginPlay() override;
+    virtual void Tick(float DeltaTime) override;
 
-	// ======== 生命周期 ========
-	virtual void PostInitializeComponents() override;
+    UFUNCTION(BlueprintCallable, Category = "Enemy|GAS")
+    virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override { return AbilitySystemComponent; }
+
+    // ==========================================
+    // 蓝图核心接口转化
+    // ==========================================
+
+    UFUNCTION(BlueprintCallable, Category = "Enemy|Animation")
+    void BindAnimLayers();
+
+    UFUNCTION(BlueprintCallable, Category = "Enemy|UI")
+    void UpdateHealthBar();
+
+    UFUNCTION(BlueprintCallable, Category = "Enemy|UI")
+    void OrientToScreen(USceneComponent* SceneComp);
+
+    UFUNCTION(BlueprintCallable, Category = "Enemy|Combat")
+    void MeleeAttack();
+
+    UFUNCTION(BlueprintCallable, Category = "Enemy|Combat")
+    void CancelMeleeAttack();
+
+    // 由动画蒙太奇中的 Notify 调用的伤害应用函数
+    UFUNCTION(BlueprintCallable, Category = "Enemy|Combat")
+    void ApplyDamage();
+
+    UFUNCTION(BlueprintCallable, Category = "Enemy|State")
+    void OnDead();
+
+    // ==========================================
+    // ICombatInterface
+    // ==========================================
+
+    virtual void HandleDeath_Implementation() override;
+
+    // ==========================================
+    // 事件分发器
+    // ==========================================
+
+    UPROPERTY(BlueprintAssignable, Category = "Enemy|Events")
+    FOnEnemyAttackFinished OnAttackFinished;
 
 protected:
-	// ======== GAS核心组件 ========
-	/** 角色的能力系统组件。管理所有技能、效果和属性。*/
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|GAS")
-	TObjectPtr<UAbilitySystemComponent> AbilitySystemComponent;
+    // GAS 属性变化回调（C++ 内部调用，不暴露给蓝图，因为 FOnAttributeChangeData 无法被 UHT 解析）
+    virtual void OnHealthAttributeChanged(const FOnAttributeChangeData& Data);
 
-	/** 角色的属性集。存储生命、攻击等核心数值。*/
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|GAS")
-	TObjectPtr<UAS_Enemy> AttributeSet;
-	
+    UFUNCTION()
+    void OnMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+
+    void DestroyEnemy();
+
+protected:
+    // ==========================================
+    // 组件
+    // ==========================================
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|GAS")
+    TObjectPtr<UAbilitySystemComponent> AbilitySystemComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|GAS")
+    TObjectPtr<UAS_Enemy> AttributeSet;
+
+    // 对应蓝图中的 Health Bar 控件
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|UI")
+    TObjectPtr<UWidgetComponent> HealthBarComponent;
+
+    // ==========================================
+    // 配置项：武器与表现
+    // ==========================================
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Config|Weapon")
+    TSubclassOf<AActor> WeaponClass;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Config|Weapon")
+    FName WeaponSocketName = FName("RightHandWeaponSocket");
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Config|Animation")
+    TSubclassOf<UAnimInstance> AnimLayerClass;
+
+    // ==========================================
+    // 配置项：战斗参数
+    // ==========================================
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Config|Combat")
+    TObjectPtr<UAnimMontage> ComboAttackMontage;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Config|Combat")
+    TSubclassOf<UGameplayEffect> DamageEffectClass;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Config|Combat")
+    float DamageTraceRadius = 120.0f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Config|Combat")
+    float DamageTraceForwardStartOffset = 50.0f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Config|Combat")
+    float DamageTraceForwardEndOffset = 100.0f;
+
+    // ==========================================
+    // 配置项：死亡参数
+    // ==========================================
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Config|State")
+    TSubclassOf<class UGameplayAbility> DeathAbilityClass;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Config|State")
+    FGameplayTag DeathAbilityTag;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Config|State")
+    FGameplayTagContainer CancelTagsOnDeath;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Config|State")
+    float DestroyDelayTime = 5.0f;
+
+public:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Enemy|AI")
+    TObjectPtr<AActor> PatrolArea;
+
+private:
+    UPROPERTY()
+    TObjectPtr<AActor> EnemyWeapon;
+
+    FTimerHandle DeathDestroyTimerHandle;
 };

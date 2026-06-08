@@ -21,8 +21,8 @@ void UCharacterWeaponComponent::BeginPlay()
 {
     Super::BeginPlay();
 
-    // 缓存持有该组件的角色，提升后续调用的性能
     CachedCharacter = Cast<APlayerCharacter>(GetOwner());
+    UE_LOG(LogTemp, Warning, TEXT("[WeaponComp] BeginPlay: Owner=%s, CachedCharacter=%s"), *GetNameSafe(GetOwner()), CachedCharacter ? *CachedCharacter->GetName() : TEXT("NULL"));
 }
 
 // =====================================================================
@@ -31,15 +31,36 @@ void UCharacterWeaponComponent::BeginPlay()
 
 void UCharacterWeaponComponent::InitializeCharacterWeapon()
 {
-    if (!CachedCharacter) return;
+    // CachedCharacter 可能在 BeginPlay 之前调用时为空，主动获取一次
+    if (!CachedCharacter)
+    {
+        CachedCharacter = Cast<APlayerCharacter>(GetOwner());
+    }
+
+    if (!CachedCharacter)
+    {
+        UE_LOG(LogTemp, Error, TEXT("[WeaponComp] InitializeCharacterWeapon: CachedCharacter is NULL even after GetOwner(), abort!"));
+        return;
+    }
 
     // 1. 从角色直接获取武器蓝图
     TSubclassOf<AWeaponBase> WeaponClass = CachedCharacter->GetWeaponBlueprint();
-    if (!WeaponClass) return;
+    if (!WeaponClass)
+    {
+        UE_LOG(LogTemp, Error, TEXT("[WeaponComp] InitializeCharacterWeapon: WeaponClass is NULL (DataSourceAsset is %s)"),
+            CachedCharacter->GetDataSourceAsset() ? TEXT("Valid") : TEXT("NULL"));
+        return;
+    }
+    UE_LOG(LogTemp, Warning, TEXT("[WeaponComp] InitializeCharacterWeapon: WeaponClass=%s"), *WeaponClass->GetName());
 
     // 2. 获取武器背负挂载点 (悬浮弹簧臂插槽)
     USceneComponent* RestSocket = CachedCharacter->GetWeaponRestSocket();
-    if (!RestSocket) return;
+    if (!RestSocket)
+    {
+        UE_LOG(LogTemp, Error, TEXT("[WeaponComp] InitializeCharacterWeapon: WeaponRestSocket is NULL!"));
+        return;
+    }
+    UE_LOG(LogTemp, Warning, TEXT("[WeaponComp] InitializeCharacterWeapon: RestSocket=%s"), *RestSocket->GetName());
 
     // 3. 配置生成参数并生成武器实体
     FActorSpawnParameters SpawnParams;
@@ -56,18 +77,35 @@ void UCharacterWeaponComponent::InitializeCharacterWeapon()
         // 挂载到弹簧臂末端，不需要提供 SocketName
         CharacterWeapon->AttachToComponent(RestSocket, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
         bIsWeaponStowed = true;
+        UE_LOG(LogTemp, Warning, TEXT("[WeaponComp] InitializeCharacterWeapon: Weapon spawned and attached to back. Weapon=%s, bHidden=%s"),
+            *CharacterWeapon->GetName(),
+            CharacterWeapon->IsHidden() ? TEXT("true") : TEXT("false"));
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("[WeaponComp] InitializeCharacterWeapon: SpawnActor FAILED! WeaponClass=%s"), *WeaponClass->GetName());
     }
 }
 
 void UCharacterWeaponComponent::WeaponToHand()
 {
-    if (!CharacterWeapon || !CachedCharacter || !CachedCharacter->GetMesh()) return;
+    if (!CharacterWeapon || !CachedCharacter || !CachedCharacter->GetMesh())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[WeaponComp] WeaponToHand: SKIP (CharacterWeapon=%s, CachedCharacter=%s, Mesh=%s)"),
+            CharacterWeapon ? *CharacterWeapon->GetName() : TEXT("NULL"),
+            CachedCharacter ? *CachedCharacter->GetName() : TEXT("NULL"),
+            (CachedCharacter && CachedCharacter->GetMesh()) ? TEXT("Valid") : TEXT("NULL"));
+        return;
+    }
 
     // 拔出武器：挂载到角色的骨骼网格体对应的手部插槽 (由蓝图配置的 HandSocketName 决定)
     CharacterWeapon->AttachToComponent(CachedCharacter->GetMesh(), FAttachmentTransformRules::KeepRelativeTransform, HandSocketName);
 
     // 更新状态机
     bIsWeaponStowed = false;
+    UE_LOG(LogTemp, Warning, TEXT("[WeaponComp] WeaponToHand: Attached to socket=%s, bHidden=%s"),
+        *HandSocketName.ToString(),
+        CharacterWeapon->IsHidden() ? TEXT("true") : TEXT("false"));
 }
 
 void UCharacterWeaponComponent::WeaponToBack()
@@ -93,6 +131,11 @@ void UCharacterWeaponComponent::SetWeaponHidden(bool bHidden)
     if (CharacterWeapon)
     {
         CharacterWeapon->SetActorHiddenInGame(bHidden);
+        UE_LOG(LogTemp, Warning, TEXT("[WeaponComp] SetWeaponHidden: bHidden=%s, Weapon=%s"), bHidden ? TEXT("true") : TEXT("false"), *CharacterWeapon->GetName());
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[WeaponComp] SetWeaponHidden: CharacterWeapon is NULL, cannot set hidden=%s"), bHidden ? TEXT("true") : TEXT("false"));
     }
 }
 

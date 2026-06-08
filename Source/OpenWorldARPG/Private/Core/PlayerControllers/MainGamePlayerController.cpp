@@ -2,22 +2,16 @@
 
 #include "Core/PlayerControllers/MainGamePlayerController.h"
 #include "Characters/PlayerCharacter.h"
-#include "Core/GameModes/MainGameGameMode.h"
+#include "Core/PlayerStates/MainGamePlayerState.h"
 #include "Managers/TeamManagerSubsystem.h"
-#include "Managers/UIManagerSubsystem.h" 
-#include "Components/BackpackComponent.h"
-#include "Components/ClimbingComponent.h"
-#include "AbilitySystemComponent.h"
+#include "Managers/UIManagerSubsystem.h"
 #include "AbilitySystemBlueprintLibrary.h"
-#include "NiagaraFunctionLibrary.h"
 #include "Blueprint/UserWidget.h"
-#include "GameFramework/CharacterMovementComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 
 AMainGamePlayerController::AMainGamePlayerController()
 {
-    AllowedMovementModes.Add(MOVE_Walking);
 }
 
 void AMainGamePlayerController::BeginPlay()
@@ -39,18 +33,14 @@ void AMainGamePlayerController::BeginPlay()
         if (MainHUDInstance) MainHUDInstance->AddToViewport();
     }
 
-    if (UTeamManagerSubsystem* TeamManager = GetGameInstance()->GetSubsystem<UTeamManagerSubsystem>())
-    {
-        TeamManager->OnRequestCharacterSwitch.RemoveDynamic(this, &AMainGamePlayerController::HandleSwitchCharacter);
-        TeamManager->OnRequestCharacterSwitch.AddDynamic(this, &AMainGamePlayerController::HandleSwitchCharacter);
-    }
+    // 注意：不再绑定 TeamManager->OnRequestCharacterSwitch
+    // 角色切换现在通过 Server RPC 流程：输入 → HandleSwitchCharacterInput → Server_SwitchCharacter
 }
 
 void AMainGamePlayerController::SetupInputComponent()
 {
     Super::SetupInputComponent();
 
-    // 绑定增强输入系统
     if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(InputComponent))
     {
         // 移动
@@ -103,17 +93,100 @@ void AMainGamePlayerController::SetupInputComponent()
 }
 
 // ==========================================
-// 动作绑定实现
+// 角色切换 (Server RPC)
+// ==========================================
+
+void AMainGamePlayerController::HandleSwitchCharacterInput(int32 Index)
+{
+    // 客户端：只发送 RPC 请求到服务器，不做任何本地切换逻辑
+    Server_SwitchCharacter(Index);
+}
+
+bool AMainGamePlayerController::Server_SwitchCharacter_Validate(int32 TargetIndex)
+{
+    // 基础验证：索引必须 >= 0（队伍上限由服务器端判定）
+    return TargetIndex >= 0 && TargetIndex < 4; // 最多4人队伍
+}
+
+void AMainGamePlayerController::Server_SwitchCharacter_Implementation(int32 TargetIndex)
+{
+    // ==========================================
+    // 服务器端：验证 + 执行角色切换
+    // ==========================================
+
+    AMainGamePlayerState* MyPlayerState = GetPlayerState<AMainGamePlayerState>();
+    if (!MyPlayerState) return;
+
+    // 1. 获取当前控制的角色
+    APlayerCharacter* OldCharacter = Cast<APlayerCharacter>(GetPawn());
+    if (!OldCharacter) return;
+
+    // 2. 旧角色状态拦截 (交由 Character 内部判定)
+    if (!OldCharacter->CanSwapOut())
+    {
+        UE_LOG(LogTemp, Log, TEXT("Server_SwitchCharacter: 旧角色状态不允许切换！"));
+        return;
+    }
+
+    // 3. 从 PlayerState 获取队伍角色实例
+    APlayerCharacter* NewCharacter = MyPlayerState->GetTeamCharacterByIndex(TargetIndex);
+    if (!NewCharacter || NewCharacter == OldCharacter) return;
+
+    // 4. 新角色状态拦截 (交由 Character 内部判定)
+    if (!NewCharacter->CanSwapIn())
+    {
+        UE_LOG(LogTemp, Log, TEXT("Server_SwitchCharacter: 新角色状态不允许切换！"));
+        return;
+    }
+
+    // ==========================================
+    // 执行角色切换流水线
+    // ==========================================
+
+    // 5. 旧角色下场 (保存 Transform、生成特效、进入待机)
+    FTransform SwapTransform;
+    OldCharacter->PerformSwapOut(SwapTransform);
+
+    // 6. 解除旧角色控制
+    FRotator OldControlRotation = GetControlRotation();
+    UnPossess();
+
+    // 7. 新角色上场 (设置 Transform、解除待机)
+    NewCharacter->PerformSwapIn(SwapTransform);
+
+    // 8. 接管新角色并恢复摄像机视角
+    Possess(NewCharacter);
+    SetControlRotation(OldControlRotation);
+
+    // 9. 更新 PlayerState 的激活索引（触发全网同步）
+    MyPlayerState->SetActiveCharacterIndex(TargetIndex);
+
+    // 10. 通知客户端完成切换（客户端执行本地表现）
+    Client_OnCharacterSwitched(TargetIndex);
+}
+
+void AMainGamePlayerController::Client_OnCharacterSwitched_Implementation(int32 NewActiveIndex)
+{
+    // 客户端收到服务器确认后，执行本地 UI 刷新等操作
+    // PlayerState 的 OnRep_ActiveCharacterIndex 会自动触发 TeamManager 广播
+    // 这里可以补充客户端专属的本地表现逻辑（如音效、镜头震动等）
+    UE_LOG(LogTemp, Log, TEXT("Client_OnCharacterSwitched: 切换完成，新激活索引 = %d"), NewActiveIndex);
+}
+
+// ==========================================
+// 输入回调实现 (邮局原则：只转发，不拦截)
+//
+// 注意 [联机安全]: SendGameplayEventToActor 在客户端本地执行。
+// 如果触发的技能是 LocalPredicted，GAS 会自动与服务器同步，无需额外 RPC。
+// 但如果是 ServerInitiated 技能，客户端调用 SendGameplayEventToActor 不会触发服务器执行，
+// 需要改为 Server RPC 调用 TryActivateAbility。
+// 请确保所有战斗技能的 NetExecutionPolicy 设置正确。
 // ==========================================
 
 void AMainGamePlayerController::Input_Move(const FInputActionValue& Value)
 {
     APlayerCharacter* PC = Cast<APlayerCharacter>(GetPawn());
     if (!PC) return;
-
-    UAbilitySystemComponent* ASC = PC->GetAbilitySystemComponent();
-    // 对应蓝图：如果拥有 Uncontrollable 标签，拦截输入
-    if (ASC && UncontrollableStateTag.IsValid() && ASC->HasMatchingGameplayTag(UncontrollableStateTag)) return;
 
     FVector2D MoveValue = Value.Get<FVector2D>();
     PC->HandleMovementInput(MoveValue.X, MoveValue.Y);
@@ -129,29 +202,23 @@ void AMainGamePlayerController::Input_MoveCompleted(const FInputActionValue& Val
 
 void AMainGamePlayerController::Input_JumpStart()
 {
+    UE_LOG(LogTemp, Warning, TEXT("[Jump] Input_JumpStart called from Controller"));
+
     APlayerCharacter* PC = Cast<APlayerCharacter>(GetPawn());
-    if (!PC) return;
-
-    if (JumpStartEventTag.IsValid())
-        UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(PC, JumpStartEventTag, FGameplayEventData());
-
-    // 对应蓝图：检测是否在攀爬，如果是则退出
-    if (UAbilitySystemComponent* ASC = PC->GetAbilitySystemComponent())
+    if (!PC)
     {
-        if (ClimbingStateTag.IsValid() && ASC->HasMatchingGameplayTag(ClimbingStateTag))
-        {
-            if (UClimbingComponent* ClimbComp = PC->FindComponentByClass<UClimbingComponent>())
-                ClimbComp->ExitClimb();
-        }
+        UE_LOG(LogTemp, Error, TEXT("[Jump] Controller has no PlayerCharacter pawn!"));
+        return;
     }
+
+    PC->HandleJumpStartInput();
 }
 
 void AMainGamePlayerController::Input_JumpStop()
 {
     if (APlayerCharacter* PC = Cast<APlayerCharacter>(GetPawn()))
     {
-        if (JumpStopEventTag.IsValid())
-            UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(PC, JumpStopEventTag, FGameplayEventData());
+        PC->HandleJumpStopInput();
     }
 }
 
@@ -178,7 +245,7 @@ void AMainGamePlayerController::Input_Walk()
     APlayerCharacter* PC = Cast<APlayerCharacter>(GetPawn());
     if (!PC) return;
 
-    bIsWalking = !bIsWalking; // FlipFlop 逻辑
+    bIsWalking = !bIsWalking;
     FGameplayTag TagToSend = bIsWalking ? WalkStartEventTag : WalkStopEventTag;
 
     if (TagToSend.IsValid())
@@ -190,27 +257,7 @@ void AMainGamePlayerController::Input_Glide()
     APlayerCharacter* PC = Cast<APlayerCharacter>(GetPawn());
     if (!PC) return;
 
-    UAbilitySystemComponent* ASC = PC->GetAbilitySystemComponent();
-    if (!ASC) return;
-
-    // 滑翔只能在空中下落时启动，地面按空格不应触发滑翔
-    if (UCharacterMovementComponent* MoveComp = PC->GetCharacterMovement())
-    {
-        bool bIsGliding = GlidingStateTag.IsValid() && ASC->HasMatchingGameplayTag(GlidingStateTag);
-
-        // 如果当前不在滑翔状态，且不在空中（下落），则不允许启动滑翔
-        if (!bIsGliding && !MoveComp->IsFalling())
-        {
-            return;
-        }
-    }
-
-    // 对应蓝图：检测是否在滑翔，进行状态翻转
-    bool bIsGliding = GlidingStateTag.IsValid() && ASC->HasMatchingGameplayTag(GlidingStateTag);
-    FGameplayTag TagToSend = bIsGliding ? GlideStopEventTag : GlideStartEventTag;
-
-    if (TagToSend.IsValid())
-        UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(PC, TagToSend, FGameplayEventData());
+    PC->ToggleGlide();
 }
 
 void AMainGamePlayerController::Input_Hook()
@@ -227,15 +274,11 @@ void AMainGamePlayerController::Input_PickUp()
     APlayerCharacter* PC = Cast<APlayerCharacter>(GetPawn());
     if (!PC) return;
 
-    if (UBackpackComponent* Backpack = PC->FindComponentByClass<UBackpackComponent>())
-    {
-        Backpack->PickUpItem(); // 注意：请确保你的组件方法名叫这个
-    }
+    PC->HandleInteractInput();
 }
 
 void AMainGamePlayerController::Input_ToggleInventory()
 {
-    // 对应蓝图：打开 UI
     if (UUIManagerSubsystem* UIManager = GetGameInstance()->GetSubsystem<UUIManagerSubsystem>())
     {
         if (InventoryUITag.IsValid())
@@ -248,7 +291,7 @@ void AMainGamePlayerController::Input_ClothSimulation()
     APlayerCharacter* PC = Cast<APlayerCharacter>(GetPawn());
     if (!PC) return;
 
-    bIsPhysicsAnimDisabled = !bIsPhysicsAnimDisabled; // FlipFlop 逻辑
+    bIsPhysicsAnimDisabled = !bIsPhysicsAnimDisabled;
     if (bIsPhysicsAnimDisabled)
     {
         PC->ClearPhysicsAnimLayers();
@@ -305,114 +348,8 @@ void AMainGamePlayerController::Input_PlungeAttack()
 
 void AMainGamePlayerController::Input_Aim()
 {
-    // 对应图2：判断是否正在瞄准，然后分支发送事件
     APlayerCharacter* PC = Cast<APlayerCharacter>(GetPawn());
     if (!PC) return;
 
-    UAbilitySystemComponent* ASC = PC->GetAbilitySystemComponent();
-    if (!ASC) return;
-
-    // 检测角色是否拥有瞄准标签
-    bool bIsAiming = AimingStateTag.IsValid() && ASC->HasMatchingGameplayTag(AimingStateTag);
-
-    // 如果正在瞄准就发送 Stop，否则发送 Start
-    FGameplayTag TagToSend = bIsAiming ? AimStopEventTag : AimStartEventTag;
-
-    if (TagToSend.IsValid())
-    {
-        UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(PC, TagToSend, FGameplayEventData());
-    }
-}
-
-void AMainGamePlayerController::HandleSwitchCharacterInput(int32 Index)
-{
-    // 将玩家键盘切人输入，转发给 TeamManager
-    if (UTeamManagerSubsystem* TeamManager = GetGameInstance()->GetSubsystem<UTeamManagerSubsystem>())
-    {
-        // 注意：请确保你的 TeamManager 里面切人接口的方法名与这里一致
-        TeamManager->SwitchToCharacterByIndex(Index);
-    }
-}
-
-void AMainGamePlayerController::HandleSwitchCharacter(int32 TargetIndex)
-{
-    UTeamManagerSubsystem* TeamManager = GetGameInstance()->GetSubsystem<UTeamManagerSubsystem>();
-    AMainGameGameMode* GameMode = GetWorld()->GetAuthGameMode<AMainGameGameMode>();
-    if (!TeamManager || !GameMode) return;
-
-    // 1. 获取当前控制的角色
-    APlayerCharacter* OldCharacter = Cast<APlayerCharacter>(GetPawn());
-    if (!OldCharacter) return;
-
-    // ------------------------------------------
-    // 拦截点 1：运动模式拦截（检查当前角色）
-    // ------------------------------------------
-    if (UCharacterMovementComponent* MoveComp = OldCharacter->GetCharacterMovement())
-    {
-        if (!AllowedMovementModes.Contains(MoveComp->MovementMode))
-        {
-            UE_LOG(LogTemp, Log, TEXT("HandleSwitchCharacter: 当前运动模式禁止切换角色！"));
-            return;
-        }
-    }
-
-    // 2. 从 TeamManager 获取纯数据 (Tags)，从 GameMode 获取 Actor 引用
-    TArray<FGameplayTag> TeamTags = TeamManager->GetCurrentTeamCharacterTags();
-    if (!TeamTags.IsValidIndex(TargetIndex)) return;
-
-    FGameplayTag TargetTag = TeamTags[TargetIndex];
-
-    // 从 GameMode (World层) 获取角色实例，而非从 GameInstanceSubsystem
-    APlayerCharacter* NewCharacter = GameMode->GetTeamCharacterByTag(TargetTag);
-
-    if (!NewCharacter || NewCharacter == OldCharacter) return;
-
-    // ------------------------------------------
-    // 拦截点 2：GAS 状态标签拦截（检查目标角色）
-    // ------------------------------------------
-    UAbilitySystemComponent* TargetASC = NewCharacter->GetAbilitySystemComponent();
-    if (TargetASC && TargetASC->HasAnyMatchingGameplayTags(PreventSwitchTags))
-    {
-        UE_LOG(LogTemp, Log, TEXT("HandleSwitchCharacter: 目标角色状态（Tag）禁止切换！"));
-        return;
-    }
-
-    // ==========================================
-    // 执行角色切换流水线
-    // ==========================================
-
-    // 4. 保存旧角色的现场数据
-    FTransform OldTransform = OldCharacter->GetActorTransform();
-    FRotator OldControlRotation = GetControlRotation();
-
-    // 5. 在旧位置生成切换特效
-    if (CharacterSwapFX)
-    {
-        FVector SpawnFXLocation = OldTransform.GetLocation() + SwapFXLocationOffset;
-
-        UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-            GetWorld(),
-            CharacterSwapFX,
-            SpawnFXLocation,
-            FRotator::ZeroRotator,
-            SwapFXScale
-        );
-    }
-
-    // 6. 让旧角色进入待机休眠状态
-    OldCharacter->SetStandbyMode(true);
-
-    // 7. 更新队伍管理器的当前激活索引
-    TeamManager->SetActiveCharacterIndex(TargetIndex);
-
-    // 8. 装配新角色并唤醒
-    NewCharacter->SetActorTransform(OldTransform);
-    NewCharacter->SetStandbyMode(false);
-
-    // 9. 显式解除旧角色控制
-    UnPossess();
-
-    // 10. 接管新角色并恢复摄像机视角
-    Possess(NewCharacter);
-    SetControlRotation(OldControlRotation);
+    PC->ToggleAim();
 }

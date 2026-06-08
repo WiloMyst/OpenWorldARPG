@@ -4,13 +4,13 @@
 
 #include "CoreMinimal.h"
 #include "Weapons/WeaponBase.h"
-#include "Sword.generated.h"
+#include "SwordBase.generated.h"
 
 /**
  * 
  */
 UCLASS()
-class OPENWORLDARPG_API ASword : public AWeaponBase
+class OPENWORLDARPG_API ASwordBase : public AWeaponBase
 {
 	GENERATED_BODY()
 	

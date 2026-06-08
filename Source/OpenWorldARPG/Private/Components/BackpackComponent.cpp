@@ -7,11 +7,15 @@
 #include "AbilitySystemComponent.h"
 #include "Engine/World.h"
 #include "Kismet/KismetSystemLibrary.h"
+#include "Net/UnrealNetwork.h"
 
 UBackpackComponent::UBackpackComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
     PrimaryComponentTick.TickInterval = 0.1f;
+
+    // 网络同步：组件需要复制才能让 Server RPC 工作
+    SetIsReplicatedByDefault(true);
 }
 
 void UBackpackComponent::BeginPlay()
@@ -28,9 +32,18 @@ void UBackpackComponent::BeginPlay()
     }
 }
 
+void UBackpackComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+}
+
 void UBackpackComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    // 仅在本地控制端执行拾取检测（避免服务器为所有客户端角色做检测）
+    APawn* OwnerPawn = Cast<APawn>(GetOwner());
+    if (OwnerPawn && !OwnerPawn->IsLocallyControlled()) return;
 
     AActor* OwnerActor = GetOwner();
     if (!OwnerActor) return;
@@ -73,28 +86,94 @@ int32 UBackpackComponent::GetOwnerCharacterID() const
     APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(GetOwner());
     if (PlayerChar)
     {
-        // 使用角色 Tag 的哈希值作为 CharacterID
-        // 实际项目中应使用 CharacterManagerSubsystem 分配的 ID
         return PlayerChar->GetCharacterTag().GetTagName().GetNumber();
     }
     return -1;
 }
 
+// ==========================================
+// 拾取物品 (Client → Server RPC)
+// ==========================================
+
 void UBackpackComponent::PickUpItem()
 {
-    if (IsCharacterInStandby() || !CurrentPickableItem.IsValid() || !InventorySubsystem) return;
+    // 客户端：只发送请求到服务器
+    if (IsCharacterInStandby() || !CurrentPickableItem.IsValid()) return;
 
     AItemBase* PickableItem = CurrentPickableItem.Get();
-    int32 ItemID = PickableItem->ItemID;
-    int32 Amount = PickableItem->ItemAmount;
+    Server_PickUpItem(PickableItem->ItemID, PickableItem->ItemAmount);
+}
+
+bool UBackpackComponent::Server_PickUpItem_Validate(int32 ItemID, int32 Amount)
+{
+    return ItemID > 0 && Amount > 0;
+}
+
+void UBackpackComponent::Server_PickUpItem_Implementation(int32 ItemID, int32 Amount)
+{
+    // 服务器端：执行拾取逻辑（权威操作）
+    if (IsCharacterInStandby() || !InventorySubsystem) return;
 
     InventorySubsystem->AddItem(ItemID, Amount);
-    PickableItem->Destroy();
-    CurrentPickableItem = nullptr;
+
+    // 服务器端销毁可拾取物品
+    // 注意：需要找到对应的世界物品 Actor 并销毁
+    // 由于客户端只传了 ItemID 和 Amount，服务器需要自行查找
+    // 简化方案：客户端检测到物品后，通过 RPC 传递引用
+    // 但 Actor 引用不能直接通过 RPC 传递，所以用 ItemID 方案
+
+    // TODO: 未来可改为通过 NetId 或更可靠的引用方式
+    // 当前简化实现：服务器在附近搜索匹配 ItemID 的 AItemBase 并销毁
+    AActor* OwnerActor = GetOwner();
+    if (!OwnerActor) return;
+
+    FVector OwnerLoc = OwnerActor->GetActorLocation();
+    float SearchRadius = 200.0f;
+
+    TArray<FOverlapResult> OverlapResults;
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(OwnerActor);
+
+    GetWorld()->OverlapMultiByObjectType(
+        OverlapResults,
+        OwnerLoc,
+        FQuat::Identity,
+        FCollisionObjectQueryParams(ECollisionChannel::ECC_PhysicsBody),
+        FCollisionShape::MakeSphere(SearchRadius),
+        QueryParams
+    );
+
+    for (const FOverlapResult& Result : OverlapResults)
+    {
+        if (AItemBase* Item = Cast<AItemBase>(Result.GetActor()))
+        {
+            if (Item->ItemID == ItemID)
+            {
+                Item->Destroy();
+                break;
+            }
+        }
+    }
 }
+
+// ==========================================
+// 丢弃物品 (Client → Server RPC)
+// ==========================================
 
 void UBackpackComponent::DropItemByGUID(FGuid ItemGUID, int32 DropAmount)
 {
+    // 客户端：只发送请求到服务器
+    Server_DropItemByGUID(ItemGUID, DropAmount);
+}
+
+bool UBackpackComponent::Server_DropItemByGUID_Validate(FGuid ItemGUID, int32 DropAmount)
+{
+    return DropAmount > 0;
+}
+
+void UBackpackComponent::Server_DropItemByGUID_Implementation(FGuid ItemGUID, int32 DropAmount)
+{
+    // 服务器端：执行丢弃逻辑（权威操作）
     if (!InventorySubsystem) return;
     InventorySubsystem->RemoveItemByGUID(ItemGUID, DropAmount);
 }
@@ -125,7 +204,10 @@ bool UBackpackComponent::UnequipItemByGUID(FGuid ItemGUID)
 
 void UBackpackComponent::HandleOnItemDropped(int32 ItemID, int32 DroppedAmount)
 {
+    // 仅在服务器端生成丢弃物品（服务器权威）
+    if (!GetOwner()->HasAuthority()) return;
     if (IsCharacterInStandby()) return;
+
     SpawnDroppedItem(ItemID, DroppedAmount);
 }
 

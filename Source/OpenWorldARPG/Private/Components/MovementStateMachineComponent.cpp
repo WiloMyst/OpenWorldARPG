@@ -3,6 +3,7 @@
 #include "Components/MovementStateMachineComponent.h"
 #include "Characters/PlayerCharacter.h"
 #include "Components/OpenWorldARPGCharacterMovementComponent.h"
+#include "Types/CustomMovementModeTypes.h"
 #include "GameFramework/CharacterMovementComponent.h"
 
 UMovementStateMachineComponent::UMovementStateMachineComponent()
@@ -68,6 +69,23 @@ void UMovementStateMachineComponent::TickComponent(float DeltaTime, ELevelTick T
 		return;
 	}
 
+	// 滑翔状态由 GA 通过 CMC 驱动进入，需要检测是否意外退出 (如着地)
+	if (CurrentState == EMovementState::Gliding)
+	{
+		if (MovementComp->IsWalking() || MovementComp->IsMovingOnGround())
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[FSM] Tick: Gliding->Grounded (landed)"));
+			RequestStateChange(EMovementState::Grounded);
+		}
+		else if (MovementComp->IsFalling())
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[FSM] Tick: Gliding->Falling (CMC exited glide)"));
+			// CMC 的 ExitGlideMode 会切换到 Falling，FSM 需要同步
+			RequestStateChange(EMovementState::Falling);
+		}
+		return;
+	}
+
 	// 其他状态：根据引擎 MovementMode 同步
 	DetectStateFromEngine();
 }
@@ -87,6 +105,11 @@ bool UMovementStateMachineComponent::IsGrounded() const
 	return CurrentState == EMovementState::Grounded;
 }
 
+bool UMovementStateMachineComponent::IsGliding() const
+{
+	return CurrentState == EMovementState::Gliding;
+}
+
 bool UMovementStateMachineComponent::IsInCornerTransition() const
 {
 	return CurrentState == EMovementState::CornerTransition;
@@ -101,6 +124,8 @@ bool UMovementStateMachineComponent::RequestStateChange(EMovementState NewState)
 	if (CurrentState == EMovementState::CornerTransition) return false;
 
 	EMovementState OldState = CurrentState;
+
+	UE_LOG(LogTemp, Warning, TEXT("[FSM] RequestStateChange: %d->%d"), (int32)OldState, (int32)NewState);
 
 	OnExitState(OldState);
 	CurrentState = NewState;
@@ -129,17 +154,17 @@ void UMovementStateMachineComponent::OnEnterState(EMovementState State)
 		if (MovementComp)
 		{
 			MovementComp->bOrientRotationToMovement = true;
-			MovementComp->RotationRate = FRotator(0.0f, StateConfigs.GroundedRotationRate, 0.0f);
-			MovementComp->AirControl = 0.0f; // 地面不需要空中控制力
+			// 物理参数由 CMC 统一管理，FSM 不越权设置
 		}
 		break;
 
 	case EMovementState::Falling:
 		if (MovementComp)
 		{
+			UE_LOG(LogTemp, Warning, TEXT("[FSM] OnEnterState: Falling (CMC handles physics)"));
 			MovementComp->bOrientRotationToMovement = true;
-			MovementComp->RotationRate = FRotator(0.0f, StateConfigs.FallingConfig.RotationInterpSpeed * 100.0f, 0.0f);
-			MovementComp->AirControl = StateConfigs.FallingConfig.AirControl;
+			// 物理参数(AirControl/RotationRate)由 CMC 的 OnMovementModeChanged 统一管理
+			// FSM 不越权设置物理参数，避免覆盖 CMC 恢复的值
 		}
 		if (CustomMovementComp)
 		{
@@ -160,6 +185,15 @@ void UMovementStateMachineComponent::OnEnterState(EMovementState State)
 		if (MovementComp)
 		{
 			MovementComp->bOrientRotationToMovement = false;
+		}
+		break;
+
+	case EMovementState::Gliding:
+		// 物理参数由 CMC 的 EnterGlideMode 统一设置，FSM 不越权操作
+		UE_LOG(LogTemp, Warning, TEXT("[FSM] OnEnterState: Gliding (CMC handles physics)"));
+		if (MovementComp)
+		{
+			MovementComp->bOrientRotationToMovement = true;
 		}
 		break;
 
@@ -186,6 +220,12 @@ void UMovementStateMachineComponent::OnExitState(EMovementState State)
 		}
 		break;
 
+	case EMovementState::Gliding:
+		// 滑翔退出由 GA 的 EndAbility 调用 CMC 的 ExitGlideMode
+		// FSM 不越权调用 CMC 的物理恢复逻辑
+		UE_LOG(LogTemp, Warning, TEXT("[FSM] OnExitState: Gliding (GA handles ExitGlideMode)"));
+		break;
+
 	default:
 		break;
 	}
@@ -198,7 +238,7 @@ void UMovementStateMachineComponent::DetectStateFromEngine()
 	uint8 CurrentEngineMode = MovementComp->MovementMode;
 
 	// 检测引擎侧状态变化
-	if (CurrentEngineMode != PrevEngineMovementMode)
+	if (CurrentEngineMode != PrevEngineMovementMode || MovementComp->MovementMode == MOVE_Custom)
 	{
 		PrevEngineMovementMode = CurrentEngineMode;
 
@@ -211,6 +251,13 @@ void UMovementStateMachineComponent::DetectStateFromEngine()
 
 		case MOVE_Falling:
 			RequestStateChange(EMovementState::Falling);
+			break;
+
+		case MOVE_Custom:
+			if (MovementComp->CustomMovementMode == static_cast<uint8>(ECustomMovementMode::Gliding))
+			{
+				RequestStateChange(EMovementState::Gliding);
+			}
 			break;
 
 		default:
@@ -233,6 +280,10 @@ void UMovementStateMachineComponent::ApplyStateParamsToCMC()
 	case EMovementState::Falling:
 		MovementComp->AirControl = StateConfigs.FallingConfig.AirControl;
 		MovementComp->RotationRate = FRotator(0.0f, StateConfigs.FallingConfig.RotationInterpSpeed * 100.0f, 0.0f);
+		break;
+
+	case EMovementState::Gliding:
+		// 物理参数由 CMC 的 EnterGlideMode 统一管理，FSM 不越权操作
 		break;
 
 	default:

@@ -17,7 +17,10 @@ class UCharacterWeaponComponent;
 class UAS_Player;
 class UOpenWorldARPGCharacterMovementComponent;
 class UMovementStateMachineComponent;
+class UBackpackComponent;
+class UClimbingComponent;
 class AWeaponBase;
+class UNiagaraSystem;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnPlayerMovementInput, float, InputX, float, InputY);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnHealthUpdated);
@@ -43,6 +46,12 @@ public:
 
 	virtual void Tick(float DeltaTime) override;
 
+	/** 客户端收到 PlayerState 同步后，重新初始化 ASC 的 AbilityActorInfo */
+	virtual void OnRep_PlayerState() override;
+
+	/** 注册网络同步属性 */
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
 	// ==========================================
 	// 核心初始化 API
 	// ==========================================
@@ -62,20 +71,83 @@ public:
 	void SetStandbyMode(bool bNewStandbyState);
 
 	// ==========================================
-	// 输入处理接口
+	// 输入处理接口 (邮局原则：Controller 只转发，Character 负责状态拦截与执行)
 	// ==========================================
 
-	/** * @brief 处理持续的移动输入
-	 * @param InputX 对应蓝图 Action Value X (左右)
-	 * @param InputY 对应蓝图 Action Value Y (前后)
-	 */
+	/** 处理持续的移动输入 */
 	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|Input")
 	void HandleMovementInput(float InputX, float InputY);
 
-	/** * @brief 处理移动输入停止
-	 */
+	/** 处理移动输入停止 */
 	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|Input")
 	void HandleMovementInputCompleted();
+
+	/** 处理交互输入 (拾取等)，内部查找 BackpackComponent 执行拾取 */
+	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|Input")
+	void HandleInteractInput();
+
+	/** 处理跳跃开始输入，内部完成攀爬退出判定 + 发送 GAS 跳跃事件 */
+	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|Input")
+	void HandleJumpStartInput();
+
+	/** 处理跳跃结束输入 */
+	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|Input")
+	void HandleJumpStopInput();
+
+	/** 切换滑翔状态，内部完成 IsFalling 和 GlidingStateTag 的拦截判定 */
+	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|Input")
+	void ToggleGlide();
+
+	/** 切换瞄准状态，内部完成 AimingStateTag 的翻转判定 */
+	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|Input")
+	void ToggleAim();
+
+	// ==========================================
+	// 角色切换流水线 (邮局原则：视觉表现归 Character，Possess 归 Controller)
+	// ==========================================
+
+	/**
+	 * @brief 旧角色下场：保存 Transform、生成切换特效、进入待机。
+	 * @param OutTransform [输出] 旧角色的世界变换，供新角色上场使用。
+	 */
+	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|Swap")
+	void PerformSwapOut(FTransform& OutTransform);
+
+	/**
+	 * @brief 新角色上场：设置 Transform、解除待机。
+	 * @param InTransform 旧角色留下的世界变换。
+	 */
+	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|Swap")
+	void PerformSwapIn(const FTransform& InTransform);
+
+	/** 多播：在所有客户端上生成角色切换特效 */
+	UFUNCTION(NetMulticast, Unreliable)
+	void Multicast_SpawnSwapFX(FVector Location);
+
+	/** 多播：同步待机模式的状态变更到所有客户端 */
+	UFUNCTION(NetMulticast, Reliable)
+	void Multicast_SetStandbyMode(bool bNewStandbyState);
+
+	/** 多播：同步元素/武器类型 Tag 到客户端（AddLooseGameplayTag 不同步） */
+	UFUNCTION(NetMulticast, Reliable)
+	void Multicast_AddLooseGameplayTags(FGameplayTag ElementTypeTag, FGameplayTag WeaponTypeTag);
+
+	/** 实际执行待机模式状态变更（由 SetStandbyMode 和 Multicast 回调调用） */
+	void ApplyStandbyMode(bool bNewStandbyState);
+
+	/**
+	 * @brief 检查当前角色是否允许被切换下场。
+	 * 内部完成运动模式和 GAS 状态标签的拦截判定。
+	 */
+	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Swap")
+	bool CanSwapOut() const;
+
+	/**
+	 * @brief 检查目标角色是否允许被切换上场。
+	 * 内部完成 GAS 状态标签的拦截判定。
+	 */
+	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Swap")
+	bool CanSwapIn() const;
 
 	// ==========================================
 	// 动画与物理控制 API
@@ -184,7 +256,7 @@ protected:
 	void OnAimingTagChanged(const FGameplayTag Tag, int32 NewCount);
 
 	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|State")
-	virtual void HandleDeath();
+	virtual void HandleDeath_Implementation() override;
 
 public:
 	UPROPERTY(BlueprintAssignable, Category = "PlayerCharacter|Events")
@@ -209,6 +281,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlayerCharacter|Weapon")
 	TObjectPtr<USceneComponent> WeaponRestSocket;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlayerCharacter|Weapon")
+	TObjectPtr<UCharacterWeaponComponent> WeaponComponent;
 
 	/** 移动状态机组件 (FSM) */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlayerCharacter|Movement")
@@ -248,8 +323,9 @@ protected:
 	 * 动态数据 (唯一数据源)。
 	 * 初始化时从存档/配置移入，运行时直接修改此结构体，存档时直接序列化。
 	 * 不再在 Actor 上重复声明 CharacterLevel 等字段。
+	 * Replicated：客户端需要读取 CharacterTag、CharacterLevel 等数据驱动 UI。
 	 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlayerCharacter|Data")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Replicated, Category = "PlayerCharacter|Data")
 	FCharacterSaveData RuntimeData;
 
 	// ==========================================
@@ -275,6 +351,70 @@ protected:
 	/** 重生时需要强制取消的技能 Tags (例如: Ability.Category.IsInAir) */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
 	FGameplayTagContainer RespawnCancelAbilityTags;
+
+	// ==========================================
+	// 配置项：角色切换 (从 Controller 迁移，视觉表现归 Character)
+	// ==========================================
+
+	/** 切换特效 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Swap")
+	TObjectPtr<UNiagaraSystem> CharacterSwapFX;
+
+	/** 特效生成位置偏移 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Swap")
+	FVector SwapFXLocationOffset = FVector(0.0f, 0.0f, -100.0f);
+
+	/** 特效缩放 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Swap")
+	FVector SwapFXScale = FVector(0.5f, 0.5f, 0.5f);
+
+	/** 目标角色禁止切换上场的状态 Tags */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Swap")
+	FGameplayTagContainer PreventSwitchTags;
+
+	/** 允许切换下场的运动模式 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Swap")
+	TArray<TEnumAsByte<EMovementMode>> AllowedSwapOutMovementModes;
+
+	// ==========================================
+	// 配置项：输入事件 Tags (由 Controller 通过 GAS 事件发送)
+	// ==========================================
+
+	/** 标识角色处于不可控状态的 Tag (用于 HandleMovementInput 内部拦截) */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
+	FGameplayTag UncontrollableStateTag;
+
+	/** 标识角色处于攀爬状态的 Tag */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
+	FGameplayTag ClimbingStateTag;
+
+	/** 标识角色处于滑翔状态的 Tag */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
+	FGameplayTag GlidingStateTag;
+
+	/** 跳跃开始事件 Tag */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
+	FGameplayTag JumpStartEventTag;
+
+	/** 跳跃结束事件 Tag */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
+	FGameplayTag JumpStopEventTag;
+
+	/** 滑翔开始事件 Tag */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
+	FGameplayTag GlideStartEventTag;
+
+	/** 滑翔结束事件 Tag */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
+	FGameplayTag GlideStopEventTag;
+
+	/** 瞄准开始事件 Tag */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
+	FGameplayTag AimStartEventTag;
+
+	/** 瞄准结束事件 Tag */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
+	FGameplayTag AimStopEventTag;
 
 	// ==========================================
 	// 配置项：瞄准与摄像机 (彻底数据驱动)

@@ -21,16 +21,26 @@ public:
 
 protected:
     virtual void BeginPlay() override;
+    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 public:
     // --- 核心交互接口 ---
 
+    /** 客户端请求拾取物品（内部调用 Server RPC） */
     UFUNCTION(BlueprintCallable, Category = "Inventory|Action")
     void PickUpItem();
 
-    /** 按 GUID 丢弃物品 */
+    /** 服务器执行拾取物品逻辑 */
+    UFUNCTION(Server, Reliable, WithValidation)
+    void Server_PickUpItem(int32 ItemID, int32 Amount);
+
+    /** 按 GUID 丢弃物品（内部调用 Server RPC） */
     UFUNCTION(BlueprintCallable, Category = "Inventory|Action")
     void DropItemByGUID(FGuid ItemGUID, int32 DropAmount);
+
+    /** 服务器执行丢弃物品逻辑 */
+    UFUNCTION(Server, Reliable, WithValidation)
+    void Server_DropItemByGUID(FGuid ItemGUID, int32 DropAmount);
 
     /** 按索引丢弃物品 (保留兼容) */
     UFUNCTION(BlueprintCallable, Category = "Inventory|Action")
@@ -56,6 +66,7 @@ protected:
     UFUNCTION()
     void HandleOnItemDropped(int32 ItemID, int32 DroppedAmount);
 
+    /** 服务器端：在角色前方生成丢弃物品 */
     void SpawnDroppedItem(int32 ItemID, int32 DroppedAmount);
 
     bool IsCharacterInStandby() const;

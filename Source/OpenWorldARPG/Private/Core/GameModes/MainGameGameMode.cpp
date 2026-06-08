@@ -1,7 +1,8 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Core/GameModes/MainGameGameMode.h"
 #include "Characters/PlayerCharacter.h"
+#include "Core/PlayerStates/MainGamePlayerState.h"
 #include "Data/CharacterInfoRow.h"
 #include "Data/CharacterDataAsset.h"
 #include "Managers/CharacterManagerSubsystem.h"
@@ -16,58 +17,35 @@ AMainGameGameMode::AMainGameGameMode()
     AssetCleanupDelay = 3.0f;
 }
 
-APlayerCharacter* AMainGameGameMode::GetTeamCharacterByTag(const FGameplayTag& CharacterTag) const
+void AMainGameGameMode::PostLogin(APlayerController* NewPlayer)
 {
-    if (APlayerCharacter* const* Found = TeamCharacterActors.Find(CharacterTag))
-    {
-        return IsValid(*Found) ? *Found : nullptr;
-    }
-    return nullptr;
-}
+    Super::PostLogin(NewPlayer);
 
-void AMainGameGameMode::GetAllOwnedCharacters(TArray<APlayerCharacter*>& OutCharacters) const
-{
-    OutCharacters.Empty();
-    OutCharacters.Reserve(OwnedCharacters.Num());
-    for (const auto& Pair : OwnedCharacters)
-    {
-        if (IsValid(Pair.Value))
-        {
-            OutCharacters.Add(Pair.Value);
-        }
-    }
-}
+    // 仅在服务器执行角色生成
+    if (!HasAuthority()) return;
 
-void AMainGameGameMode::GetAllTeamCharacters(TArray<APlayerCharacter*>& OutCharacters) const
-{
-    OutCharacters.Empty();
-    OutCharacters.Reserve(TeamCharacterActors.Num());
-    for (const auto& Pair : TeamCharacterActors)
+    GeneratePlayerCharacters(NewPlayer);
+
+    // 只在首次 PostLogin 时设置清理定时器（避免多玩家连入时覆盖）
+    if (!CleanupTimerHandle.IsValid())
     {
-        if (IsValid(Pair.Value))
-        {
-            OutCharacters.Add(Pair.Value);
-        }
+        GetWorld()->GetTimerManager().SetTimer(
+            CleanupTimerHandle,
+            this,
+            &AMainGameGameMode::CleanupAfterLoad,
+            AssetCleanupDelay,
+            false
+        );
     }
 }
 
-void AMainGameGameMode::BeginPlay()
+void AMainGameGameMode::GeneratePlayerCharacters(APlayerController* PlayerController)
 {
-    Super::BeginPlay();
+    // TODO [联机架构缺陷]: CharacterManagerSubsystem 和 TeamManagerSubsystem 是全局共享的
+    // GameInstanceSubsystem，多玩家连入时 LoadBuffer 和 TeamTags 会互相覆盖。
+    // 联机时需要改为按玩家隔离的数据源（如从 PlayerState 或存档系统按玩家 ID 加载）。
+    // 当前单机/Listen Server 场景下只有 Host 一个玩家，暂时安全。
 
-    GeneratePlayerCharacters();
-
-    GetWorld()->GetTimerManager().SetTimer(
-        CleanupTimerHandle,
-        this,
-        &AMainGameGameMode::CleanupAfterLoad,
-        AssetCleanupDelay,
-        false
-    );
-}
-
-void AMainGameGameMode::GeneratePlayerCharacters()
-{
     UCharacterManagerSubsystem* CharManager = GetGameInstance()->GetSubsystem<UCharacterManagerSubsystem>();
     UTeamManagerSubsystem* TeamManager = GetGameInstance()->GetSubsystem<UTeamManagerSubsystem>();
 
@@ -87,16 +65,18 @@ void AMainGameGameMode::GeneratePlayerCharacters()
         return;
     }
 
+    AMainGamePlayerState* PlayerState = PlayerController->GetPlayerState<AMainGamePlayerState>();
+    if (!PlayerState)
+    {
+        UE_LOG(LogTemp, Error, TEXT("GeneratePlayerCharacters: PlayerState 为空或类型不是 AMainGamePlayerState！"));
+        return;
+    }
+
     UE_LOG(LogTemp, Log, TEXT("GeneratePlayerCharacters: LoadBuffer 数量 = %d"), CharManager->GetLoadBuffer().Num());
     UE_LOG(LogTemp, Log, TEXT("GeneratePlayerCharacters: 队伍成员 = %d, 活跃索引 = %d"), TeamManager->GetCurrentTeamCharacterTags().Num(), TeamManager->GetActiveCharacterIndex());
 
-    // 1. 清空旧引用 (GameMode 随关卡销毁，这里防御性清空)
-    OwnedCharacters.Empty();
-    TeamCharacterActors.Empty();
-
-    // 2. 获取生成位置
-    APlayerController* PC = GetWorld()->GetFirstPlayerController();
-    AActor* StartSpot = FindPlayerStart(PC, DefaultPlayerStartTag.ToString());
+    // 1. 获取生成位置
+    AActor* StartSpot = FindPlayerStart(PlayerController, DefaultPlayerStartTag.ToString());
     FTransform SpawnTransform = StartSpot ? StartSpot->GetActorTransform() : FTransform::Identity;
 
     if (!StartSpot)
@@ -106,6 +86,11 @@ void AMainGameGameMode::GeneratePlayerCharacters()
 
     FActorSpawnParameters SpawnParams;
     SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    SpawnParams.Owner = PlayerController; // 设置 Owner 为 PlayerController，便于权限判定
+
+    // 2. 队伍角色实例数组（按队伍顺序存储）
+    TArray<APlayerCharacter*> TeamActors;
+    TArray<FGameplayTag> TeamTags = TeamManager->GetCurrentTeamCharacterTags();
 
     // 3. 为所有拥有的角色生成 PlayerCharacter 实体并初始化
     for (const auto& SaveData : CharManager->GetLoadBuffer())
@@ -123,16 +108,19 @@ void AMainGameGameMode::GeneratePlayerCharacters()
 
             if (SpawnedChar)
             {
-                // 注册到 GameMode 的本地 Actor 管理
-                OwnedCharacters.Add(SaveData.CharacterTag, SpawnedChar);
-
                 // 初始化: SaveData 移入 RuntimeData
                 SpawnedChar->InitializeCharacter(SaveData, InfoRow.CharacterDataAsset);
 
-                // 如果是队伍成员，也注册到队伍 Actor 管理
-                if (TeamManager->GetCurrentTeamCharacterTags().Contains(SaveData.CharacterTag))
+                // 如果是队伍成员，按队伍顺序加入 TeamActors
+                int32 TeamIndex = TeamTags.Find(SaveData.CharacterTag);
+                if (TeamIndex != INDEX_NONE)
                 {
-                    TeamCharacterActors.Add(SaveData.CharacterTag, SpawnedChar);
+                    // 确保数组足够大
+                    if (TeamActors.Num() <= TeamIndex)
+                    {
+                        TeamActors.SetNum(TeamIndex + 1);
+                    }
+                    TeamActors[TeamIndex] = SpawnedChar;
                 }
 
                 // 默认进入待机模式
@@ -147,34 +135,37 @@ void AMainGameGameMode::GeneratePlayerCharacters()
         }
         else
         {
-            UE_LOG(LogTemp, Error, TEXT("GeneratePlayerCharacters: 角色 Tag=%s 在 CharacterInfoTable 中未找到！请检查 DataTable 和 TagToRowNameMap。"), *SaveData.CharacterTag.ToString());
+            UE_LOG(LogTemp, Error, TEXT("GeneratePlayerCharacters: 角色 Tag=%s 在 CharacterInfoTable 中未找到！"), *SaveData.CharacterTag.ToString());
         }
     }
 
     // 4. 所有角色已生成并初始化，清空加载缓冲区
     CharManager->ClearLoadBuffer();
 
-    UE_LOG(LogTemp, Log, TEXT("GeneratePlayerCharacters: 总共生成 %d 个角色，队伍成员 %d 个。"), OwnedCharacters.Num(), TeamCharacterActors.Num());
+    // 5. 将队伍角色存入 PlayerState（Replicated，全网同步）
+    PlayerState->SetTeamCharacterActors(TeamActors);
 
-    // 5. 激活当前激活索引的角色
+    UE_LOG(LogTemp, Log, TEXT("GeneratePlayerCharacters: 队伍成员 %d 个已存入 PlayerState。"), TeamActors.Num());
+
+    // 6. 激活当前激活索引的角色
     int32 ActiveIndex = TeamManager->GetActiveCharacterIndex();
-    if (TeamManager->GetCurrentTeamCharacterTags().IsValidIndex(ActiveIndex))
+    if (TeamActors.IsValidIndex(ActiveIndex))
     {
-        FGameplayTag ActiveTag = TeamManager->GetCurrentTeamCharacterTags()[ActiveIndex];
-        if (APlayerCharacter* ActiveCharacter = GetTeamCharacterByTag(ActiveTag))
+        APlayerCharacter* ActiveCharacter = TeamActors[ActiveIndex];
+        if (ActiveCharacter)
         {
             ActiveCharacter->SetStandbyMode(false);
-            if (PC) PC->Possess(ActiveCharacter);
-            UE_LOG(LogTemp, Log, TEXT("GeneratePlayerCharacters: 激活角色 Tag=%s 并 Possess。"), *ActiveTag.ToString());
-        }
-        else
-        {
-            UE_LOG(LogTemp, Error, TEXT("GeneratePlayerCharacters: 活跃角色 Tag=%s 在 TeamCharacterActors 中未找到！"), *ActiveTag.ToString());
+            PlayerController->Possess(ActiveCharacter);
+
+            // 设置 PlayerState 的激活索引（触发全网同步）
+            PlayerState->SetActiveCharacterIndex(ActiveIndex);
+
+            UE_LOG(LogTemp, Log, TEXT("GeneratePlayerCharacters: 激活角色索引 %d 并 Possess。"), ActiveIndex);
         }
     }
     else
     {
-        UE_LOG(LogTemp, Error, TEXT("GeneratePlayerCharacters: 活跃索引 %d 无效！队伍成员数=%d"), ActiveIndex, TeamManager->GetCurrentTeamCharacterTags().Num());
+        UE_LOG(LogTemp, Error, TEXT("GeneratePlayerCharacters: 活跃索引 %d 无效！队伍成员数=%d"), ActiveIndex, TeamActors.Num());
     }
 }
 

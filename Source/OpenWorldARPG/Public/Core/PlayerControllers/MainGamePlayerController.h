@@ -1,19 +1,31 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Core/OpenWorldARPGPlayerController.h"
 #include "GameplayTagContainer.h"
-#include "Engine/EngineTypes.h"
-#include "InputActionValue.h" // 增强输入取值所需
+#include "InputActionValue.h"
 #include "MainGamePlayerController.generated.h"
 
-class UNiagaraSystem;
 class UUserWidget;
 class UInputMappingContext;
 class UInputAction;
 
+/**
+ * @class AMainGamePlayerController
+ * @brief 轻量化控制器 (邮局原则 + Server RPC)。
+ *
+ * 职责边界：
+ * - 接收输入并向下派发请求 (发信号)
+ * - 角色切换通过 Server RPC 请求，服务器执行 Possess/UnPossess
+ * - 管理输入映射上下文和 HUD
+ *
+ * 绝对禁止：
+ * - FindComponentByClass 微操 Character 的私有组件
+ * - HasMatchingGameplayTag 越权判断能否执行某动作
+ * - 处理视觉表现层逻辑 (特效、动画)
+ */
 UCLASS()
 class OPENWORLDARPG_API AMainGamePlayerController : public AOpenWorldARPGPlayerController
 {
@@ -22,14 +34,32 @@ class OPENWORLDARPG_API AMainGamePlayerController : public AOpenWorldARPGPlayerC
 public:
     AMainGamePlayerController();
 
+    // ==========================================
+    // 角色切换 (Server RPC) - 供 TeamManagerSubsystem 等外部调用
+    // ==========================================
+
+    /** 客户端输入触发：请求切换角色（发送到服务器） */
+    void HandleSwitchCharacterInput(int32 Index);
+
+    /**
+     * Server RPC：请求服务器执行角色切换。
+     * 客户端只负责发送请求，服务器负责验证和执行。
+     */
+    UFUNCTION(Server, Reliable, WithValidation)
+    void Server_SwitchCharacter(int32 TargetIndex);
+
+    /** 服务器执行角色切换的实际逻辑 */
+    void Server_SwitchCharacter_Implementation(int32 TargetIndex);
+    bool Server_SwitchCharacter_Validate(int32 TargetIndex);
+
+    /** 客户端回调：服务器完成角色切换后，客户端执行本地表现 */
+    UFUNCTION(Client, Unreliable)
+    void Client_OnCharacterSwitched(int32 NewActiveIndex);
+
 protected:
     virtual void BeginPlay() override;
 
-    // 覆盖输入绑定核心函数
     virtual void SetupInputComponent() override;
-
-    UFUNCTION()
-    void HandleSwitchCharacter(int32 TargetIndex);
 
 protected:
     // ==========================================
@@ -57,7 +87,6 @@ protected:
     void Input_Switch2() { HandleSwitchCharacterInput(1); }
     void Input_Switch3() { HandleSwitchCharacterInput(2); }
     void Input_Switch4() { HandleSwitchCharacterInput(3); }
-    void HandleSwitchCharacterInput(int32 Index);
 
     void Input_NormalAttack();
     void Input_HeavyAttack();
@@ -125,27 +154,11 @@ protected:
     TObjectPtr<UInputAction> IA_Aim;
 
     // ==========================================
-    // 配置项：Gameplay Tags (拒绝硬编码)
+    // 配置项：Controller 专属 Gameplay Tags
     // ==========================================
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
-    FGameplayTag UncontrollableStateTag; // Character.State.Uncontrollable
-
-    UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
-    FGameplayTag ClimbingStateTag;       // Character.State.Climbing
-
-    UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
-    FGameplayTag GlidingStateTag;        // Character.State.InAir.Gliding
-
-    UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
-    FGameplayTag InventoryUITag;         // UI.Menu.Inventory
-
-    // --- Events ---
-    UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
-    FGameplayTag JumpStartEventTag;
-
-    UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
-    FGameplayTag JumpStopEventTag;
+    FGameplayTag InventoryUITag;
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
     FGameplayTag SprintStartEventTag;
@@ -160,58 +173,26 @@ protected:
     FGameplayTag WalkStopEventTag;
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
-    FGameplayTag GlideStartEventTag;
-
-    UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
-    FGameplayTag GlideStopEventTag;
-
-    UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
     FGameplayTag HookStartEventTag;
 
-    // --- 状态标签 ---
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags|Combat")
-    FGameplayTag AimingStateTag; // 对应蓝图：Character.State.Aiming
-
-    // --- 事件标签 ---
-    UPROPERTY(EditDefaultsOnly, Category = "Config|Tags|Combat")
-    FGameplayTag NormalAttackEventTag; // 对应：Input.Action.Attack.Normal
+    FGameplayTag NormalAttackEventTag;
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags|Combat")
-    FGameplayTag HeavyAttackEventTag;  // 对应：Input.Action.Attack.Heavy
+    FGameplayTag HeavyAttackEventTag;
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags|Combat")
-    FGameplayTag PlungeAttackEventTag; // 对应：Input.Action.Attack.Plunge
+    FGameplayTag PlungeAttackEventTag;
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags|Combat")
-    FGameplayTag AimAttackEventTag;    // 对应：Input.Action.Attack.AimShot
-
-    UPROPERTY(EditDefaultsOnly, Category = "Config|Tags|Combat")
-    FGameplayTag AimStartEventTag;     // 对应：Input.Action.Aim.Start
-
-    UPROPERTY(EditDefaultsOnly, Category = "Config|Tags|Combat")
-    FGameplayTag AimStopEventTag;      // 对应：Input.Action.Aim.Stop
+    FGameplayTag AimAttackEventTag;
 
     // ==========================================
-    // 原有的各种配置项保留...
+    // 配置项：UI
     // ==========================================
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|UI")
     TSubclassOf<UUserWidget> MainHUDClass;
-
-    UPROPERTY(EditDefaultsOnly, Category = "Config|Effects")
-    TObjectPtr<UNiagaraSystem> CharacterSwapFX;
-
-    UPROPERTY(EditDefaultsOnly, Category = "Config|Effects")
-    FVector SwapFXLocationOffset = FVector(0.0f, 0.0f, -100.0f);
-
-    UPROPERTY(EditDefaultsOnly, Category = "Config|Effects")
-    FVector SwapFXScale = FVector(0.5f, 0.5f, 0.5f);
-
-    UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
-    FGameplayTagContainer PreventSwitchTags;
-
-    UPROPERTY(EditDefaultsOnly, Category = "Config|Movement")
-    TArray<TEnumAsByte<EMovementMode>> AllowedMovementModes;
 
 private:
     UPROPERTY()

@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Core/PlayerControllers/MainMenuPlayerController.h"
 #include "Managers/UIManagerSubsystem.h"
@@ -67,7 +67,9 @@ void AMainMenuPlayerController::HandleOnStartButtonClicked()
         UIManager->CloseTopUI();
     }
 
-    // 2. 获取 GameMode 并通知开始游戏
+    // TODO [联机架构缺陷]: GetGameMode 在客户端返回 nullptr。
+    // 联机时客户端点击"开始游戏"需要通过 Server RPC 通知服务器。
+    // 当前仅在 Host/单机场景下有效。
     if (AMainMenuGameMode* MainMenuGM = Cast<AMainMenuGameMode>(UGameplayStatics::GetGameMode(this)))
     {
         MainMenuGM->HandleStartGameRequest();

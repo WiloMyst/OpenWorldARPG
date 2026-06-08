@@ -8,13 +8,17 @@
 #include "MainGameGameMode.generated.h"
 
 class APlayerCharacter;
+class AMainGamePlayerState;
 
 /**
  * @class AMainGameGameMode
- * @brief 主游戏 GameMode，管理关卡内的角色 Actor 引用。
- * 
- * 架构原则：Actor 引用属于 World 层，由 GameMode 管理。
- * 关卡卸载时 GameMode 自动销毁，Actor 引用随之消失，不存在悬空指针问题。
+ * @brief 主游戏 GameMode，负责服务器端角色生成与初始化。
+ *
+ * 架构原则（Client-Server Authoritative Model）：
+ * - GameMode 只在服务器存在，负责生成角色 Actor
+ * - 角色实体引用存入 PlayerState（Replicated），不再存入 GameMode
+ * - 角色生成时机从 BeginPlay 迁移到 PostLogin（按玩家连接触发）
+ * - GameMode 不保留任何角色 TMap，所有查询通过 PlayerState 进行
  */
 UCLASS()
 class OPENWORLDARPG_API AMainGameGameMode : public AGameModeBase
@@ -24,35 +28,25 @@ class OPENWORLDARPG_API AMainGameGameMode : public AGameModeBase
 public:
     AMainGameGameMode();
 
-    // ---- 角色 Actor 管理 (World 层) ----
+    // ---- 生命周期 ----
 
-    /** 根据角色Tag获取队伍中的角色实例 */
-    UFUNCTION(BlueprintCallable, Category = "MainGameGameMode")
-    APlayerCharacter* GetTeamCharacterByTag(const FGameplayTag& CharacterTag) const;
-
-    /** 获取所有已拥有的角色实例 */
-    UFUNCTION(BlueprintCallable, Category = "MainGameGameMode")
-    void GetAllOwnedCharacters(TArray<APlayerCharacter*>& OutCharacters) const;
-
-    /** 获取所有队伍角色实例 */
-    UFUNCTION(BlueprintCallable, Category = "MainGameGameMode")
-    void GetAllTeamCharacters(TArray<APlayerCharacter*>& OutCharacters) const;
+    /** 重写 PostLogin：玩家加入后为其生成角色实体 */
+    virtual void PostLogin(APlayerController* NewPlayer) override;
 
 protected:
-    virtual void BeginPlay() override;
-
     // ==========================================
     // 核心初始化流程
     // ==========================================
 
-    void GeneratePlayerCharacters();
+    /** 为指定玩家生成所有拥有的角色实体 */
+    void GeneratePlayerCharacters(APlayerController* PlayerController);
 
-    // 延时清理资产
+    /** 延时清理资产 */
     void CleanupAfterLoad();
 
 protected:
     // ==========================================
-    // 暴露给蓝图的配置项 (彻底告别硬编码)
+    // 暴露给蓝图的配置项
     // ==========================================
 
     UPROPERTY(EditDefaultsOnly, Category = "GameMode|Config")
@@ -63,18 +57,6 @@ protected:
 
     UPROPERTY(EditDefaultsOnly, Category = "GameMode|Config")
     float AssetCleanupDelay;
-
-    // ==========================================
-    // 角色 Actor 引用 (随关卡销毁自然清理)
-    // ==========================================
-
-    /** 所有已拥有的角色实例 (包含队伍内和队伍外) */
-    UPROPERTY()
-    TMap<FGameplayTag, APlayerCharacter*> OwnedCharacters;
-
-    /** 当前出战队伍的角色实例 */
-    UPROPERTY()
-    TMap<FGameplayTag, APlayerCharacter*> TeamCharacterActors;
 
 private:
     FTimerHandle CleanupTimerHandle;

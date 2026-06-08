@@ -160,6 +160,43 @@ struct FCornerTransitionConfig
 };
 
 /**
+ * @brief 滑翔状态可配参数
+ */
+USTRUCT(BlueprintType)
+struct FGlidingStateConfig
+{
+	GENERATED_BODY()
+
+	/** 滑翔时的重力缩放 (0=无重力下坠, 1=正常重力) */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gliding|Physics")
+	float GravityScale = 0.0f;
+
+	/** 滑翔时的空中控制力 (0~1) */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gliding|Physics")
+	float AirControl = 0.8f;
+
+	/** 滑翔时的旋转速率 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gliding|Physics")
+	FRotator RotationRate = FRotator(0.0f, 0.0f, 100.0f);
+
+	/** 进入滑翔时的初始弹射速度 (世界空间) */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gliding|Physics")
+	FVector LaunchVelocity = FVector(0.0f, 0.0f, -200.0f);
+
+	/** 滑翔最大水平速度 (cm/s) */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gliding|Physics")
+	float MaxHorizontalSpeed = 600.0f;
+
+	/** 滑翔最小下落速度 (cm/s，负值表示向下) */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gliding|Physics")
+	float MinDescentSpeed = -200.0f;
+
+	/** 滑翔最大下落速度 (cm/s，负值表示向下) */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gliding|Physics")
+	float MaxDescentSpeed = -50.0f;
+};
+
+/**
  * @brief 所有移动状态的可配参数集合
  */
 USTRUCT(BlueprintType)
@@ -182,4 +219,8 @@ struct FMovementStateConfigs
 	/** 墙角过渡参数 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CornerTransition")
 	FCornerTransitionConfig CornerConfig;
+
+	/** 滑翔状态参数 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gliding")
+	FGlidingStateConfig GlidingConfig;
 };

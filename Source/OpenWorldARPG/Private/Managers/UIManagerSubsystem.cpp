@@ -1,9 +1,9 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Managers/UIManagerSubsystem.h"
 #include "UI/BaseMenuWidget.h"
 #include "Data/UIDataAsset.h"
-#include "Kismet/GameplayStatics.h"
+#include "Engine/LocalPlayer.h"
 #include "Managers/GameAssetManagerSubsystem.h"
 
 UBaseMenuWidget* UUIManagerSubsystem::ShowUIByTag(FGameplayTag UITag)
@@ -89,7 +89,15 @@ bool UUIManagerSubsystem::IsAnyUIOpen() const
 
 void UUIManagerSubsystem::UpdateInputMode()
 {
-    APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0);
+    // 使用 LocalPlayer 而非硬编码 Player 0，联机时每个客户端只控制自己的 UI
+    APlayerController* PC = nullptr;
+    if (UWorld* World = GetWorld())
+    {
+        if (ULocalPlayer* LocalPlayer = World->GetFirstLocalPlayerFromController())
+        {
+            PC = LocalPlayer->GetPlayerController(World);
+        }
+    }
     if (!PC) return;
 
     if (UIStack.IsEmpty())

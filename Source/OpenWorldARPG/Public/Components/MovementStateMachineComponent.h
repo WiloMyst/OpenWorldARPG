@@ -55,6 +55,9 @@ public:
 	/** 是否处于地面状态 */
 	bool IsGrounded() const;
 
+	/** 是否处于滑翔状态 */
+	bool IsGliding() const;
+
 	/** 是否正在墙角过渡中 */
 	bool IsInCornerTransition() const;
 

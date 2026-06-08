@@ -1,10 +1,13 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
-
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Managers/TeamManagerSubsystem.h"
 #include "Managers/CharacterManagerSubsystem.h"
+#include "Characters/PlayerCharacter.h"
+#include "Core/PlayerControllers/MainGamePlayerController.h"
+#include "Core/PlayerStates/MainGamePlayerState.h"
 #include "Data/StartingRosterConfig.h"
 #include "Engine/GameInstance.h"
+#include "Engine/LocalPlayer.h"
 
 void UTeamManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -42,16 +45,6 @@ void UTeamManagerSubsystem::InitializeFromDataObject(UObject* InDataObject)
     SetCurrentTeam(ConfigData->InitialTeamTags, ConfigData->InitialActiveCharacterIndex);
 }
 
-void UTeamManagerSubsystem::SwitchToCharacterByIndex(int32 TeamIndex)
-{
-    if (IsCharacterSwitchable(TeamIndex))
-    {
-        OnRequestCharacterSwitch.Broadcast(TeamIndex);
-
-        UE_LOG(LogTemp, Log, TEXT("TeamManager: 请求切换到索引 %d 的角色"), TeamIndex);
-    }
-}
-
 bool UTeamManagerSubsystem::SetCurrentTeam(const TArray<FGameplayTag>& NewTeamCharacterTags, int32 NewActiveCharacterIndex)
 {
     if (!CharacterManager) return false;
@@ -66,6 +59,32 @@ bool UTeamManagerSubsystem::SetCurrentTeam(const TArray<FGameplayTag>& NewTeamCh
     UE_LOG(LogTemp, Log, TEXT("Team set with %d members. Active Index: %d"), CurrentTeamCharacters.Num(), SafeIndex);
     OnTeamMembersChanged.Broadcast();
     return true;
+}
+
+// ==========================================
+// 角色切换请求 (通过 PlayerController 的 Server RPC)
+// ==========================================
+
+void UTeamManagerSubsystem::SwitchToCharacterByIndex(int32 TeamIndex)
+{
+    if (!IsCharacterSwitchable(TeamIndex)) return;
+
+    // 获取本地玩家（而非硬编码 Player 0）的 PlayerController
+    // 联机时每个客户端只有自己的 LocalPlayer
+    if (UWorld* World = GetWorld())
+    {
+        if (ULocalPlayer* LocalPlayer = World->GetFirstLocalPlayerFromController())
+        {
+            if (AMainGamePlayerController* PC = Cast<AMainGamePlayerController>(LocalPlayer->GetPlayerController(World)))
+            {
+                PC->Server_SwitchCharacter(TeamIndex);
+                UE_LOG(LogTemp, Log, TEXT("TeamManager: 通过 Server RPC 请求切换到索引 %d 的角色"), TeamIndex);
+                return;
+            }
+        }
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("TeamManager: SwitchToCharacterByIndex - 无法获取本地 PlayerController！"));
 }
 
 void UTeamManagerSubsystem::SwitchToCharacterByTag(const FGameplayTag& CharacterTag)
@@ -100,4 +119,45 @@ bool UTeamManagerSubsystem::IsCharacterSwitchable(int32 Index) const
     if (!CharacterTag.IsValid()) return false;
 
     return true;
+}
+
+// ==========================================
+// PlayerState OnRep 回调 (由 MainGamePlayerState 调用)
+// ==========================================
+
+void UTeamManagerSubsystem::OnRep_ActiveCharacterIndexFromServer(int32 NewActiveIndex)
+{
+    int32 OldIndex = ActiveCharacterIndex;
+    ActiveCharacterIndex = NewActiveIndex;
+
+    // 广播激活角色变化事件，驱动本地 UI 刷新
+    FGameplayTag OldTag = CurrentTeamCharacters.IsValidIndex(OldIndex) ? CurrentTeamCharacters[OldIndex] : FGameplayTag::EmptyTag;
+    FGameplayTag NewTag = CurrentTeamCharacters.IsValidIndex(NewActiveIndex) ? CurrentTeamCharacters[NewActiveIndex] : FGameplayTag::EmptyTag;
+
+    OnActiveCharacterChanged.Broadcast(OldTag, NewTag);
+
+    UE_LOG(LogTemp, Log, TEXT("TeamManager: OnRep_ActiveCharacterIndex - 索引 %d -> %d"), OldIndex, NewActiveIndex);
+}
+
+void UTeamManagerSubsystem::OnRep_TeamCharacterActorsFromServer(const TArray<APlayerCharacter*>& NewTeamActors)
+{
+    // 从服务器同步来的角色实例中更新本地队伍 Tag 缓存
+    TArray<FGameplayTag> UpdatedTags;
+    UpdatedTags.Reserve(NewTeamActors.Num());
+
+    for (APlayerCharacter* Character : NewTeamActors)
+    {
+        if (IsValid(Character))
+        {
+            UpdatedTags.Add(Character->GetCharacterTag());
+        }
+    }
+
+    if (UpdatedTags != CurrentTeamCharacters)
+    {
+        CurrentTeamCharacters = MoveTemp(UpdatedTags);
+        OnTeamMembersChanged.Broadcast();
+
+        UE_LOG(LogTemp, Log, TEXT("TeamManager: OnRep_TeamCharacterActors - 队伍成员已更新，共 %d 个"), CurrentTeamCharacters.Num());
+    }
 }
