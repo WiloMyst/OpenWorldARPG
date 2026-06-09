@@ -11,8 +11,7 @@ class UBaseMenuWidget;
 class UUIDataAsset;
 
 /**
- * @class UUIManagerSubsystem
- * @brief UI 管理子系统。基于栈的 UI 打开/关闭管理，自动处理输入模式切换。
+ * UI 管理子系统。基于栈的 UI 打开/关闭管理，自动处理输入模式切换。
  */
 UCLASS()
 class OPENWORLDARPG_API UUIManagerSubsystem : public UGameInstanceSubsystem

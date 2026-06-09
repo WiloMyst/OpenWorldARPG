@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #pragma once
 
@@ -16,7 +16,6 @@ class OPENWORLDARPG_API UPlayerPanelWidget : public UBaseMenuWidget
 protected:
     virtual void NativeConstruct() override;
 
-    // 绑定蓝图中的关闭按钮，变量名必须一模一样
     UPROPERTY(meta = (BindWidget))
     UButton* Button_ClosePlayerPanel;
 

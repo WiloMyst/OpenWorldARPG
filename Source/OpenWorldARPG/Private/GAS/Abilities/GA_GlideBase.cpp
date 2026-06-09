@@ -1,10 +1,10 @@
-// Copyright 2025 WiloMyst. All Rights Reserved.
+﻿// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "GAS/Abilities/GA_GlideBase.h"
 #include "AbilitySystemComponent.h"
-#include "AbilitySystemBlueprintLibrary.h"
 #include "Abilities/Tasks/AbilityTask_WaitGameplayEvent.h"
 #include "Components/OpenWorldARPGCharacterMovementComponent.h"
+#include "GAS/ARPGGameplayAbilityActorInfo.h"
 #include "GameFramework/Character.h"
 
 UGA_GlideBase::UGA_GlideBase()
@@ -18,7 +18,9 @@ void UGA_GlideBase::ActivateAbility(const FGameplayAbilitySpecHandle Handle, con
     if (!CommitAbility(Handle, ActorInfo, ActivationInfo)) return;
 
     ACharacter* Character = Cast<ACharacter>(ActorInfo->AvatarActor.Get());
-    UOpenWorldARPGCharacterMovementComponent* CustomMoveComp = Character ? Character->FindComponentByClass<UOpenWorldARPGCharacterMovementComponent>() : nullptr;
+    // O(1) 读取缓存的 CMC 指针，替代 FindComponentByClass O(N) 遍历
+    const FARPGGameplayAbilityActorInfo* ARPGActorInfo = StaticCast<const FARPGGameplayAbilityActorInfo*>(ActorInfo);
+    UOpenWorldARPGCharacterMovementComponent* CustomMoveComp = ARPGActorInfo ? ARPGActorInfo->CustomMovementComponent : nullptr;
     UAbilitySystemComponent* ASC = ActorInfo->AbilitySystemComponent.Get();
 
     if (!Character || !CustomMoveComp || !ASC)
@@ -34,16 +36,12 @@ void UGA_GlideBase::ActivateAbility(const FGameplayAbilitySpecHandle Handle, con
     UE_LOG(LogTemp, Warning, TEXT("[GA_Glide] ActivateAbility: IsGliding=%d, MovementMode=%d"),
         CustomMoveComp->IsGliding(), (int32)CustomMoveComp->MovementMode.GetValue());
 
-    // ==========================================
-    // CMC 职责：物理参数修改 + Launch + 运动模式切换 + Tag 管理
-    // GA 只发送"进入滑翔"的意愿，不传递任何物理参数
-    // ==========================================
-    CustomMoveComp->EnterGlideMode();
+        // CMC 职责：物理参数修改 + Launch + 运动模式切换 + 状态 Tag 管理
+    // GA 只发送"进入滑翔"的意愿，不传递任何物理参数，不注入状态 Tag
+        CustomMoveComp->EnterGlideMode();
 
-    // ==========================================
-    // GA 职责：意愿和表现
-    // ==========================================
-
+        // GA 职责：意愿和表现
+    
     // 1. 生成滑翔伞 (表现层：视觉外观)
     if (GliderActorClass)
     {
@@ -55,23 +53,10 @@ void UGA_GlideBase::ActivateAbility(const FGameplayAbilitySpecHandle Handle, con
         }
     }
 
-    // 2. 应用状态 GE (意愿层：Tag 状态标记)
-    if (GlideStateEffectClass)
-    {
-        FGameplayEffectSpecHandle SpecHandle = ASC->MakeOutgoingSpec(GlideStateEffectClass, 1.0f, ASC->MakeEffectContext());
-        if (SpecHandle.IsValid()) ActiveGlideEffectHandle = ASC->ApplyGameplayEffectSpecToSelf(*SpecHandle.Data.Get());
-    }
+    // 2. 状态 Tag (Character.State.InAir.Gliding 等) 由 CMC 的 OnMovementModeChanged 统一管理，
+    //    GA 不再通过 GE 重复注入，避免 Tag 计数冲突
 
-    // 3. 发送空中状态变更事件 (意愿层：通知 FSM/其他系统)
-    if (AirStateChangedEventTag.IsValid() && Character)
-    {
-        FGameplayEventData Payload;
-        Payload.Instigator = Character;
-        Payload.Target = Character;
-        UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(Character, AirStateChangedEventTag, Payload);
-    }
-
-    // 4. 监听停止事件 (意愿层：等待玩家输入或系统取消)
+    // 3. 监听停止事件 (意愿层：等待玩家输入或系统取消)
     WaitEventTask = UAbilityTask_WaitGameplayEvent::WaitGameplayEvent(this, StopGlideEventTag, nullptr, false, true);
     if (WaitEventTask)
     {
@@ -91,13 +76,13 @@ void UGA_GlideBase::EndAbility(const FGameplayAbilitySpecHandle Handle, const FG
     UE_LOG(LogTemp, Warning, TEXT("[GA_Glide] EndAbility called, bWasCancelled=%d"), bWasCancelled);
 
     ACharacter* Character = Cast<ACharacter>(ActorInfo->AvatarActor.Get());
-    UOpenWorldARPGCharacterMovementComponent* CustomMoveComp = Character ? Character->FindComponentByClass<UOpenWorldARPGCharacterMovementComponent>() : nullptr;
+    // O(1) 读取缓存的 CMC 指针
+    const FARPGGameplayAbilityActorInfo* ARPGActorInfo = StaticCast<const FARPGGameplayAbilityActorInfo*>(ActorInfo);
+    UOpenWorldARPGCharacterMovementComponent* CustomMoveComp = ARPGActorInfo ? ARPGActorInfo->CustomMovementComponent : nullptr;
     UAbilitySystemComponent* ASC = ActorInfo->AbilitySystemComponent.Get();
 
-    // ==========================================
-    // CMC 职责：恢复物理参数 + 运动模式切换 + Tag 清理
-    // ==========================================
-    if (CustomMoveComp)
+        // CMC 职责：恢复物理参数 + 运动模式切换 + Tag 清理
+        if (CustomMoveComp)
     {
         if (CustomMoveComp->IsGliding())
         {
@@ -112,10 +97,8 @@ void UGA_GlideBase::EndAbility(const FGameplayAbilitySpecHandle Handle, const FG
         }
     }
 
-    // ==========================================
-    // GA 职责：清理意愿和表现
-    // ==========================================
-
+        // GA 职责：清理意愿和表现
+    
     // 1. 销毁滑翔伞 (表现层)
     if (SpawnedGlider)
     {
@@ -123,23 +106,9 @@ void UGA_GlideBase::EndAbility(const FGameplayAbilitySpecHandle Handle, const FG
         SpawnedGlider = nullptr;
     }
 
-    // 2. 移除状态 GE (意愿层)
-    if (ASC && ActiveGlideEffectHandle.IsValid())
-    {
-        ASC->RemoveActiveGameplayEffect(ActiveGlideEffectHandle);
-        ActiveGlideEffectHandle.Invalidate();
-    }
+    // 2. 状态 Tag 由 CMC 统一管理，GA 不再负责 GE 的移除
 
-    // 3. 发送空中状态变更事件 (意愿层：通知 FSM/其他系统)
-    if (AirStateChangedEventTag.IsValid() && Character)
-    {
-        FGameplayEventData Payload;
-        Payload.Instigator = Character;
-        Payload.Target = Character;
-        UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(Character, AirStateChangedEventTag, Payload);
-    }
-
-    // 4. 停止异步等待任务
+    // 3. 停止异步等待任务
     if (WaitEventTask)
     {
         WaitEventTask->EndTask();

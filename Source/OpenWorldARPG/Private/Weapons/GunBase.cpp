@@ -4,7 +4,6 @@
 #include "Components/StaticMeshComponent.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
-#include "NiagaraFunctionLibrary.h"
 #include "Kismet/GameplayStatics.h"
 
 AGunBase::AGunBase()
@@ -30,15 +29,18 @@ void AGunBase::PlayShootFX()
     // 1. 播放枪口火焰 (Muzzle Flash)
     if (MuzzleFlashEffect)
     {
-        // 使用 SpawnSystemAttached，确保枪口火焰会跟随枪管一起移动
-        UNiagaraFunctionLibrary::SpawnSystemAttached(
+        // 使用 SpawnEmitterAttached 播放旧版粒子系统
+        UGameplayStatics::SpawnEmitterAttached(
             MuzzleFlashEffect,
             WeaponMesh,
             MuzzleSocketName,
-            FVector::ZeroVector, // 本地位置偏移
-            FRotator::ZeroRotator, // 本地旋转偏移
+            FVector::ZeroVector,
+            FRotator::ZeroRotator,
+            MuzzleFlashScale,
             EAttachLocation::SnapToTarget,
-            true // 自动销毁
+            true, // bAutoDestroy
+            EPSCPoolMethod::None,
+            true // bAutoActivate
         );
     }
 

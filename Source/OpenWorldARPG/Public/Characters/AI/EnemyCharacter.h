@@ -33,9 +33,7 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Enemy|GAS")
     virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override { return AbilitySystemComponent; }
 
-    // ==========================================
-    // 蓝图核心接口转化
-    // ==========================================
+    // --- 接口 ---
 
     UFUNCTION(BlueprintCallable, Category = "Enemy|Animation")
     void BindAnimLayers();
@@ -52,28 +50,22 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Enemy|Combat")
     void CancelMeleeAttack();
 
-    // 由动画蒙太奇中的 Notify 调用的伤害应用函数
     UFUNCTION(BlueprintCallable, Category = "Enemy|Combat")
     void ApplyDamage();
 
     UFUNCTION(BlueprintCallable, Category = "Enemy|State")
     void OnDead();
 
-    // ==========================================
-    // ICombatInterface
-    // ==========================================
+    // --- ICombatInterface ---
 
     virtual void HandleDeath_Implementation() override;
 
-    // ==========================================
-    // 事件分发器
-    // ==========================================
+    // --- 事件 ---
 
     UPROPERTY(BlueprintAssignable, Category = "Enemy|Events")
     FOnEnemyAttackFinished OnAttackFinished;
 
 protected:
-    // GAS 属性变化回调（C++ 内部调用，不暴露给蓝图，因为 FOnAttributeChangeData 无法被 UHT 解析）
     virtual void OnHealthAttributeChanged(const FOnAttributeChangeData& Data);
 
     UFUNCTION()
@@ -82,9 +74,7 @@ protected:
     void DestroyEnemy();
 
 protected:
-    // ==========================================
-    // 组件
-    // ==========================================
+    // --- 组件 ---
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|GAS")
     TObjectPtr<UAbilitySystemComponent> AbilitySystemComponent;
@@ -92,13 +82,10 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|GAS")
     TObjectPtr<UAS_Enemy> AttributeSet;
 
-    // 对应蓝图中的 Health Bar 控件
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy|UI")
     TObjectPtr<UWidgetComponent> HealthBarComponent;
 
-    // ==========================================
-    // 配置项：武器与表现
-    // ==========================================
+    // --- 配置：武器与表现 ---
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Config|Weapon")
     TSubclassOf<AActor> WeaponClass;
@@ -109,9 +96,7 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Config|Animation")
     TSubclassOf<UAnimInstance> AnimLayerClass;
 
-    // ==========================================
-    // 配置项：战斗参数
-    // ==========================================
+    // --- 配置：战斗参数 ---
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Config|Combat")
     TObjectPtr<UAnimMontage> ComboAttackMontage;
@@ -128,9 +113,7 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Config|Combat")
     float DamageTraceForwardEndOffset = 100.0f;
 
-    // ==========================================
-    // 配置项：死亡参数
-    // ==========================================
+    // --- 配置：死亡参数 ---
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Config|State")
     TSubclassOf<class UGameplayAbility> DeathAbilityClass;

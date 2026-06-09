@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #pragma once
 
@@ -6,9 +6,6 @@
 #include "Vehicles/VehicleBase.h"
 #include "WheeledVehicle.generated.h"
 
-/**
- * 
- */
 UCLASS()
 class OPENWORLDARPG_API AWheeledVehicle : public AVehicleBase
 {

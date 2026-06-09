@@ -1,9 +1,10 @@
-// Copyright 2025 WiloMyst. All Rights Reserved.
+﻿// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "GAS/Abilities/GA_WalkBase.h"
 #include "AbilitySystemComponent.h"
 #include "Abilities/Tasks/AbilityTask_WaitGameplayEvent.h"
 #include "Components/OpenWorldARPGCharacterMovementComponent.h"
+#include "GAS/ARPGGameplayAbilityActorInfo.h"
 #include "GameFramework/Character.h"
 
 UGA_WalkBase::UGA_WalkBase()
@@ -22,7 +23,9 @@ void UGA_WalkBase::ActivateAbility(const FGameplayAbilitySpecHandle Handle, cons
 
     ACharacter* Character = Cast<ACharacter>(ActorInfo->AvatarActor.Get());
     UAbilitySystemComponent* ASC = ActorInfo->AbilitySystemComponent.Get();
-    UOpenWorldARPGCharacterMovementComponent* CustomMoveComp = Character ? Character->FindComponentByClass<UOpenWorldARPGCharacterMovementComponent>() : nullptr;
+    // O(1) 读取缓存的 CMC 指针，替代 FindComponentByClass O(N) 遍历
+    const FARPGGameplayAbilityActorInfo* ARPGActorInfo = StaticCast<const FARPGGameplayAbilityActorInfo*>(ActorInfo);
+    UOpenWorldARPGCharacterMovementComponent* CustomMoveComp = ARPGActorInfo ? ARPGActorInfo->CustomMovementComponent : nullptr;
 
     if (!ASC || !CustomMoveComp)
     {
@@ -30,27 +33,15 @@ void UGA_WalkBase::ActivateAbility(const FGameplayAbilitySpecHandle Handle, cons
         return;
     }
 
-    // ==========================================
-    // CMC 职责：修改 MaxWalkSpeed
+        // CMC 职责：修改 MaxWalkSpeed
     // GA 只发送"进入慢走"的意愿，不传递任何物理参数
-    // ==========================================
-    CustomMoveComp->EnterWalkMode();
+        CustomMoveComp->EnterWalkMode();
 
-    // ==========================================
-    // GA 职责：意愿和表现
-    // ==========================================
+        // GA 职责：意愿和表现
+    
+    // 状态 Tag 由 ActivationOwnedTags 管理，GA 不再通过 GE 重复注入
 
-    // 1. 应用状态 GE (意愿层：Tag 状态标记)
-    if (WalkStateEffectClass)
-    {
-        FGameplayEffectSpecHandle SpecHandle = ASC->MakeOutgoingSpec(WalkStateEffectClass, 1.0f, ASC->MakeEffectContext());
-        if (SpecHandle.IsValid())
-        {
-            ActiveWalkEffectHandle = ASC->ApplyGameplayEffectSpecToSelf(*SpecHandle.Data.Get());
-        }
-    }
-
-    // 2. 监听停止事件 (意愿层：等待玩家输入或系统取消)
+    // 监听停止事件 (意愿层：等待玩家输入或系统取消)
     if (StopWalkEventTag.IsValid())
     {
         WaitEventTask = UAbilityTask_WaitGameplayEvent::WaitGameplayEvent(this, StopWalkEventTag, nullptr, false, true);
@@ -69,30 +60,21 @@ void UGA_WalkBase::OnStopWalkEventReceived(FGameplayEventData Payload)
 
 void UGA_WalkBase::EndAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateEndAbility, bool bWasCancelled)
 {
-    ACharacter* Character = Cast<ACharacter>(ActorInfo->AvatarActor.Get());
-    UAbilitySystemComponent* ASC = ActorInfo->AbilitySystemComponent.Get();
-    UOpenWorldARPGCharacterMovementComponent* CustomMoveComp = Character ? Character->FindComponentByClass<UOpenWorldARPGCharacterMovementComponent>() : nullptr;
+    // O(1) 读取缓存的 CMC 指针
+    const FARPGGameplayAbilityActorInfo* ARPGActorInfo = StaticCast<const FARPGGameplayAbilityActorInfo*>(ActorInfo);
+    UOpenWorldARPGCharacterMovementComponent* CustomMoveComp = ARPGActorInfo ? ARPGActorInfo->CustomMovementComponent : nullptr;
 
-    // ==========================================
-    // CMC 职责：恢复 MaxWalkSpeed
-    // ==========================================
-    if (CustomMoveComp && CustomMoveComp->IsWalking())
+        // CMC 职责：恢复 MaxWalkSpeed
+        if (CustomMoveComp && CustomMoveComp->IsWalking())
     {
         CustomMoveComp->ExitWalkMode();
     }
 
-    // ==========================================
-    // GA 职责：清理意愿和表现
-    // ==========================================
+        // GA 职责：清理意愿和表现
+    
+    // 状态 Tag 由 ActivationOwnedTags 管理，GA 不再负责 GE 的移除
 
-    // 1. 移除慢走 GE (意愿层)
-    if (ASC && ActiveWalkEffectHandle.IsValid())
-    {
-        ASC->RemoveActiveGameplayEffect(ActiveWalkEffectHandle);
-        ActiveWalkEffectHandle.Invalidate();
-    }
-
-    // 2. 停止异步等待任务
+    // 停止异步等待任务
     if (WaitEventTask)
     {
         WaitEventTask->EndTask();

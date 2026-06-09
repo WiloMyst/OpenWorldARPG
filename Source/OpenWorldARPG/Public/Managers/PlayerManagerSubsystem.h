@@ -7,8 +7,7 @@
 #include "PlayerManagerSubsystem.generated.h"
 
 /**
- * @class UPlayerManagerSubsystem
- * @brief 玩家账户管理子系统。负责玩家基础数据、登录状态与跨角色共享属性。
+ * 玩家账户管理子系统。负责玩家基础数据、登录状态与跨角色共享属性。
  */
 UCLASS()
 class OPENWORLDARPG_API UPlayerManagerSubsystem : public UGameInstanceSubsystem

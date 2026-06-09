@@ -18,14 +18,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnActiveCharacterIndexChanged, int
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnTeamCharacterActorsChanged);
 
 /**
- * @class AMainGamePlayerState
- * @brief 主游戏 PlayerState，掌管队伍角色实体的网络同步数据。
- *
- * 架构原则（Client-Server Authoritative Model）：
- * - 服务器是数据真理，客户端通过 Replicated 属性接收同步
- * - TeamCharacterActors 和 ActiveCharacterIndex 由服务器设置，客户端只读
- * - OnRep 回调驱动本地 UI 刷新（通过 TeamManagerSubsystem 广播）
- * - PlayerCharacter 不直接查询网络同步细节，保持解耦
+ * 主游戏 PlayerState。掌管队伍角色实体的网络同步数据。
+ * 服务器是数据真理，客户端通过 Replicated 属性接收同步。
  */
 UCLASS()
 class OPENWORLDARPG_API AMainGamePlayerState : public APlayerState
@@ -37,9 +31,7 @@ public:
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
-	// ==========================================
-	// 队伍角色 Actor 管理 (服务器权威)
-	// ==========================================
+	// --- 队伍角色管理 (服务器权威) ---
 
 	/** 获取队伍角色实例数组 */
 	UFUNCTION(BlueprintPure, Category = "PlayerState|Team")
@@ -65,9 +57,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "PlayerState|Team")
 	void AddTeamCharacter(APlayerCharacter* InCharacter);
 
-	// ==========================================
-	// 激活角色索引 (服务器权威 + OnRep 通知)
-	// ==========================================
+	// --- 激活角色索引 (服务器权威 + OnRep) ---
 
 	/** 获取当前激活角色索引 */
 	UFUNCTION(BlueprintPure, Category = "PlayerState|Team")
@@ -81,9 +71,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "PlayerState|Team")
 	void SetActiveCharacterIndex(int32 NewIndex);
 
-	// ==========================================
-	// 事件 (由 OnRep 驱动，供本地 UI 订阅)
-	// ==========================================
+	// --- 事件 (OnRep 驱动) ---
 
 	UPROPERTY(BlueprintAssignable, Category = "PlayerState|Events")
 	FOnActiveCharacterIndexChanged OnActiveCharacterIndexChanged;
@@ -92,20 +80,16 @@ public:
 	FOnTeamCharacterActorsChanged OnTeamCharacterActorsChanged;
 
 protected:
-	/** OnRep 回调：激活角色索引变化时，驱动本地 UI 刷新 */
 	UFUNCTION()
 	void OnRep_ActiveCharacterIndex(int32 OldIndex);
 
-	/** OnRep 回调：队伍角色列表变化时，驱动本地 UI 刷新 */
 	UFUNCTION()
 	void OnRep_TeamCharacterActors();
 
 private:
-	/** 当前出战队伍的角色实例 (服务器设置，客户端同步) */
 	UPROPERTY(ReplicatedUsing = OnRep_TeamCharacterActors)
 	TArray<APlayerCharacter*> TeamCharacterActors;
 
-	/** 当前激活角色在队伍中的索引 (服务器设置，客户端同步) */
 	UPROPERTY(ReplicatedUsing = OnRep_ActiveCharacterIndex)
 	int32 ActiveCharacterIndex = -1;
 };

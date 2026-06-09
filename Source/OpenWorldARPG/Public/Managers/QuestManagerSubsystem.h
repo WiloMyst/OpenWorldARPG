@@ -7,8 +7,7 @@
 #include "QuestManagerSubsystem.generated.h"
 
 /**
- * @class UQuestManagerSubsystem
- * @brief 任务管理子系统。负责任务状态追踪、完成判定与奖励发放。
+ * 任务管理子系统。负责任务状态追踪、完成判定与奖励发放。
  */
 UCLASS()
 class OPENWORLDARPG_API UQuestManagerSubsystem : public UGameInstanceSubsystem

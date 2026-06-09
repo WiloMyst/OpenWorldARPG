@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #pragma once
 
@@ -13,8 +13,7 @@ class APlayerController;
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBestTargetChanged, AActor*, OldTarget, AActor*, NewTarget);
 
 /**
- * @class UTargetSelectionComponent
- * @brief 通用的视野目标选取组件。负责维护周围有效目标列表，并基于摄像机朝向筛选最优目标。
+ * 视野目标选取组件。维护周围有效目标列表，基于摄像机朝向筛选最优目标。
  */
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class OPENWORLDARPG_API UTargetSelectionComponent : public UActorComponent
@@ -25,9 +24,7 @@ public:
     UTargetSelectionComponent();
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    // ==========================================
-    // 供目标基类或外部调用的数组管理接口
-    // ==========================================
+    // --- 目标管理 ---
 
     UFUNCTION(BlueprintCallable, Category = "Targeting")
     void AddTarget(AActor* NewTarget);
@@ -45,19 +42,13 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-    // ==========================================
-    // 内部核心算法
-    // ==========================================
+    // --- 内部算法 ---
 
     float CalculateAngleDot(AActor* Target) const;
     AActor* FindBestTarget() const;
 
 protected:
-    // ==========================================
-    // 配置项
-    // ==========================================
-
-    /** 判定为有效目标的最小点积阈值 (越大要求越精准正对) */
+    // --- 配置 ---
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Targeting|Config")
     float MinDotThreshold = 0.3f;
 

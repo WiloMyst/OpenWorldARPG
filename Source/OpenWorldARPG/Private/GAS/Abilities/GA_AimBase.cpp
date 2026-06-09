@@ -1,10 +1,12 @@
-// Copyright 2025 WiloMyst. All Rights Reserved.
+﻿// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "GAS/Abilities/GA_AimBase.h"
 #include "AbilitySystemComponent.h"
 #include "Abilities/Tasks/AbilityTask_WaitGameplayEvent.h"
 #include "AbilitySystemBlueprintLibrary.h"
 #include "Components/OpenWorldARPGCharacterMovementComponent.h"
+#include "Components/CharacterWeaponComponent.h"
+#include "GAS/ARPGGameplayAbilityActorInfo.h"
 #include "GameFramework/Character.h"
 
 UGA_AimBase::UGA_AimBase()
@@ -23,7 +25,9 @@ void UGA_AimBase::ActivateAbility(const FGameplayAbilitySpecHandle Handle, const
 
     ACharacter* Character = Cast<ACharacter>(ActorInfo->AvatarActor.Get());
     UAbilitySystemComponent* ASC = ActorInfo->AbilitySystemComponent.Get();
-    UOpenWorldARPGCharacterMovementComponent* CustomMoveComp = Character ? Character->FindComponentByClass<UOpenWorldARPGCharacterMovementComponent>() : nullptr;
+    // O(1) 读取缓存的 CMC 指针，替代 FindComponentByClass O(N) 遍历
+    const FARPGGameplayAbilityActorInfo* ARPGActorInfo = StaticCast<const FARPGGameplayAbilityActorInfo*>(ActorInfo);
+    UOpenWorldARPGCharacterMovementComponent* CustomMoveComp = ARPGActorInfo ? ARPGActorInfo->CustomMovementComponent : nullptr;
 
     if (!Character || !CustomMoveComp || !ASC)
     {
@@ -31,15 +35,17 @@ void UGA_AimBase::ActivateAbility(const FGameplayAbilitySpecHandle Handle, const
         return;
     }
 
-    // ==========================================
-    // CMC 职责：修改 MaxWalkSpeed、旋转模式
+        // CMC 职责：修改 MaxWalkSpeed、旋转模式
     // GA 只发送"进入瞄准"的意愿，不传递任何物理参数
-    // ==========================================
-    CustomMoveComp->EnterAimMode();
+        CustomMoveComp->EnterAimMode();
 
-    // ==========================================
-    // GA 职责：意愿和表现
-    // ==========================================
+        // GA 职责：意愿和表现
+
+    // 0. 武器拿到手上
+    if (UCharacterWeaponComponent* WeaponComp = Character->FindComponentByClass<UCharacterWeaponComponent>())
+    {
+        WeaponComp->WeaponToHand();
+    }
 
     // 1. 发送蒙太奇事件到武器组件 (意愿层：通知武器组件播放瞄准动画)
     if (AimMontageEventTag.IsValid())
@@ -47,15 +53,7 @@ void UGA_AimBase::ActivateAbility(const FGameplayAbilitySpecHandle Handle, const
         UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(Character, AimMontageEventTag, FGameplayEventData());
     }
 
-    // 2. 应用状态 GE (意愿层：Tag 状态标记)
-    if (AimStateEffectClass)
-    {
-        FGameplayEffectSpecHandle SpecHandle = ASC->MakeOutgoingSpec(AimStateEffectClass, 1.0f, ASC->MakeEffectContext());
-        if (SpecHandle.IsValid())
-        {
-            ActiveAimEffectHandle = ASC->ApplyGameplayEffectSpecToSelf(*SpecHandle.Data.Get());
-        }
-    }
+    // 2. 状态 Tag 由 ActivationOwnedTags 管理，GA 不再通过 GE 重复注入
 
     // 3. 监听停止事件 (意愿层：等待玩家输入或系统取消)
     if (StopAimEventTag.IsValid())
@@ -76,30 +74,21 @@ void UGA_AimBase::OnStopAimEventReceived(FGameplayEventData Payload)
 
 void UGA_AimBase::EndAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateEndAbility, bool bWasCancelled)
 {
-    ACharacter* Character = Cast<ACharacter>(ActorInfo->AvatarActor.Get());
-    UAbilitySystemComponent* ASC = ActorInfo->AbilitySystemComponent.Get();
-    UOpenWorldARPGCharacterMovementComponent* CustomMoveComp = Character ? Character->FindComponentByClass<UOpenWorldARPGCharacterMovementComponent>() : nullptr;
+    // O(1) 读取缓存的 CMC 指针
+    const FARPGGameplayAbilityActorInfo* ARPGActorInfo = StaticCast<const FARPGGameplayAbilityActorInfo*>(ActorInfo);
+    UOpenWorldARPGCharacterMovementComponent* CustomMoveComp = ARPGActorInfo ? ARPGActorInfo->CustomMovementComponent : nullptr;
 
-    // ==========================================
-    // CMC 职责：恢复 MaxWalkSpeed、旋转模式
-    // ==========================================
-    if (CustomMoveComp && CustomMoveComp->IsAiming())
+        // CMC 职责：恢复 MaxWalkSpeed、旋转模式
+        if (CustomMoveComp && CustomMoveComp->IsAiming())
     {
         CustomMoveComp->ExitAimMode();
     }
 
-    // ==========================================
-    // GA 职责：清理意愿和表现
-    // ==========================================
+        // GA 职责：清理意愿和表现
+    
+    // 状态 Tag 由 ActivationOwnedTags 管理，GA 不再负责 GE 的移除
 
-    // 1. 移除瞄准 GE (意愿层)
-    if (ASC && ActiveAimEffectHandle.IsValid())
-    {
-        ASC->RemoveActiveGameplayEffect(ActiveAimEffectHandle);
-        ActiveAimEffectHandle.Invalidate();
-    }
-
-    // 2. 停止异步等待任务
+    // 停止异步等待任务
     if (WaitEventTask)
     {
         WaitEventTask->EndTask();

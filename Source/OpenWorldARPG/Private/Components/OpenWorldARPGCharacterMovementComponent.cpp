@@ -1,4 +1,4 @@
-// Copyright 2025 WiloMyst. All Rights Reserved.
+﻿// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Components/OpenWorldARPGCharacterMovementComponent.h"
 #include "Components/ClimbingComponent.h"
@@ -78,65 +78,68 @@ void UOpenWorldARPGCharacterMovementComponent::OnMovementModeChanged(EMovementMo
 
 	Super::OnMovementModeChanged(PreviousMovementMode, PreviousCustomMode);
 
-	if (!CachedASC) return;
-
 	// ==========================================
-	// 状态 1：落地 (Walking / NavWalking)
+	// GAS Tag 映射：CMC 管理被动运动状态 Tag (Airborne/Falling)
+	// 主动行为 Tag (Climbing/Gliding) 由 GA 的 ActivationOwnedTags 管理
 	// ==========================================
-	if (MovementMode == MOVE_Walking || MovementMode == MOVE_NavWalking)
+	if (CachedASC)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[CMC] OnMovementModeChanged: LANDED (Walking)"));
+		// 1. 清除被动运动状态 Tags
+		if (AirborneTag.IsValid())  CachedASC->RemoveLooseGameplayTag(AirborneTag);
+		if (FallingTag.IsValid())   CachedASC->RemoveLooseGameplayTag(FallingTag);
 
-		// 暴力移除所有空中相关标签
-		if (AirborneTag.IsValid()) CachedASC->RemoveLooseGameplayTag(AirborneTag);
-		if (FallingTag.IsValid())  CachedASC->RemoveLooseGameplayTag(FallingTag);
-		if (GlidingTag.IsValid())  CachedASC->RemoveLooseGameplayTag(GlidingTag);
-
-		// 设置 Walking 物理参数 (CMC 统一管理)
-		AirControl = 0.0f;
-		RotationRate = GroundedRotationRate;
-		bOrientRotationToMovement = true;
-
-		// 如果上一个状态是在空中，说明这是"刚刚落地"的一瞬间
-		if (PreviousMovementMode == MOVE_Falling || PreviousMovementMode == MOVE_Custom)
+		// 2. 根据 MovementMode 注入当前被动状态 Tag
+		if (MovementMode == MOVE_Walking || MovementMode == MOVE_NavWalking)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("[CMC] OnMovementModeChanged: Was airborne, sending StopGlideEvent"));
-			// 完美复刻原 GA 的兜底逻辑：落地强制关闭滑翔伞
-			if (StopGlideEventTag.IsValid() && CachedOwnerCharacter)
+			// 设置 Walking 物理参数 (CMC 统一管理)
+			AirControl = 0.0f;
+			RotationRate = GroundedRotationRate;
+			bOrientRotationToMovement = true;
+
+			// 如果上一个状态是在空中，说明这是"刚刚落地"的一瞬间
+			if (PreviousMovementMode == MOVE_Falling || PreviousMovementMode == MOVE_Custom)
 			{
-				UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(CachedOwnerCharacter.Get(), StopGlideEventTag, FGameplayEventData());
+				UE_LOG(LogTemp, Warning, TEXT("[CMC] OnMovementModeChanged: Was airborne, sending StopGlideEvent"));
+				if (StopGlideEventTag.IsValid() && CachedOwnerCharacter)
+				{
+					UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(CachedOwnerCharacter.Get(), StopGlideEventTag, FGameplayEventData());
+				}
+			}
+		}
+		else if (MovementMode == MOVE_Falling)
+		{
+			if (AirborneTag.IsValid()) CachedASC->AddLooseGameplayTag(AirborneTag);
+			if (FallingTag.IsValid())  CachedASC->AddLooseGameplayTag(FallingTag);
+
+			// 设置 Falling 物理参数 (CMC 统一管理)
+			AirControl = FallingAirControl;
+			RotationRate = FallingRotationRate;
+			bOrientRotationToMovement = true;
+		}
+		else if (MovementMode == MOVE_Custom)
+		{
+			const ECustomMovementMode CurrCustom = static_cast<ECustomMovementMode>(CustomMovementMode);
+
+			if (CurrCustom == ECustomMovementMode::Gliding)
+			{
+				if (AirborneTag.IsValid()) CachedASC->AddLooseGameplayTag(AirborneTag);
+			}
+			else if (CurrCustom == ECustomMovementMode::Climbing
+				|| CurrCustom == ECustomMovementMode::ClimbingCornerTransition
+				|| CurrCustom == ECustomMovementMode::ClimbUp)
+			{
+				// 攀爬/墙角过渡/翻越：无被动运动状态 Tag 需要注入
 			}
 		}
 	}
-	// ==========================================
-	// 状态 2：自由掉落 (Falling)
-	// ==========================================
-	else if (MovementMode == MOVE_Falling)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("[CMC] OnMovementModeChanged: FALLING, GravityScale=%.2f"), GravityScale);
-		// 注入空中和掉落标签，移除滑翔标签
-		if (AirborneTag.IsValid()) CachedASC->AddLooseGameplayTag(AirborneTag);
-		if (FallingTag.IsValid())  CachedASC->AddLooseGameplayTag(FallingTag);
-		if (GlidingTag.IsValid())  CachedASC->RemoveLooseGameplayTag(GlidingTag);
-
-		// 设置 Falling 物理参数 (CMC 统一管理)
-		AirControl = FallingAirControl;
-		RotationRate = FallingRotationRate;
-		bOrientRotationToMovement = true;
-	}
-	// ==========================================
-	// 状态 3：特殊空中模式 (例如滑翔 Gliding)
-	// ==========================================
-	else if (MovementMode == MOVE_Custom && static_cast<ECustomMovementMode>(CustomMovementMode) == ECustomMovementMode::Gliding)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("[CMC] OnMovementModeChanged: GLIDING, GravityScale=%.2f, AirControl=%.2f"), GravityScale, AirControl);
-		// 注入空中和滑翔标签，移除掉落标签
-		if (AirborneTag.IsValid()) CachedASC->AddLooseGameplayTag(AirborneTag);
-		if (GlidingTag.IsValid())  CachedASC->AddLooseGameplayTag(GlidingTag);
-		if (FallingTag.IsValid())  CachedASC->RemoveLooseGameplayTag(FallingTag);
-	}
 
 	UE_LOG(LogTemp, Warning, TEXT("[CMC] OnMovementModeChanged END: GravityScale=%.2f, AirControl=%.2f"), GravityScale, AirControl);
+
+	// ==========================================
+	// 事件驱动：广播 MovementMode 改变 (替代 FSM Tick 轮询)
+	// 在所有物理逻辑和 Tag 注入完毕后触发，确保监听者读到的是最终状态
+	// ==========================================
+	OnMovementModeChangedDelegate.Broadcast(PreviousMovementMode, MovementMode.GetValue(), PreviousCustomMode, CustomMovementMode);
 }
 
 // ==========================================
@@ -393,11 +396,11 @@ void UOpenWorldARPGCharacterMovementComponent::PhysClimbUp(float DeltaTime, int3
 
 	// 位置插值
 	FVector CurrentLocation = Char->GetActorLocation();
-	FVector NewLocation = FMath::VInterpTo(CurrentLocation, ClimbUpTargetLocation, DeltaTime, ClimbUpPositionInterpSpeed);
+	FVector NewLocation = FMath::VInterpConstantTo(CurrentLocation, ClimbUpTargetLocation, DeltaTime, ClimbUpPositionInterpSpeed);
 
 	// 旋转插值
 	FRotator CurrentRot = Char->GetActorRotation();
-	FRotator NewRot = FMath::RInterpTo(CurrentRot, ClimbUpTargetRotation, DeltaTime, ClimbUpRotationInterpSpeed);
+	FRotator NewRot = FMath::RInterpConstantTo(CurrentRot, ClimbUpTargetRotation, DeltaTime, ClimbUpRotationInterpSpeed);
 
 	// 应用位移
 	FHitResult Hit;
@@ -426,9 +429,6 @@ void UOpenWorldARPGCharacterMovementComponent::EnterGlideMode()
 		if (!Char) return;
 	}
 
-	UE_LOG(LogTemp, Warning, TEXT("[CMC] EnterGlideMode: BEFORE GravityScale=%.2f, AirControl=%.2f, RotationRate=%s"),
-		GravityScale, AirControl, *RotationRate.ToString());
-
 	// 1. 缓存原始物理参数 (在修改之前)
 	OriginalGravityScale = GravityScale;
 	OriginalAirControl = AirControl;
@@ -440,11 +440,8 @@ void UOpenWorldARPGCharacterMovementComponent::EnterGlideMode()
 	RotationRate = GlideRotationRate;
 	bOrientRotationToMovement = true;
 
-	UE_LOG(LogTemp, Warning, TEXT("[CMC] EnterGlideMode: AFTER GravityScale=%.2f(Orig=%.2f), AirControl=%.2f(Orig=%.2f), LaunchVel=%s"),
-		GravityScale, OriginalGravityScale, AirControl, OriginalAirControl, *GlideLaunchVelocity.ToString());
-
-	// 3. 施加初始弹射力 (使用 CMC 自己的 GlideLaunchVelocity)
-	Launch(GlideLaunchVelocity);
+	// 3. 施加初始速度 (使用 CMC 自己的 GlideLaunchVelocity)
+	Velocity = FVector(GlideLaunchVelocity.X, GlideLaunchVelocity.Y, GlideLaunchVelocity.Z);
 
 	// 4. 切换到滑翔自定义移动模式
 	SetMovementMode(MOVE_Custom, static_cast<uint8>(ECustomMovementMode::Gliding));
@@ -464,6 +461,23 @@ void UOpenWorldARPGCharacterMovementComponent::ExitGlideMode()
 bool UOpenWorldARPGCharacterMovementComponent::IsGliding() const
 {
 	return MovementMode == MOVE_Custom && static_cast<ECustomMovementMode>(CustomMovementMode) == ECustomMovementMode::Gliding;
+}
+
+bool UOpenWorldARPGCharacterMovementComponent::IsClimbing() const
+{
+	if (MovementMode != MOVE_Custom) return false;
+	const ECustomMovementMode CurrCustom = static_cast<ECustomMovementMode>(CustomMovementMode);
+	return CurrCustom == ECustomMovementMode::Climbing || CurrCustom == ECustomMovementMode::ClimbingCornerTransition;
+}
+
+bool UOpenWorldARPGCharacterMovementComponent::IsFalling() const
+{
+	return MovementMode == MOVE_Falling;
+}
+
+bool UOpenWorldARPGCharacterMovementComponent::IsGrounded() const
+{
+	return MovementMode == MOVE_Walking || MovementMode == MOVE_NavWalking;
 }
 
 // ==========================================

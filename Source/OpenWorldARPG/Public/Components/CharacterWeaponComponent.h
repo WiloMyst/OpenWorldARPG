@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "GameplayTagContainer.h" // 必须包含这个才能在头文件用 FGameplayTag
+#include "GameplayTagContainer.h"
 #include "CharacterWeaponComponent.generated.h"
 
 class APlayerCharacter;
@@ -43,15 +43,11 @@ protected:
     UPROPERTY()
     TObjectPtr<APlayerCharacter> CachedCharacter;
 
-    // ==========================================
-    // 暴露给蓝图的配置项 (彻底告别硬编码)
-    // ==========================================
+    // --- 配置 ---
 
     UPROPERTY(EditDefaultsOnly, Category = "Weapon System|Config|Sockets")
     FName HandSocketName = FName("HandSocket");
 
-    // --- 【修改这里】：使用 Tag Container 容纳所有阻止武器收起的标签 ---
-    // 策划可以在蓝图里配无数个状态（攻击、瞄准、施法、格挡、僵直...）
     UPROPERTY(EditDefaultsOnly, Category = "Weapon System|Config|Tags")
     FGameplayTagContainer PreventStowTags;
 

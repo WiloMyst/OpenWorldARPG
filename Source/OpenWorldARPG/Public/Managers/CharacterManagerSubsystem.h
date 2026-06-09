@@ -15,11 +15,7 @@ struct FCharacterInfoRow;
 
 
 /**
- * @class UCharacterManagerSubsystem
- * @brief 角色数据管理子系统（纯数据层，不持有 Actor 引用）。
- *
- * 架构原则：GameInstanceSubsystem 管理跨关卡持久数据，不持有关卡内 Actor 引用。
- * Actor 引用由 World 层的 AMainGameGameMode 管理，随关卡销毁自然清理。
+ * 角色数据管理子系统（纯数据层，不持有 Actor 引用）。
  */
 UCLASS()
 class OPENWORLDARPG_API UCharacterManagerSubsystem : public UGameInstanceSubsystem
@@ -32,7 +28,7 @@ public:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
 
-	// ---- 核心 API ----
+	// --- 核心 API ---
 
 	/** 从 StartingRosterConfig 填充加载缓冲区，仅在游戏初始化时调用 */
 	UFUNCTION(BlueprintCallable, Category = "CharacterManager|Initialization")
@@ -46,20 +42,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "CharacterManager|Data")
 	FName GetRowNameByTag(const FGameplayTag& CharacterTag) const;
 
-	/**
-	 * @brief 获取加载缓冲区（仅在 GeneratePlayerCharacters 期间使用）。
-	 * 角色实体生成后，数据已移入 APlayerCharacter::RuntimeData，此缓冲区不再作为数据源。
-	 */
+	/** 获取加载缓冲区（仅在 GeneratePlayerCharacters 期间使用）。 */
 	const TArray<FCharacterSaveData>& GetLoadBuffer() const { return LoadBuffer; }
 
-	/** 清空加载缓冲区（角色全部生成并初始化后调用） */
+	/** 清空加载缓冲区（角色全部生成并初始化后调用）。 */
 	void ClearLoadBuffer() { LoadBuffer.Empty(); }
 
-	/**
-	 * @brief 从当前关卡的角色实例中收集存档数据。
-	 * @param CharacterActors 当前关卡中存活的角色实例（由 GameMode 提供）
-	 * @param OutSaveData 收集到的存档数据
-	 */
+	/** 从当前关卡的角色实例中收集存档数据。 */
 	void CollectSaveDataFromCharacters(const TArray<APlayerCharacter*>& CharacterActors, TArray<FCharacterSaveData>& OutSaveData) const;
 
 private:

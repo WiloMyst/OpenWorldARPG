@@ -1,4 +1,4 @@
-// Copyright 2025 WiloMyst. All Rights Reserved.
+﻿// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Components/CharacterWeaponComponent.h"
 #include "Characters/PlayerCharacter.h"
@@ -7,9 +7,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/SceneComponent.h"
 
-// =====================================================================
-// 生命周期与初始化
-// =====================================================================
+// --- 生命周期与初始化 ---
 
 UCharacterWeaponComponent::UCharacterWeaponComponent()
 {
@@ -25,9 +23,7 @@ void UCharacterWeaponComponent::BeginPlay()
     UE_LOG(LogTemp, Warning, TEXT("[WeaponComp] BeginPlay: Owner=%s, CachedCharacter=%s"), *GetNameSafe(GetOwner()), CachedCharacter ? *CachedCharacter->GetName() : TEXT("NULL"));
 }
 
-// =====================================================================
-// 核心武器状态机
-// =====================================================================
+// --- 核心武器状态机 ---
 
 void UCharacterWeaponComponent::InitializeCharacterWeapon()
 {
@@ -139,9 +135,7 @@ void UCharacterWeaponComponent::SetWeaponHidden(bool bHidden)
     }
 }
 
-// =====================================================================
-// 状态轮询 (自动收回逻辑)
-// =====================================================================
+// --- 状态轮询 (自动收回逻辑) ---
 
 void UCharacterWeaponComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {

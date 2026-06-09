@@ -1,4 +1,4 @@
-// Copyright 2025 WiloMyst. All Rights Reserved.
+﻿// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Components/BackpackComponent.h"
 #include "Items/ItemBase.h"
@@ -91,9 +91,7 @@ int32 UBackpackComponent::GetOwnerCharacterID() const
     return -1;
 }
 
-// ==========================================
-// 拾取物品 (Client → Server RPC)
-// ==========================================
+// --- 拾取物品 (Client → Server RPC) ---
 
 void UBackpackComponent::PickUpItem()
 {
@@ -156,9 +154,7 @@ void UBackpackComponent::Server_PickUpItem_Implementation(int32 ItemID, int32 Am
     }
 }
 
-// ==========================================
-// 丢弃物品 (Client → Server RPC)
-// ==========================================
+// --- 丢弃物品 (Client → Server RPC) ---
 
 void UBackpackComponent::DropItemByGUID(FGuid ItemGUID, int32 DropAmount)
 {

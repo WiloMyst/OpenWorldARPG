@@ -5,8 +5,6 @@
 #include "CoreMinimal.h"
 #include "ItemTypes.generated.h"
 
-// ======= 物品通用枚举 =======
-
 UENUM(BlueprintType)
 enum class EItemCategory : uint8
 {

@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "GAS/Abilities/GA_PlungeAttackBase.h"
 #include "AbilitySystemComponent.h"
@@ -13,7 +13,6 @@
 
 UGA_PlungeAttackBase::UGA_PlungeAttackBase()
 {
-    // 对应图6：设置高级默认项
     InstancingPolicy = EGameplayAbilityInstancingPolicy::InstancedPerActor;
     NetExecutionPolicy = EGameplayAbilityNetExecutionPolicy::LocalPredicted;
 }
@@ -33,17 +32,6 @@ void UGA_PlungeAttackBase::ActivateAbility(const FGameplayAbilitySpecHandle Hand
         return;
     }
 
-    // 1. 对应图1：赋予下落攻击状态 GE
-    if (PlungeStateEffectClass)
-    {
-        UAbilitySystemComponent* ASC = ActorInfo->AbilitySystemComponent.Get();
-        FGameplayEffectContextHandle Context = ASC->MakeEffectContext();
-        Context.AddSourceObject(this);
-        FGameplayEffectSpecHandle SpecHandle = ASC->MakeOutgoingSpec(PlungeStateEffectClass, 1.0f, Context);
-        PlungeStateEffectHandle = ASC->ApplyGameplayEffectSpecToSelf(*SpecHandle.Data.Get());
-    }
-
-    // 2. 对应图2：开始执行攻击流
     ExecuteAttack();
 }
 
@@ -51,31 +39,31 @@ void UGA_PlungeAttackBase::ExecuteAttack()
 {
     if (!CachedPlayer) return;
 
-    // 1. 对应图2：SET Interrupted by Land = false
     bInterruptedByLand = false;
 
-    // 2. 对应图2：Weapon to Hand
+    // 1. Weapon to Hand
     if (UCharacterWeaponComponent* WeaponComp = CachedPlayer->FindComponentByClass<UCharacterWeaponComponent>())
     {
         WeaponComp->WeaponToHand();
     }
 
-    // 3. 对应图2：清理惯性速度 (SET Velocity 0,0,0)
+    // 2. 滞空时清理速度 (可选：或者赋予一个向下的冲刺力)
     if (UCharacterMovementComponent* MoveComp = CachedPlayer->GetCharacterMovement())
     {
         MoveComp->Velocity = FVector::ZeroVector;
     }
 
-    // 4. 对应图2：获取下落蒙太奇并提取首个动画
+    // 3. 获取蒙太奇数组
     TArray<TSoftObjectPtr<UAnimMontage>> Montages = CachedPlayer->GetPlungeAttackMontages();
-    if (Montages.IsEmpty())
+    if (Montages.IsEmpty() || !Montages[0].IsValid())
     {
         EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);
         return;
     }
 
-    UAnimMontage* MontageToPlay = Montages[0].LoadSynchronous();
-    if (!MontageToPlay)
+    // 加载 [0] 号蒙太奇（空中下落循环动画）
+    UAnimMontage* FallMontage = Montages[0].LoadSynchronous();
+    if (!FallMontage)
     {
         EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);
         return;
@@ -83,24 +71,21 @@ void UGA_PlungeAttackBase::ExecuteAttack()
 
     ClearAllTasks();
 
-    // ==========================================
-    // 多线程并发监听区
-    // ==========================================
+    // --- 阶段一：多线程并发监听区 ---
 
-    // 任务1：播放蒙太奇
-    MontageTask = UAbilityTask_PlayMontageAndWait::CreatePlayMontageAndWaitProxy(this, NAME_None, MontageToPlay, 1.0f, NAME_None, true, 1.0f, 0.0f);
-    MontageTask->OnCompleted.AddDynamic(this, &UGA_PlungeAttackBase::OnMontageFinished);
-    MontageTask->OnBlendOut.AddDynamic(this, &UGA_PlungeAttackBase::OnMontageFinished);
-    MontageTask->OnInterrupted.AddDynamic(this, &UGA_PlungeAttackBase::OnMontageFinished);
-    MontageTask->OnCancelled.AddDynamic(this, &UGA_PlungeAttackBase::OnMontageFinished);
-    MontageTask->ReadyForActivation();
+    // 任务1：播放空中下落蒙太奇 (通常这是一个Loop动画，不会自然结束)
+    FallMontageTask = UAbilityTask_PlayMontageAndWait::CreatePlayMontageAndWaitProxy(this, NAME_None, FallMontage, 1.0f, NAME_None, true, 1.0f, 0.0f);
+    // 如果下落被打断或取消，结束技能
+    FallMontageTask->OnInterrupted.AddDynamic(this, &UGA_PlungeAttackBase::OnMontageFinished);
+    FallMontageTask->OnCancelled.AddDynamic(this, &UGA_PlungeAttackBase::OnMontageFinished);
+    FallMontageTask->ReadyForActivation();
 
-    // 任务2：监听移动模式变为 "行走(Walking)" 即落地判定 (对应图3的 WaitMovementModeChange)
+    // 任务2：监听移动模式变为 "行走(Walking)" 即落地判定
     MovementModeTask = UAbilityTask_WaitMovementModeChange::CreateWaitMovementModeChange(this, MOVE_Walking);
     MovementModeTask->OnChange.AddDynamic(this, &UGA_PlungeAttackBase::OnMovementModeChanged);
     MovementModeTask->ReadyForActivation();
 
-    // 任务3：监听伤害判定事件 (对应图4)
+    // 任务3：全局监听伤害判定事件 (等待 [1] 号蒙太奇里的 AnimNotify 触发)
     if (DamageDealEventTag.IsValid())
     {
         DamageTask = UAbilityTask_WaitGameplayEvent::WaitGameplayEvent(this, DamageDealEventTag, nullptr, false, false);
@@ -111,56 +96,93 @@ void UGA_PlungeAttackBase::ExecuteAttack()
 
 void UGA_PlungeAttackBase::OnMovementModeChanged(EMovementMode NewMovementMode)
 {
-    // 对应图3：落地触发 -> 设置打断标志位并结束技能
-    bInterruptedByLand = true;
+    // --- 阶段二：落地砸地 ---
 
-    // 当调用 EndAbility 时，底层的 MontageTask 会自动执行 Cancelled 回调。
-    // 但是因为我们设置了 bInterruptedByLand = true，它不会执行 CorrectPawnOrient。
-    // 这完美复刻了你的蓝图逻辑闭环！
+    // 1. 停止监听落地事件，停止当前的空中下落蒙太奇
+    if (MovementModeTask)
+    {
+        MovementModeTask->EndTask();
+        MovementModeTask = nullptr;
+    }
+    if (FallMontageTask)
+    {
+        FallMontageTask->EndTask();
+        FallMontageTask = nullptr;
+    }
+
+    // 强行停止当前的动画，为落地动画腾出轨道
+    UAbilitySystemComponent* ASC = GetAbilitySystemComponentFromActorInfo();
+    if (ASC)
+    {
+        ASC->CurrentMontageStop();
+    }
+
+    // 2. 获取并播放 [1] 号蒙太奇（落地砸地动画）
+    TArray<TSoftObjectPtr<UAnimMontage>> Montages = CachedPlayer->GetPlungeAttackMontages();
+    if (Montages.IsValidIndex(1) && Montages[1].IsValid())
+    {
+        UAnimMontage* LandingMontage = Montages[1].LoadSynchronous();
+        if (LandingMontage)
+        {
+            LandingMontageTask = UAbilityTask_PlayMontageAndWait::CreatePlayMontageAndWaitProxy(this, NAME_None, LandingMontage, 1.0f, NAME_None, true, 1.0f, 0.0f);
+
+            // 绑定落地动画结束的回调（动画播完后技能才算真正结束）
+            LandingMontageTask->OnCompleted.AddDynamic(this, &UGA_PlungeAttackBase::OnLandingMontageFinished);
+            LandingMontageTask->OnBlendOut.AddDynamic(this, &UGA_PlungeAttackBase::OnLandingMontageFinished);
+            LandingMontageTask->OnInterrupted.AddDynamic(this, &UGA_PlungeAttackBase::OnLandingMontageFinished);
+            LandingMontageTask->OnCancelled.AddDynamic(this, &UGA_PlungeAttackBase::OnLandingMontageFinished);
+
+            LandingMontageTask->ReadyForActivation();
+            return; // 成功播放落地动画，跳出函数等待动画结束
+        }
+    }
+
+    // 兜底：如果没有配置 [1] 号蒙太奇，落地后直接结束技能
+    CorrectPawnOrient();
     EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, false);
 }
 
 void UGA_PlungeAttackBase::OnMontageFinished()
 {
-    // 对应图3：蒙太奇自然结束 / 被打断 时的分支
-    if (!bInterruptedByLand)
-    {
-        // 如果不是因为落地打断的，执行朝向修正
-        CorrectPawnOrient();
-        EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, false);
-    }
+    // 这个用于处理“空中阶段”意外结束（比如被击飞打断）
+    CorrectPawnOrient();
+    EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, false);
+}
+
+void UGA_PlungeAttackBase::OnLandingMontageFinished()
+{
+    // 落地砸地动画播放完毕，完美收尾
+    CorrectPawnOrient();
+    EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, false);
 }
 
 void UGA_PlungeAttackBase::OnDamageEventReceived(FGameplayEventData Payload)
 {
-    // 收到 Tag 广播，执行伤害结算
+    // 收到 [1] 号蒙太奇里 AnimNotify 发出的 Tag 广播，执行伤害结算
     ApplyDamageToTargets();
 }
 
 void UGA_PlungeAttackBase::ApplyDamageToTargets()
 {
-    // 对应图4中你自定义的 Apply Damage 事件
     if (!CachedPlayer) return;
+    if (!GetAvatarActorFromActorInfo()->HasAuthority()) return;
 
     UAbilitySystemComponent* SourceASC = GetAbilitySystemComponentFromActorInfo();
     if (!SourceASC || !DamageEffectClass) return;
 
-    // 以玩家为中心，执行球体范围追踪 (模拟下落震地 AoE 伤害)
     FVector ActorLoc = CachedPlayer->GetActorLocation();
-
     TArray<AActor*> ActorsToIgnore;
     ActorsToIgnore.Add(CachedPlayer);
     TArray<FHitResult> OutHits;
 
     UKismetSystemLibrary::SphereTraceMultiForObjects(
         CachedPlayer,
-        ActorLoc, ActorLoc, // Start 和 End 相同，原地范围检测
+        ActorLoc, ActorLoc,
         PlungeDamageRadius,
         TraceObjectTypes, false, ActorsToIgnore,
         EDrawDebugTrace::None, OutHits, true
     );
 
-    // 防重复受击缓存 (对于 AoE 很重要)
     TArray<AActor*> HitActors;
 
     for (const FHitResult& Hit : OutHits)
@@ -178,7 +200,10 @@ void UGA_PlungeAttackBase::ApplyDamageToTargets()
                 Context.AddSourceObject(this);
 
                 FGameplayEffectSpecHandle SpecHandle = SourceASC->MakeOutgoingSpec(DamageEffectClass, GetAbilityLevel(), Context);
-                SourceASC->ApplyGameplayEffectSpecToTarget(*SpecHandle.Data.Get(), TargetASC);
+                if (SpecHandle.IsValid())
+                {
+                    SourceASC->ApplyGameplayEffectSpecToTarget(*SpecHandle.Data.Get(), TargetASC);
+                }
             }
         }
     }
@@ -186,8 +211,8 @@ void UGA_PlungeAttackBase::ApplyDamageToTargets()
 
 void UGA_PlungeAttackBase::ClearAllTasks()
 {
-    // 强行清理异步任务，避免内存泄漏或逻辑冲突
-    if (MontageTask) { MontageTask->EndTask(); MontageTask = nullptr; }
+    if (FallMontageTask) { FallMontageTask->EndTask(); FallMontageTask = nullptr; }
+    if (LandingMontageTask) { LandingMontageTask->EndTask(); LandingMontageTask = nullptr; }
     if (MovementModeTask) { MovementModeTask->EndTask(); MovementModeTask = nullptr; }
     if (DamageTask) { DamageTask->EndTask(); DamageTask = nullptr; }
 }
@@ -202,15 +227,6 @@ void UGA_PlungeAttackBase::CorrectPawnOrient()
 
 void UGA_PlungeAttackBase::EndAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateEndAbility, bool bWasCancelled)
 {
-    // 对应图1结尾：移除下落状态 GE
-    UAbilitySystemComponent* ASC = ActorInfo->AbilitySystemComponent.Get();
-    if (ASC && PlungeStateEffectHandle.IsValid())
-    {
-        ASC->RemoveActiveGameplayEffect(PlungeStateEffectHandle);
-        PlungeStateEffectHandle.Invalidate();
-    }
-
     ClearAllTasks();
-
     Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
 }

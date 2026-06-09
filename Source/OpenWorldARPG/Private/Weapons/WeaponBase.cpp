@@ -1,4 +1,4 @@
-// Copyright 2025 WiloMyst. All Rights Reserved.
+﻿// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Weapons/WeaponBase.h"
 #include "Components/StaticMeshComponent.h"
@@ -61,9 +61,7 @@ void AWeaponBase::BeginPlay()
     }
 }
 
-// ==========================================
-// 外部调用接口
-// ==========================================
+// --- 外部调用接口 ---
 
 void AWeaponBase::PlayWeaponSpawnFX()
 {
@@ -75,9 +73,7 @@ void AWeaponBase::PlayWeaponDissolveFX()
     WeaponDissolveEvent();
 }
 
-// ==========================================
-// 核心事件实现
-// ==========================================
+// --- 核心事件实现 ---
 
 void AWeaponBase::WeaponSpawnEvent()
 {
@@ -114,9 +110,7 @@ void AWeaponBase::WeaponDissolveEvent()
     }
 }
 
-// ==========================================
-// Timeline 回调
-// ==========================================
+// --- Timeline 回调 ---
 
 void AWeaponBase::UpdateSpawnMask(float Value)
 {

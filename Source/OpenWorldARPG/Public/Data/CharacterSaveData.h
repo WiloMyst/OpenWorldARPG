@@ -7,8 +7,7 @@
 #include "CharacterSaveData.generated.h"
 
 /**
- * @struct FTalentLevelEntry
- * @brief 天赋等级键值对，用于替代 TMap 以支持网络复制（TMap 不支持 Replicated）。
+ * 天赋等级键值对。TArray 替代 TMap 以支持网络复制。
  */
 USTRUCT(BlueprintType)
 struct FTalentLevelEntry
@@ -23,9 +22,7 @@ struct FTalentLevelEntry
 };
 
 /**
- * @struct FCharacterSaveData
- * @brief 角色持久化动态数据，作为 APlayerCharacter::RuntimeData 的唯一数据源。
- * 同时用于存档序列化和菜单数据访问。
+ * 角色持久化动态数据。APlayerCharacter::RuntimeData 的唯一数据源。
  */
 USTRUCT(BlueprintType)
 struct FCharacterSaveData
@@ -50,7 +47,6 @@ struct FCharacterSaveData
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SaveData")
 	int32 FriendshipLevel = 1;
 
-	/** 天赋等级列表（TArray<FTalentLevelEntry> 替代 TMap，以支持网络复制） */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SaveData")
 	TArray<FTalentLevelEntry> TalentLevels;
 

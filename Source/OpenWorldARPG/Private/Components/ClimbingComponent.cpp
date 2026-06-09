@@ -1,9 +1,8 @@
-// Copyright 2025 WiloMyst. All Rights Reserved.
+﻿// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Components/ClimbingComponent.h"
-#include "Components/MovementStateMachineComponent.h"
 #include "Components/OpenWorldARPGCharacterMovementComponent.h"
-#include "Characters/PlayerCharacter.h"
+#include "Interfaces/ARPGCharacterInterface.h"
 #include "Data/CharacterDataAsset.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -25,33 +24,45 @@ void UClimbingComponent::BeginPlay()
 {
     Super::BeginPlay();
 
-    if (APlayerCharacter* Player = Cast<APlayerCharacter>(GetOwner()))
+    // 面向接口编程：Owner 统一视为 ACharacter，不再强转 APlayerCharacter
+    // 组件可复用于怪物/NPC，只需实现 IARPGCharacterInterface 即可提供数据
+    if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
     {
-        OwnerCharacter = Player;
-        MovementComp = OwnerCharacter->GetCharacterMovement();
-        CustomMovementComp = Player->GetCustomMovementComp();
-        ASC = OwnerCharacter->GetAbilitySystemComponent();
-        FSMComp = OwnerCharacter->FindComponentByClass<UMovementStateMachineComponent>();
+        OwnerCharacter = Character;
+        MovementComp = Character->GetCharacterMovement();
+        CustomMovementComp = Character->FindComponentByClass<UOpenWorldARPGCharacterMovementComponent>();
+        ASC = Character->FindComponentByClass<UAbilitySystemComponent>();
 
-        // 缓存角色数据资产
-        if (UCharacterDataAsset* DataAsset = Player->GetDataSourceAsset())
+        // 通过接口获取项目特定数据 (CharacterDataAsset)
+        if (Character->GetClass()->ImplementsInterface(UARPGCharacterInterface::StaticClass()))
         {
-            CharacterData = DataAsset;
+            if (UCharacterDataAsset* DataAsset = IARPGCharacterInterface::Execute_GetCharacterDataAsset(Character))
+            {
+                CharacterData = DataAsset;
+            }
         }
 
-        Player->OnPlayerMovementInput.AddDynamic(this, &UClimbingComponent::HandleOwnerMovementInput);
+        // 解耦输入：不再依赖 APlayerCharacter::OnPlayerMovementInput 委托
+        // 改为低频定时器轮询 CMC 的 LastInputVector，任何 ACharacter 都可复用
+        GetWorld()->GetTimerManager().SetTimer(
+            InputDetectionTimerHandle,
+            this,
+            &UClimbingComponent::OnInputDetectionTick,
+            0.05f, // 20Hz 输入检测频率
+            true,
+            0.0f
+        );
     }
 }
 
-// ==========================================
-// 核心接口
-// ==========================================
+// --- 核心接口 ---
 
 void UClimbingComponent::TryClimb()
 {
     if (!OwnerCharacter || !MovementComp || !ASC) return;
 
-    if (FSMComp && !FSMComp->IsGrounded() && !FSMComp->IsFalling()) return;
+    // 只在地面或下落状态下允许尝试攀爬
+    if (CustomMovementComp && !CustomMovementComp->IsGrounded() && !CustomMovementComp->IsFalling()) return;
 
     if (ASC->HasAnyMatchingGameplayTags(BlockClimbingTags)) return;
 
@@ -85,12 +96,8 @@ void UClimbingComponent::ExitClimb()
         CustomMovementComp->ClearClimbState();
     }
 
-    if (FSMComp)
-    {
-        FSMComp->RequestStateChange(EMovementState::Falling);
-    }
-
-    // 必须显式设置引擎 MovementMode，FSM 的 OnEnterState 不会设置它
+    // CMC 的 SetMovementMode(MOVE_Falling) 会触发 OnMovementModeChanged，
+    // 自动广播事件和更新 GAS Tag，无需 FSM 中转
     MovementComp->SetMovementMode(MOVE_Falling);
     MovementComp->bOrientRotationToMovement = true;
 
@@ -150,11 +157,8 @@ void UClimbingComponent::EnterClimb(const FHitResult& WallHit)
         CustomMovementComp->SetClimbWallNormal(WallHit.Normal);
     }
 
-    // 3. 通过 FSM 切换状态
-    if (FSMComp)
-    {
-        FSMComp->RequestStateChange(EMovementState::Climbing);
-    }
+    // 3. CMC 的 SetMovementMode(MOVE_Custom, Climbing) 会触发 OnMovementModeChanged，
+    // 自动广播事件，无需 FSM 中转
 
     // 4. 发送 Gameplay Event
     if (EventClimbStartTag.IsValid())
@@ -184,9 +188,7 @@ void UClimbingComponent::EnterClimb(const FHitResult& WallHit)
     );
 }
 
-// ==========================================
-// 下落转攀爬
-// ==========================================
+// --- 下落转攀爬 ---
 
 void UClimbingComponent::CheckFallingToClimb()
 {
@@ -219,9 +221,7 @@ bool UClimbingComponent::IsWallClimbable(const FVector& WallNormal) const
     return FMath::Abs(WallNormal.Z) < 0.2f;
 }
 
-// ==========================================
-// 攀爬转地面
-// ==========================================
+// --- 攀爬转地面 ---
 
 void UClimbingComponent::CheckClimbToGround()
 {
@@ -255,11 +255,8 @@ void UClimbingComponent::CheckClimbToGround()
             CustomMovementComp->ClearClimbState();
         }
 
-        if (FSMComp)
-        {
-            FSMComp->RequestStateChange(EMovementState::Grounded);
-        }
-
+        // CMC 的 SetMovementMode(MOVE_Walking) 会触发 OnMovementModeChanged，
+        // 自动广播事件和更新 GAS Tag，无需 FSM 中转
         MovementComp->SetMovementMode(MOVE_Walking);
         MovementComp->bOrientRotationToMovement = true;
 
@@ -277,9 +274,7 @@ void UClimbingComponent::CheckClimbToGround()
     }
 }
 
-// ==========================================
-// 墙角检测与过渡
-// ==========================================
+// --- 墙角检测与过渡 ---
 
 void UClimbingComponent::CheckCornerTransition()
 {
@@ -294,8 +289,7 @@ void UClimbingComponent::CheckCornerTransition()
     float LateralInput = FVector::DotProduct(LastInput, ActorRight);
     if (FMath::IsNearlyZero(LateralInput)) return;
 
-    if (FSMComp && FSMComp->IsInCornerTransition()) return;
-    if (CustomMovementComp->IsInCornerTransition()) return;
+    if (CustomMovementComp && CustomMovementComp->IsInCornerTransition()) return;
 
     FVector ActorLocation = OwnerCharacter->GetActorLocation();
     FVector SideDir = ActorRight * FMath::Sign(LateralInput);
@@ -331,24 +325,25 @@ void UClimbingComponent::CheckCornerTransition()
 
 void UClimbingComponent::HandleConvexCorner(const FHitResult& NewWallHit)
 {
-    if (!OwnerCharacter || !CustomMovementComp || !FSMComp) return;
+    if (!OwnerCharacter || !CustomMovementComp) return;
 
     FVector CornerPoint = NewWallHit.Location;
     FVector TargetLocation = CalculateConvexTargetLocation(CornerPoint, CurrentWallNormal, NewWallHit.Normal);
 
     // SetCornerTransitionTarget 内部会切换 CustomMovementMode 为 ClimbingCornerTransition
+    // CMC 的 SetMovementMode 会触发 OnMovementModeChanged，自动广播事件，无需 FSM 中转
     CustomMovementComp->SetCornerTransitionTarget(TargetLocation, NewWallHit.Normal, ECornerType::Convex);
-    FSMComp->RequestStateChange(EMovementState::CornerTransition);
 }
 
 void UClimbingComponent::HandleConcaveCorner(const FHitResult& NewWallHit)
 {
-    if (!OwnerCharacter || !CustomMovementComp || !FSMComp) return;
+    if (!OwnerCharacter || !CustomMovementComp) return;
 
     FVector TargetLocation = CalculateConcaveTargetLocation(NewWallHit.Location, NewWallHit.Normal);
 
+    // SetCornerTransitionTarget 内部会切换 CustomMovementMode 为 ClimbingCornerTransition
+    // CMC 的 SetMovementMode 会触发 OnMovementModeChanged，自动广播事件，无需 FSM 中转
     CustomMovementComp->SetCornerTransitionTarget(TargetLocation, NewWallHit.Normal, ECornerType::Concave);
-    FSMComp->RequestStateChange(EMovementState::CornerTransition);
 }
 
 FVector UClimbingComponent::CalculateConvexTargetLocation(const FVector& CornerPoint, const FVector& CurrentNormal, const FVector& NewNormal) const
@@ -378,13 +373,11 @@ FVector UClimbingComponent::CalculateConcaveTargetLocation(const FVector& NewWal
 
 void UClimbingComponent::OnCornerTransitionFinished()
 {
-    if (!FSMComp) return;
-    FSMComp->RequestStateChange(EMovementState::Climbing);
+    // CMC 的 ClearCornerTransition 会将 CustomMovementMode 恢复为 Climbing，
+    // 触发 OnMovementModeChanged 自动广播事件，无需 FSM 中转
 }
 
-// ==========================================
-// 翻越 (CMC PhysClimbUp 驱动位移，蒙太奇驱动动画)
-// ==========================================
+// --- 翻越 (CMC PhysClimbUp 驱动位移，蒙太奇驱动动画) ---
 
 void UClimbingComponent::CheckAndClimbUp()
 {
@@ -422,7 +415,7 @@ void UClimbingComponent::DoClimbUp()
     GetWorld()->GetTimerManager().ClearTimer(ClimbDetectionTimerHandle);
 
     // 计算翻越目标位置 (基于角色朝向 + DataAsset 偏移)
-    FVector ClimbUpOffsetToUse = CharacterData ? CharacterData->ClimbUpOffset : FVector(80.0f, 0.0f, 86.0f);
+    FVector ClimbUpOffsetToUse = CharacterData ? CharacterData->ClimbUpOffset : FVector(80.0f, 0.0f, 70.0f);
     FVector TargetLoc = OwnerCharacter->GetActorLocation()
         + OwnerCharacter->GetActorForwardVector() * ClimbUpOffsetToUse.X
         + OwnerCharacter->GetActorRightVector() * ClimbUpOffsetToUse.Y
@@ -433,10 +426,7 @@ void UClimbingComponent::DoClimbUp()
     CustomMovementComp->SetClimbUpTarget(TargetLoc, TargetRot);
     MovementComp->SetMovementMode(MOVE_Custom, static_cast<uint8>(ECustomMovementMode::ClimbUp));
 
-    if (FSMComp)
-    {
-        FSMComp->ForceStateChange(EMovementState::None);
-    }
+    // CMC 的 SetMovementMode 会触发 OnMovementModeChanged，自动广播事件，无需 FSM 中转
 
     if (EventClimbStopTag.IsValid())
     {
@@ -502,10 +492,7 @@ void UClimbingComponent::FinishClimbUp()
         MovementComp->bOrientRotationToMovement = true;
     }
 
-    if (FSMComp)
-    {
-        FSMComp->ForceStateChange(EMovementState::Falling);
-    }
+    // CMC 的 SetMovementMode 会触发 OnMovementModeChanged，自动广播事件，无需 FSM 中转
 
     if (OwnerCharacter)
     {
@@ -518,26 +505,24 @@ void UClimbingComponent::FinishClimbUp()
     CMCHitWallNormal = FVector::ZeroVector;
 }
 
-// ==========================================
-// 降频检测回调
-// ==========================================
+// --- 降频检测回调 ---
 
 void UClimbingComponent::OnClimbDetectionTick()
 {
     if (!OwnerCharacter || !MovementComp) return;
 
-    EMovementState CurrentFSMState = FSMComp ? FSMComp->GetCurrentState() : EMovementState::None;
-    if (CurrentFSMState != EMovementState::Climbing) return;
+    // 使用 CMC 的状态查询替代 FSM (事件驱动，无 Tick 轮询)
+    if (!CustomMovementComp || !CustomMovementComp->IsClimbing()) return;
 
     // 1. 检测攀爬转地面
     CheckClimbToGround();
 
-    if (FSMComp && FSMComp->GetCurrentState() != EMovementState::Climbing) return;
+    if (CustomMovementComp && !CustomMovementComp->IsClimbing()) return;
 
     // 2. 检测墙角过渡
     CheckCornerTransition();
 
-    if (FSMComp && FSMComp->IsInCornerTransition()) return;
+    if (CustomMovementComp && CustomMovementComp->IsInCornerTransition()) return;
 
     // 3. 更新墙面法线
     if (bCMCHitWall && !CMCHitWallNormal.IsNearlyZero())
@@ -571,8 +556,8 @@ void UClimbingComponent::OnFallingToClimbTick()
 {
     if (!OwnerCharacter || !MovementComp) return;
 
-    EMovementState CurrentFSMState = FSMComp ? FSMComp->GetCurrentState() : EMovementState::None;
-    if (CurrentFSMState != EMovementState::Falling)
+    // 使用 CMC 的状态查询替代 FSM
+    if (!CustomMovementComp || !CustomMovementComp->IsFalling())
     {
         GetWorld()->GetTimerManager().ClearTimer(FallingToClimbTimerHandle);
         return;
@@ -581,9 +566,19 @@ void UClimbingComponent::OnFallingToClimbTick()
     CheckFallingToClimb();
 }
 
-// ==========================================
-// 输入处理 (仅用于检测逻辑，不转发给 CMC)
-// ==========================================
+// --- 输入处理 (仅用于检测逻辑，不转发给 CMC) ---
+
+void UClimbingComponent::OnInputDetectionTick()
+{
+    if (!MovementComp) return;
+
+    // 从 CMC 的 LastInputVector 读取输入方向 (解耦：不依赖 APlayerCharacter 委托)
+    FVector LastInput = MovementComp->GetLastInputVector();
+    float InputX = LastInput.X;
+    float InputY = LastInput.Y;
+
+    HandleOwnerMovementInput(InputX, InputY);
+}
 
 void UClimbingComponent::HandleOwnerMovementInput(float InputX, float InputY)
 {
@@ -591,12 +586,12 @@ void UClimbingComponent::HandleOwnerMovementInput(float InputX, float InputY)
 
     if (bIsClimbingUp) return;
 
-    EMovementState CurrentFSMState = FSMComp ? FSMComp->GetCurrentState() : EMovementState::None;
+    // 使用 CMC 的状态查询替代 FSM (事件驱动，无 Tick 轮询)
+    bool bIsFalling = CustomMovementComp && CustomMovementComp->IsFalling();
+    bool bIsGrounded = CustomMovementComp && CustomMovementComp->IsGrounded();
 
-    // ==========================================
-    // 下落状态 → 启动/保持低频定时器
-    // ==========================================
-    if (CurrentFSMState == EMovementState::Falling)
+        // 下落状态 → 启动/保持低频定时器
+        if (bIsFalling)
     {
         if (!FMath::IsNearlyZero(InputX) || !FMath::IsNearlyZero(InputY))
         {
@@ -619,17 +614,13 @@ void UClimbingComponent::HandleOwnerMovementInput(float InputX, float InputY)
         return;
     }
 
-    // ==========================================
-    // 地面状态 → 尝试攀爬
-    // ==========================================
-    if (CurrentFSMState == EMovementState::Grounded)
+        // 地面状态 → 尝试攀爬
+        if (bIsGrounded)
     {
         TryClimb();
         return;
     }
 
-    // ==========================================
-    // 攀爬状态 → 不需要拦截输入
+        // 攀爬状态 → 不需要拦截输入
     // 输入走引擎原生管线 (AddMovementInput → CMC ConsumeInputVector)
-    // ==========================================
-}
+    }

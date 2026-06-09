@@ -11,20 +11,10 @@
 class UUserWidget;
 class UInputMappingContext;
 class UInputAction;
+class APlayerCharacter;
 
 /**
- * @class AMainGamePlayerController
- * @brief 轻量化控制器 (邮局原则 + Server RPC)。
- *
- * 职责边界：
- * - 接收输入并向下派发请求 (发信号)
- * - 角色切换通过 Server RPC 请求，服务器执行 Possess/UnPossess
- * - 管理输入映射上下文和 HUD
- *
- * 绝对禁止：
- * - FindComponentByClass 微操 Character 的私有组件
- * - HasMatchingGameplayTag 越权判断能否执行某动作
- * - 处理视觉表现层逻辑 (特效、动画)
+ * 轻量化控制器。只接收输入并向下派发请求，不微操 Character 组件。
  */
 UCLASS()
 class OPENWORLDARPG_API AMainGamePlayerController : public AOpenWorldARPGPlayerController
@@ -34,27 +24,25 @@ class OPENWORLDARPG_API AMainGamePlayerController : public AOpenWorldARPGPlayerC
 public:
     AMainGamePlayerController();
 
-    // ==========================================
-    // 角色切换 (Server RPC) - 供 TeamManagerSubsystem 等外部调用
-    // ==========================================
+    // --- 角色切换 (Server RPC) ---
 
-    /** 客户端输入触发：请求切换角色（发送到服务器） */
     void HandleSwitchCharacterInput(int32 Index);
 
-    /**
-     * Server RPC：请求服务器执行角色切换。
-     * 客户端只负责发送请求，服务器负责验证和执行。
-     */
     UFUNCTION(Server, Reliable, WithValidation)
     void Server_SwitchCharacter(int32 TargetIndex);
 
-    /** 服务器执行角色切换的实际逻辑 */
     void Server_SwitchCharacter_Implementation(int32 TargetIndex);
     bool Server_SwitchCharacter_Validate(int32 TargetIndex);
 
-    /** 客户端回调：服务器完成角色切换后，客户端执行本地表现 */
     UFUNCTION(Client, Unreliable)
     void Client_OnCharacterSwitched(int32 NewActiveIndex);
+
+    /**
+     * GA_SwapOut 退场完成回调。由 PlayerCharacter::OnSwapOutCompleted 委托触发。
+     * 在服务器端执行 UnPossess → Possess → 激活 GA_SwapIn 的流水线。
+     */
+    UFUNCTION()
+    void OnSwapOutCompleted(APlayerCharacter* SwappedOutCharacter, FTransform SwapTransform);
 
 protected:
     virtual void BeginPlay() override;
@@ -62,9 +50,7 @@ protected:
     virtual void SetupInputComponent() override;
 
 protected:
-    // ==========================================
-    // 增强输入系统 (Enhanced Input) 绑定回调
-    // ==========================================
+    // --- 输入绑定回调 ---
 
     void Input_Move(const FInputActionValue& Value);
     void Input_MoveCompleted(const FInputActionValue& Value);
@@ -76,7 +62,6 @@ protected:
     void Input_SprintStop();
 
     void Input_Walk();
-    void Input_Glide();
     void Input_Hook();
     void Input_PickUp();
     void Input_ToggleInventory();
@@ -95,9 +80,7 @@ protected:
     void Input_Aim();
 
 protected:
-    // ==========================================
-    // 配置项：输入资产 (Input Actions)
-    // ==========================================
+    // --- 配置：输入资产 ---
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
     TObjectPtr<UInputAction> IA_Move;
@@ -110,9 +93,6 @@ protected:
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
     TObjectPtr<UInputAction> IA_Walk;
-
-    UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
-    TObjectPtr<UInputAction> IA_Glide;
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
     TObjectPtr<UInputAction> IA_Hook;
@@ -153,9 +133,7 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Config|Input|Combat")
     TObjectPtr<UInputAction> IA_Aim;
 
-    // ==========================================
-    // 配置项：Controller 专属 Gameplay Tags
-    // ==========================================
+    // --- 配置：Tags ---
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
     FGameplayTag InventoryUITag;
@@ -187,9 +165,7 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags|Combat")
     FGameplayTag AimAttackEventTag;
 
-    // ==========================================
-    // 配置项：UI
-    // ==========================================
+    // --- 配置：UI ---
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|UI")
     TSubclassOf<UUserWidget> MainHUDClass;
@@ -198,7 +174,9 @@ private:
     UPROPERTY()
     TObjectPtr<UUserWidget> MainHUDInstance;
 
-    // 替代蓝图 FlipFlop 节点的布尔状态
     bool bIsWalking = false;
     bool bIsPhysicsAnimDisabled = false;
+
+    /** 缓存的目标切换角色索引，GA_SwapOut 完成后使用 */
+    int32 PendingSwapTargetIndex = -1;
 };

@@ -1,4 +1,4 @@
-// Copyright 2025 WiloMyst. All Rights Reserved.
+﻿// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Managers/InventoryManagerSubsystem.h"
 #include "Engine/DataTable.h"
@@ -39,9 +39,7 @@ const FItemData* UInventoryManagerSubsystem::GetItemData(int32 ItemID) const
     return ItemDatabase->FindRow<FItemData>(RowName, TEXT("InventoryManager"));
 }
 
-// =====================================================================
-// 内部辅助
-// =====================================================================
+// --- 内部辅助 ---
 
 int32 UInventoryManagerSubsystem::FindIndexByGUID(FGuid ItemGUID) const
 {
@@ -81,9 +79,7 @@ int32 UInventoryManagerSubsystem::GetCategoryCapacity(EItemCategory Category) co
     return Capacity ? *Capacity : 9999;
 }
 
-// =====================================================================
-// 排序
-// =====================================================================
+// --- 排序 ---
 
 void UInventoryManagerSubsystem::SortItems(TArray<FItemInstance>& Items, EItemSortMode SortMode) const
 {
@@ -134,9 +130,7 @@ void UInventoryManagerSubsystem::SortItems(TArray<FItemInstance>& Items, EItemSo
     }
 }
 
-// =====================================================================
-// 添加物品
-// =====================================================================
+// --- 添加物品 ---
 
 void UInventoryManagerSubsystem::AddStackableItem(int32 ItemID, int32 Amount)
 {
@@ -325,9 +319,7 @@ void UInventoryManagerSubsystem::AddItem(int32 ItemID, int32 Amount)
     }
 }
 
-// =====================================================================
-// 移除物品
-// =====================================================================
+// --- 移除物品 ---
 
 bool UInventoryManagerSubsystem::RemoveItemByGUID(FGuid ItemGUID, int32 RemoveAmount)
 {
@@ -384,9 +376,7 @@ bool UInventoryManagerSubsystem::RemoveItemByIndex(int32 DropIndex, int32 DropAm
     return true;
 }
 
-// =====================================================================
-// 装备系统
-// =====================================================================
+// --- 装备系统 ---
 
 bool UInventoryManagerSubsystem::EquipItem(FGuid ItemGUID, int32 CharacterID)
 {
@@ -483,9 +473,7 @@ TArray<FItemInstance> UInventoryManagerSubsystem::GetEquippedArtifacts(int32 Cha
     return Result;
 }
 
-// =====================================================================
-// 使用/消耗系统
-// =====================================================================
+// --- 使用/消耗系统 ---
 
 bool UInventoryManagerSubsystem::UseItem(FGuid ItemGUID, int32 TargetCharacterID, int32 UseAmount)
 {
@@ -546,9 +534,7 @@ bool UInventoryManagerSubsystem::UseItem(FGuid ItemGUID, int32 TargetCharacterID
     return true;
 }
 
-// =====================================================================
-// 查询接口
-// =====================================================================
+// --- 查询接口 ---
 
 void UInventoryManagerSubsystem::GetItemsByCategory(EItemCategory Category, TArray<FItemInstance>& OutItems) const
 {

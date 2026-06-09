@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "GAS/Abilities/GA_FireBase.h"
 #include "AbilitySystemComponent.h"
@@ -81,6 +81,9 @@ void UGA_FireBase::ApplyDamage()
 {
     if (!CachedPlayer || !CachedWeapon) return;
 
+    // LocalPredicted GA：伤害应用必须只在权威端（服务器）执行
+    if (!GetAvatarActorFromActorInfo()->HasAuthority()) return;
+
     // 强转为我们的枪械基类，获取准确的枪械独立数据
     AGunBase* Gun = Cast<AGunBase>(CachedWeapon);
     UCameraComponent* FollowCamera = CachedPlayer->GetFollowCamera();
@@ -98,10 +101,8 @@ void UGA_FireBase::ApplyDamage()
     Params.AddIgnoredActor(CachedPlayer);
     Params.AddIgnoredActor(CachedWeapon);
 
-    // ==========================================
-    // 第一步：摄像机射线 (寻找准心在世界中的落点)
-    // ==========================================
-    FVector CamTraceEnd = CameraLoc + CameraForward * (CurrentFireRange + 500.0f);
+        // 第一步：摄像机射线 (寻找准心在世界中的落点)
+        FVector CamTraceEnd = CameraLoc + CameraForward * (CurrentFireRange + 500.0f);
 
     FHitResult CamHitResult;
     bool bCamHit = GetWorld()->LineTraceSingleByChannel(CamHitResult, CameraLoc, CamTraceEnd, TraceChannel, Params);
@@ -109,10 +110,8 @@ void UGA_FireBase::ApplyDamage()
     // 目标落点：如果摄像机打到东西了，就是撞击点；如果没打到，就是射线的尽头
     FVector TargetAimPoint = bCamHit ? CamHitResult.ImpactPoint : CamTraceEnd;
 
-    // ==========================================
-    // 第二步：枪口射线 (真实弹道计算)
-    // ==========================================
-    // 计算从枪口指向准心落点的标准化方向向量
+        // 第二步：枪口射线 (真实弹道计算)
+        // 计算从枪口指向准心落点的标准化方向向量
     FVector ShootDirection = (TargetAimPoint - MuzzleLoc).GetSafeNormal();
 
     // 根据动态射程，计算真实的枪口射线终点
@@ -121,10 +120,8 @@ void UGA_FireBase::ApplyDamage()
     FHitResult MuzzleHitResult;
     bool bMuzzleHit = GetWorld()->LineTraceSingleByChannel(MuzzleHitResult, MuzzleLoc, MuzzleTraceEnd, TraceChannel, Params);
 
-    // ==========================================
-    // 第三步：结算伤害 (GAS 核心流程)
-    // ==========================================
-    if (bMuzzleHit)
+        // 第三步：结算伤害 (GAS 核心流程)
+        if (bMuzzleHit)
     {
         AActor* HitActor = MuzzleHitResult.GetActor();
         if (HitActor)
@@ -140,7 +137,10 @@ void UGA_FireBase::ApplyDamage()
                 Context.AddSourceObject(this);
 
                 FGameplayEffectSpecHandle SpecHandle = SourceASC->MakeOutgoingSpec(DamageEffectClass, GetAbilityLevel(), Context);
-                SourceASC->ApplyGameplayEffectSpecToTarget(*SpecHandle.Data.Get(), TargetASC);
+                if (SpecHandle.IsValid())
+                {
+                    SourceASC->ApplyGameplayEffectSpecToTarget(*SpecHandle.Data.Get(), TargetASC);
+                }
             }
         }
     }

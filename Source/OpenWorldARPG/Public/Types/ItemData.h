@@ -12,8 +12,6 @@
 #include "Types/WeaponTypes.h"
 #include "ItemData.generated.h"
 
-// ======= 物品静态数据 (DataTable 行) =======
-
 USTRUCT(BlueprintType)
 struct FItemData : public FTableRowBase
 {

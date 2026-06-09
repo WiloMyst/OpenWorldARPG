@@ -5,8 +5,6 @@
 #include "CoreMinimal.h"
 #include "AttackTypes.generated.h"
 
-// ======= 攻击通用枚举 =======
-
 UENUM(BlueprintType)
 enum class EAttackType : uint8
 {

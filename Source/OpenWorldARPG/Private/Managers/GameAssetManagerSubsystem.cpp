@@ -1,14 +1,15 @@
-// Copyright 2025 WiloMyst. All Rights Reserved.
+﻿// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Managers/GameAssetManagerSubsystem.h"
+#include "Managers/CharacterManagerSubsystem.h"
 #include "Core/OpenWorldARPGSettings.h"
 #include "Data/CharacterDataAsset.h"
 #include "Data/CharacterInfoRow.h"
 #include "Data/CharacterGeneralDataAsset.h"
 #include "Data/UIDataAsset.h"
 #include "UI/LoadingScreenWidget.h"
-#include "Managers/CharacterManagerSubsystem.h"
 #include "GameplayTagContainer.h"
+#include "AbilitySystemGlobals.h"
 #include "Engine/StreamableManager.h"
 #include "Engine/AssetManager.h"
 #include "Kismet/GameplayStatics.h"
@@ -17,13 +18,14 @@ void UGameAssetManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection
 {
     Super::Initialize(Collection);
 
+    // 强制 GAS 初始化全局数据并读取 DefaultGame.ini 里的自定义配置
+    UAbilitySystemGlobals::Get().InitGlobalData();
+
     UAssetManager& AssetManager = UAssetManager::Get();
     StreamableManager = &AssetManager.GetStreamableManager();
 }
 
-// ==========================================
-// 中央资产缓存访问接口
-// ==========================================
+// --- 中央资产缓存访问接口 ---
 
 UDataTable* UGameAssetManagerSubsystem::GetCharacterInfoTable()
 {
@@ -101,9 +103,7 @@ TSubclassOf<ULoadingScreenWidget> UGameAssetManagerSubsystem::GetLoadingScreenWi
     return Settings.LoadingScreenWidgetClass;
 }
 
-// ==========================================
-// 异步加载调度
-// ==========================================
+// --- 异步加载调度 ---
 
 float UGameAssetManagerSubsystem::GetTotalLoadingProgress() const
 {

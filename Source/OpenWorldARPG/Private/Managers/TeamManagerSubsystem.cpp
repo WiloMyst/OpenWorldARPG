@@ -1,4 +1,4 @@
-// Copyright 2025 WiloMyst. All Rights Reserved.
+﻿// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Managers/TeamManagerSubsystem.h"
 #include "Managers/CharacterManagerSubsystem.h"
@@ -61,9 +61,7 @@ bool UTeamManagerSubsystem::SetCurrentTeam(const TArray<FGameplayTag>& NewTeamCh
     return true;
 }
 
-// ==========================================
-// 角色切换请求 (通过 PlayerController 的 Server RPC)
-// ==========================================
+// --- 角色切换请求 (通过 PlayerController 的 Server RPC) ---
 
 void UTeamManagerSubsystem::SwitchToCharacterByIndex(int32 TeamIndex)
 {
@@ -121,9 +119,7 @@ bool UTeamManagerSubsystem::IsCharacterSwitchable(int32 Index) const
     return true;
 }
 
-// ==========================================
-// PlayerState OnRep 回调 (由 MainGamePlayerState 调用)
-// ==========================================
+// --- PlayerState OnRep 回调 (由 MainGamePlayerState 调用) ---
 
 void UTeamManagerSubsystem::OnRep_ActiveCharacterIndexFromServer(int32 NewActiveIndex)
 {

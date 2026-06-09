@@ -1,4 +1,4 @@
-// Copyright 2025 WiloMyst. All Rights Reserved.
+﻿// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Core/PlayerStates/MainGamePlayerState.h"
 #include "Characters/PlayerCharacter.h"
@@ -19,9 +19,7 @@ void AMainGamePlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 	DOREPLIFETIME(AMainGamePlayerState, ActiveCharacterIndex);
 }
 
-// ==========================================
-// 队伍角色 Actor 管理
-// ==========================================
+// --- 队伍角色 Actor 管理 ---
 
 APlayerCharacter* AMainGamePlayerState::GetTeamCharacterByIndex(int32 Index) const
 {
@@ -74,9 +72,7 @@ void AMainGamePlayerState::AddTeamCharacter(APlayerCharacter* InCharacter)
 	}
 }
 
-// ==========================================
-// 激活角色索引
-// ==========================================
+// --- 激活角色索引 ---
 
 APlayerCharacter* AMainGamePlayerState::GetActiveCharacter() const
 {
@@ -98,9 +94,7 @@ void AMainGamePlayerState::SetActiveCharacterIndex(int32 NewIndex)
 	}
 }
 
-// ==========================================
-// OnRep 回调 (客户端收到同步后，驱动本地 UI)
-// ==========================================
+// --- OnRep 回调 (客户端收到同步后，驱动本地 UI) ---
 
 void AMainGamePlayerState::OnRep_ActiveCharacterIndex(int32 OldIndex)
 {

@@ -6,9 +6,6 @@
 #include "GameFramework/GameStateBase.h"
 #include "OpenWorldARPGGameStateBase.generated.h"
 
-/**
- * 
- */
 UCLASS()
 class OPENWORLDARPG_API AOpenWorldARPGGameStateBase : public AGameStateBase
 {

@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #pragma once
 
@@ -9,7 +9,7 @@
 class UGameplayAbility;
 
 /**
- * 
+ * 角色共有 GA 配置资产。
  */
 UCLASS()
 class OPENWORLDARPG_API UCharacterGeneralDataAsset : public UPrimaryDataAsset

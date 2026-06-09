@@ -7,8 +7,7 @@
 #include "GlossaryManagerSubsystem.generated.h"
 
 /**
- * @class UGlossaryManagerSubsystem
- * @brief 词典管理子系统。负责游戏内词条/图鉴的解锁与查询。
+ * 词典管理子系统。负责词条/图鉴的解锁与查询。
  */
 UCLASS()
 class OPENWORLDARPG_API UGlossaryManagerSubsystem : public UGameInstanceSubsystem

@@ -5,8 +5,6 @@
 #include "CoreMinimal.h"
 #include "ArtifactTypes.generated.h"
 
-// ======= 圣遗物枚举 =======
-
 UENUM(BlueprintType)
 enum class EArtifactSlot : uint8
 {
@@ -35,7 +33,7 @@ enum class EArtifactStatType : uint8
     None            UMETA(DisplayName = "无")
 };
 
-// ======= 圣遗物结构体 =======
+// --- 圣遗物结构体 ---
 
 USTRUCT(BlueprintType)
 struct FArtifactSubStat

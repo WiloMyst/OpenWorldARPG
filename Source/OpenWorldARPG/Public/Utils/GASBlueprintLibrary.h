@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #pragma once
 
@@ -18,20 +18,11 @@ class OPENWORLDARPG_API UGASBlueprintLibrary : public UBlueprintFunctionLibrary
 	GENERATED_BODY()
 
 public:
-	/**
-	 * @brief 获取GameplayTag的最后一部分名称。
-	 * 例如，给定Tag "Character.Hero.Warrior"，将返回 "Warrior"。
-	 * @param InTag 输入的GameplayTag。
-	 * @return 返回Tag的最后一部分字符串。如果Tag无效或为空，则返回空字符串。
-	 */
+	/** 获取 GameplayTag 的最后一部分名称（如 "Character.Hero.Warrior" → "Warrior"）。 */
 	UFUNCTION(BlueprintCallable, Category = "GAS|Gameplay Tag")
 	static FString GetLastPartOfGameplayTag(const FGameplayTag& InTag);
 
-	/**
-	 * @brief 公开引擎的CancelAbilities功能给蓝图。
-	 * @param ASC 目标能力系统组件。
-	 * @param WithTags 一个Tag容器，所有拥有这些Tag的激活中能力都将被取消。
-	 */
+	/** 取消拥有指定 Tags 的所有激活中能力。 */
 	UFUNCTION(BlueprintCallable, Category = "GAS|Abilities")
 	static void CancelAbilitiesWithTags(UAbilitySystemComponent* ASC, const FGameplayTagContainer& WithTags);
 	

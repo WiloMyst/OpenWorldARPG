@@ -14,17 +14,14 @@ class OPENWORLDARPG_API UAS_Enemy : public UAS_Base
 public:
 	UAS_Enemy();
 
-	// 当属性被修改前调用
 	virtual void PreAttributeChange(const FGameplayAttribute& Attribute, float& NewValue) override;
 
-	// --- 属性定义 ---
+	// --- 属性 ---
 
-	// 生命值
 	UPROPERTY(BlueprintReadOnly, Category = "Attributes | Health")
 	FGameplayAttributeData Health;
 	ATTRIBUTE_ACCESSORS(UAS_Enemy, Health)
 
-	// 最大生命值
 	UPROPERTY(BlueprintReadOnly, Category = "Attributes | Health")
 	FGameplayAttributeData MaxHealth;
 	ATTRIBUTE_ACCESSORS(UAS_Enemy, MaxHealth)

@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #pragma once
 
@@ -10,9 +10,6 @@ class UInputMappingContext;
 class UInputAction;
 struct FInputActionValue;
 
-/**
- * 
- */
 UCLASS()
 class OPENWORLDARPG_API AOpenWorldARPGPlayerController : public APlayerController
 {
@@ -22,34 +19,22 @@ public:
 
 	// --- 输入资产 ---
 
-	/** MappingContext */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = Input, meta = (AllowPrivateAccess = "true"))
 	class UInputMappingContext* DefaultMappingContext;
 
-	/** Look Input Action */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = Input, meta = (AllowPrivateAccess = "true"))
 	class UInputAction* LookAction;
 
-	// 光标显示 输入动作
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = Input, meta = (AllowPrivateAccess = "true"))
 	class UInputAction* ShowCursorAction;
 
 protected:
-    // 在游戏开始时调用
     virtual void BeginPlay() override;
-
-    // 绑定输入回调
     virtual void SetupInputComponent() override;
 
 protected:
-
-	/** Called for looking input */
 	void Look(const FInputActionValue& Value);
-
-	/** 当按下Alt键时调用 */
 	void ShowCursorTemporarily(const FInputActionValue& Value);
-
-	/** 当松开Alt键时调用 */
 	void HideCursorTemporarily(const FInputActionValue& Value);
 
 	

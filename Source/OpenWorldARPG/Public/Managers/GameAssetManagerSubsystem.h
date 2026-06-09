@@ -33,9 +33,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnLoadComplete);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnLevelAsyncLoaded);
 
 /**
- * @class UGameAssetManagerSubsystem
- * @brief 游戏资产管理子系统。中央资产缓存/访问层 + 异步加载调度器。
- * 所有资产路径统一从 UOpenWorldARPGSettings 获取，不硬编码。
+ * 游戏资产管理子系统。中央资产缓存/访问层 + 异步加载调度器。
  */
 UCLASS()
 class OPENWORLDARPG_API UGameAssetManagerSubsystem : public UGameInstanceSubsystem

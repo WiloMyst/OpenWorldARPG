@@ -7,8 +7,7 @@
 #include "ShopManagerSubsystem.generated.h"
 
 /**
- * @class UShopManagerSubsystem
- * @brief 商店管理子系统。负责商品上架、购买逻辑与库存刷新。
+ * 商店管理子系统。负责商品上架、购买逻辑与库存刷新。
  */
 UCLASS()
 class OPENWORLDARPG_API UShopManagerSubsystem : public UGameInstanceSubsystem

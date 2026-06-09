@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #pragma once
 
@@ -23,11 +23,8 @@ protected:
     UFUNCTION()
     void OnStopJumpEventReceived(FGameplayEventData Payload);
 
-    // ==========================================
-    // 策划配置项 (取代硬编码)
-    // ==========================================
+    // --- 配置 ---
 
-    // 对应蓝图：停止跳跃的事件 Tag (Input.Action.Jump.Stop)
     UPROPERTY(EditDefaultsOnly, Category = "Jump|Config")
     FGameplayTag StopJumpEventTag;
 

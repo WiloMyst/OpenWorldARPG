@@ -5,13 +5,14 @@
 #include "AbilitySystemComponent.h"
 #include "Abilities/Tasks/AbilityTask_PlayMontageAndWait.h"
 #include "Abilities/Tasks/AbilityTask_WaitDelay.h"
-#include "Characters/PlayerCharacter.h"
-#include "Components/TargetSelectionComponent.h"
+#include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Components/TargetSelectionComponent.h"
 #include "Kismet/KismetMathLibrary.h"
-#include "Kismet/KismetSystemLibrary.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraComponent.h"
+// RootMotionSource 头文件
+#include "GameFramework/RootMotionSource.h"
 
 UGA_GrappleHookBase::UGA_GrappleHookBase()
 {
@@ -27,15 +28,15 @@ void UGA_GrappleHookBase::ActivateAbility(const FGameplayAbilitySpecHandle Handl
         return;
     }
 
-    CachedPlayer = Cast<APlayerCharacter>(GetAvatarActorFromActorInfo());
-    if (!CachedPlayer)
+    CachedCharacter = Cast<ACharacter>(GetAvatarActorFromActorInfo());
+    if (!CachedCharacter)
     {
         EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
         return;
     }
 
     // 1. 对应蓝图图1：获取最优钩索锚点
-    UTargetSelectionComponent* GrappleComp = CachedPlayer->FindComponentByClass<UTargetSelectionComponent>();
+    UTargetSelectionComponent* GrappleComp = CachedCharacter->FindComponentByClass<UTargetSelectionComponent>();
     if (GrappleComp)
     {
         CurrentHookTarget = GrappleComp->GetBestTarget();
@@ -43,20 +44,11 @@ void UGA_GrappleHookBase::ActivateAbility(const FGameplayAbilitySpecHandle Handl
 
     if (!CurrentHookTarget)
     {
-        // 如果没有目标，技能释放失败
         EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
         return;
     }
 
-    // 2. 赋予钩索状态 GE
-    if (GrapplingStateEffectClass)
-    {
-        UAbilitySystemComponent* ASC = ActorInfo->AbilitySystemComponent.Get();
-        FGameplayEffectContextHandle Context = ASC->MakeEffectContext();
-        Context.AddSourceObject(this);
-        FGameplayEffectSpecHandle SpecHandle = ASC->MakeOutgoingSpec(GrapplingStateEffectClass, 1.0f, Context);
-        GrapplingStateEffectHandle = ASC->ApplyGameplayEffectSpecToSelf(*SpecHandle.Data.Get());
-    }
+    // 2. 状态 Tag 由 ActivationOwnedTags 管理，GA 不再通过 GE 重复注入
 
     // 3. 对应蓝图图5：修正朝向
     OrientToTarget();
@@ -83,24 +75,20 @@ void UGA_GrappleHookBase::ActivateAbility(const FGameplayAbilitySpecHandle Handl
 
 void UGA_GrappleHookBase::OrientToTarget()
 {
-    if (!CachedPlayer || !CurrentHookTarget) return;
+    if (!CachedCharacter || !CurrentHookTarget) return;
 
-    FRotator CurrentRot = CachedPlayer->GetActorRotation();
-    FRotator LookAtRot = UKismetMathLibrary::FindLookAtRotation(CachedPlayer->GetActorLocation(), CurrentHookTarget->GetActorLocation());
-
-    // 仅修改 Z轴(Yaw)，保留原本的 X 和 Y
+    FRotator LookAtRot = UKismetMathLibrary::FindLookAtRotation(CachedCharacter->GetActorLocation(), CurrentHookTarget->GetActorLocation());
     FRotator TargetRot = FRotator(0.0f, LookAtRot.Yaw, 0.0f);
-    CachedPlayer->SetActorRotation(TargetRot);
+    CachedCharacter->SetActorRotation(TargetRot);
 }
 
 void UGA_GrappleHookBase::TriggerGrappleVFX()
 {
-    if (!CachedPlayer || !RopeVFXTemplate || !CurrentHookTarget) return;
+    if (!CachedCharacter || !RopeVFXTemplate || !CurrentHookTarget) return;
 
-    USkeletalMeshComponent* MeshComp = CachedPlayer->GetMesh();
+    USkeletalMeshComponent* MeshComp = CachedCharacter->GetMesh();
     if (!MeshComp) return;
 
-    // 生成 Niagara 特效并吸附到手腕插槽
     SpawnedRopeVFX = UNiagaraFunctionLibrary::SpawnSystemAttached(
         RopeVFXTemplate,
         MeshComp,
@@ -108,75 +96,81 @@ void UGA_GrappleHookBase::TriggerGrappleVFX()
         FVector::ZeroVector,
         FRotator::ZeroRotator,
         EAttachLocation::KeepRelativeOffset,
-        true // bAutoDestroy
+        true
     );
 
     if (SpawnedRopeVFX)
     {
-        // 设置 Niagara 的终点变量 (End)
         SpawnedRopeVFX->SetVariableVec3(RopeEndParamName, CurrentHookTarget->GetActorLocation());
 
-        // 提前计算总耗时：前摇延迟 + 飞行时间(距离/速度)
-        float Distance = FVector::Dist(CachedPlayer->GetActorLocation(), CurrentHookTarget->GetActorLocation());
-        float PredictedMoveTime = Distance / GrappleMoveSpeed;
-
-        // 加入极小值保护，防止除以零或时间过短导致特效闪烁
-        PredictedMoveTime = FMath::Max(PredictedMoveTime, 0.05f);
-
+        float Distance = FVector::Dist(CachedCharacter->GetActorLocation(), CurrentHookTarget->GetActorLocation());
+        float PredictedMoveTime = FMath::Max(Distance / GrappleMoveSpeed, 0.05f);
         float TotalLifetime = HookDelay + PredictedMoveTime;
 
-        // 设置 Niagara 变量 (浮点) -> Lifetime
         SpawnedRopeVFX->SetVariableFloat(RopeLifetimeParamName, TotalLifetime);
     }
 }
 
 void UGA_GrappleHookBase::OnDelayFinished()
 {
-    if (!CachedPlayer || !CurrentHookTarget) return;
+    if (!CachedCharacter || !CurrentHookTarget) return;
 
-    // 1. 计算移动时间 (Time = Distance / Velocity)
-    float Distance = FVector::Dist(CachedPlayer->GetActorLocation(), CurrentHookTarget->GetActorLocation());
-    float MoveTime = Distance / GrappleMoveSpeed;
+    UCharacterMovementComponent* MoveComp = CachedCharacter->GetCharacterMovement();
+    if (!MoveComp) return;
 
-    // 安全保护：防止极近距离导致时间趋近于 0
-    MoveTime = FMath::Max(MoveTime, 0.05f);
+        // 废弃 MoveComponentTo，改用 FRootMotionSource_MoveToForce
+    // 优势：完美兼容 CMC 的网络预测与回滚 (Prediction & Rollback)
+    // MoveComponentTo 是 Latent Action，游离于 CMC 预测体系之外
+    
+    float Distance = FVector::Dist(CachedCharacter->GetActorLocation(), CurrentHookTarget->GetActorLocation());
+    float MoveTime = FMath::Max(Distance / GrappleMoveSpeed, 0.05f);
 
-    // 2. 对应蓝图图4：使用 MoveComponentTo 平滑位移
-    FLatentActionInfo LatentInfo;
-    LatentInfo.CallbackTarget = this;
-    LatentInfo.ExecutionFunction = FName("OnMoveCompleted"); // 移动完成后呼叫这个函数
-    LatentInfo.Linkage = 0;
-    LatentInfo.UUID = FMath::Rand();
+    // 1. 创建 RootMotionSource
+    TSharedPtr<FRootMotionSource_MoveToForce> RMS = MakeShared<FRootMotionSource_MoveToForce>();
+    RMS->InstanceName = FName("GrappleHook");
+    RMS->AccumulateMode = ERootMotionAccumulateMode::Override;
+    RMS->Priority = 5;
+    RMS->StartLocation = CachedCharacter->GetActorLocation();
+    RMS->TargetLocation = CurrentHookTarget->GetActorLocation();
+    RMS->Duration = MoveTime;
+    RMS->bRestrictSpeedToExpected = true;
+    // 位移结束后速度归零，防止角色残留惯性
+    RMS->FinishVelocityParams.Mode = ERootMotionFinishVelocityMode::SetVelocity;
+    RMS->FinishVelocityParams.SetVelocity = FVector::ZeroVector;
 
-    UKismetSystemLibrary::MoveComponentTo(
-        CachedPlayer->GetRootComponent(),
-        CurrentHookTarget->GetActorLocation(),
-        CachedPlayer->GetActorRotation(), // 保持朝向
-        false, false,
+    // 2. 注册到 CMC 的 CurrentRootMotion
+    GrappleRMS_ID = MoveComp->ApplyRootMotionSource(RMS);
+    bHasActiveRMS = true;
+
+    // 3. 设置定时器：RMS 完成后触发清理逻辑
+    // UE5.2 的 RMS 没有完成回调，使用与 Duration 匹配的定时器检测完成
+    FTimerHandle GrappleFinishTimer;
+    GetWorld()->GetTimerManager().SetTimer(
+        GrappleFinishTimer,
+        this,
+        &UGA_GrappleHookBase::OnGrappleMoveFinished,
         MoveTime,
-        false,
-        EMoveComponentAction::Move,
-        LatentInfo
+        false
     );
 }
 
-void UGA_GrappleHookBase::OnMoveCompleted()
+void UGA_GrappleHookBase::OnGrappleMoveFinished()
 {
-    // 对应蓝图图4后半段：清空速度，停止动画
-    if (CachedPlayer)
-    {
-        if (UCharacterMovementComponent* MoveComp = CachedPlayer->GetCharacterMovement())
-        {
-            MoveComp->Velocity = FVector::ZeroVector;
-        }
+    if (!CachedCharacter) return;
 
-        // 停止投掷钩索的蒙太奇
-        UAbilitySystemComponent* ASC = GetAbilitySystemComponentFromActorInfo();
-        if (ASC && GrappleMontage)
-        {
-            ASC->CurrentMontageStop();
-        }
+    // 位移完成：清空速度，停止蒙太奇
+    if (UCharacterMovementComponent* MoveComp = CachedCharacter->GetCharacterMovement())
+    {
+        MoveComp->Velocity = FVector::ZeroVector;
     }
+
+    UAbilitySystemComponent* ASC = GetAbilitySystemComponentFromActorInfo();
+    if (ASC && GrappleMontage)
+    {
+        ASC->CurrentMontageStop();
+    }
+
+    bHasActiveRMS = false;
 
     // 完美闭环：移动完成，结束技能
     EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, false);
@@ -190,23 +184,26 @@ void UGA_GrappleHookBase::OnMontageFinished()
 
 void UGA_GrappleHookBase::EndAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateEndAbility, bool bWasCancelled)
 {
-    UAbilitySystemComponent* ASC = ActorInfo->AbilitySystemComponent.Get();
+    // 1. 状态 Tag 由 ActivationOwnedTags 管理，GA 不再负责 GE 的移除
 
-    // 1. 对应蓝图图1结尾：移除状态 GE
-    if (ASC && GrapplingStateEffectHandle.IsValid())
+    // 2. 安全移除 RootMotionSource (防止技能被打断时 RMS 残留导致角色持续位移)
+    if (bHasActiveRMS && CachedCharacter)
     {
-        ASC->RemoveActiveGameplayEffect(GrapplingStateEffectHandle);
-        GrapplingStateEffectHandle.Invalidate();
+        if (UCharacterMovementComponent* MoveComp = CachedCharacter->GetCharacterMovement())
+        {
+            MoveComp->RemoveRootMotionSourceByID(GrappleRMS_ID);
+        }
+        bHasActiveRMS = false;
     }
 
-    // 2. 极致安全防泄漏：销毁特效绳子
+    // 3. 销毁特效绳子
     if (SpawnedRopeVFX)
     {
         SpawnedRopeVFX->DestroyComponent();
         SpawnedRopeVFX = nullptr;
     }
 
-    // 3. 杀死所有的异步监听任务
+    // 4. 杀死所有的异步监听任务
     if (MontageTask) { MontageTask->EndTask(); MontageTask = nullptr; }
     if (DelayTask) { DelayTask->EndTask(); DelayTask = nullptr; }
 

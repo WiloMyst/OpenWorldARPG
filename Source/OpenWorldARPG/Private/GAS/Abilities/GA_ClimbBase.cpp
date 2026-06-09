@@ -20,7 +20,6 @@ void UGA_ClimbBase::ActivateAbility(const FGameplayAbilitySpecHandle Handle, con
         return;
     }
 
-    // 完美解耦：直接从 ActorInfo 获取 ASC，不需要进行任何强转！
     UAbilitySystemComponent* ASC = ActorInfo->AbilitySystemComponent.Get();
     if (!ASC)
     {
@@ -28,28 +27,15 @@ void UGA_ClimbBase::ActivateAbility(const FGameplayAbilitySpecHandle Handle, con
         return;
     }
 
-    // 1. 对应图1：Apply Gameplay Effect To Self
-    if (ClimbingStateEffectClass)
-    {
-        FGameplayEffectContextHandle EffectContext = ASC->MakeEffectContext();
-        EffectContext.AddSourceObject(this);
+    // 状态 Tag (Character.State.Climbing) 由 CMC 的 OnMovementModeChanged 统一管理，
+    // GA 不再通过 GE 重复注入，避免 Tag 计数冲突
 
-        FGameplayEffectSpecHandle SpecHandle = ASC->MakeOutgoingSpec(ClimbingStateEffectClass, 1.0f, EffectContext);
-        if (SpecHandle.IsValid())
-        {
-            // 应用 GE 并将句柄保存起来
-            ActiveClimbEffectHandle = ASC->ApplyGameplayEffectSpecToSelf(*SpecHandle.Data.Get());
-        }
-    }
-
-    // 2. 对应图2：Wait Gameplay Event
+    // 监听停止事件 (意愿层：等待玩家输入或系统取消)
     if (StopClimbEventTag.IsValid())
     {
-        // 这里的参数 true 代表 OnlyMatchExact，完美对应你蓝图里的勾选
         WaitEventTask = UAbilityTask_WaitGameplayEvent::WaitGameplayEvent(this, StopClimbEventTag, nullptr, false, true);
         if (WaitEventTask)
         {
-            // 绑定回调，并激活任务
             WaitEventTask->EventReceived.AddDynamic(this, &UGA_ClimbBase::OnStopClimbEventReceived);
             WaitEventTask->ReadyForActivation();
         }
@@ -66,21 +52,13 @@ void UGA_ClimbBase::OnStopClimbEventReceived(FGameplayEventData Payload)
 
 void UGA_ClimbBase::EndAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateEndAbility, bool bWasCancelled)
 {
-    UAbilitySystemComponent* ASC = ActorInfo->AbilitySystemComponent.Get();
+    // 状态 Tag 由 CMC 统一管理，GA 不再负责 GE 的移除
 
-    // 1. 对应图1与图2：OnEndAbility -> Remove Active Gameplay Effect
-    if (ASC && ActiveClimbEffectHandle.IsValid())
-    {
-        ASC->RemoveActiveGameplayEffect(ActiveClimbEffectHandle);
-        ActiveClimbEffectHandle.Invalidate(); // 清空句柄
-    }
-
-    // 2. 停止异步等待任务
+    // 停止异步等待任务
     if (WaitEventTask)
     {
         WaitEventTask->EndTask();
     }
 
-    // 最后必须调用 Super
     Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
 }

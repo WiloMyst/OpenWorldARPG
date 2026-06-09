@@ -7,8 +7,7 @@
 #include "GachaManagerSubsystem.generated.h"
 
 /**
- * @class UGachaManagerSubsystem
- * @brief 祈愿（抽卡）管理子系统。负责卡池配置、抽卡逻辑与保底计数。
+ * 祈愿（抽卡）管理子系统。负责卡池配置、抽卡逻辑与保底计数。
  */
 UCLASS()
 class OPENWORLDARPG_API UGachaManagerSubsystem : public UGameInstanceSubsystem

@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #pragma once
 
@@ -23,28 +23,15 @@ public:
     virtual void EndAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateEndAbility, bool bWasCancelled) override;
 
 protected:
-    // ==========================================
-    // 核心流程 API
-    // ==========================================
+    // --- 核心流程 ---
 
-    /** 执行攻击 */
     void ExecuteAttack();
-
-    /** 攻击转向 */
     void AttackOrientation();
-
-    /** Apply Damage (球体追踪与施加伤害 GE) */
     void ApplyDamageToTargets();
-
-    /** 清理所有的异步任务，防止连招打断时互相干扰 */
     void ClearAllTasks();
-
-    /** 修正 Pawn 朝向 */
     void CorrectPawnOrient();
 
-    // ==========================================
-    // 回调函数 (响应 Ability Tasks)
-    // ==========================================
+    // --- 回调 ---
 
     UFUNCTION()
     void OnMontageFinished();
@@ -62,22 +49,14 @@ protected:
     void OnNextAttackInputReceived(FGameplayEventData Payload);
 
 protected:
-    // ==========================================
-    // 策划配置项 (Config)
-    // ==========================================
+    // --- 配置 ---
 
-    // 攻击类型
     UPROPERTY(EditDefaultsOnly, Category = "Config|Type")
     EAttackType AttackType = EAttackType::Normal;
-
-    // --- 状态与伤害 GE ---
-    UPROPERTY(EditDefaultsOnly, Category = "Config|Effects")
-    TSubclassOf<UGameplayEffect> AttackingStateEffectClass;
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Effects")
     TSubclassOf<UGameplayEffect> DamageEffectClass;
 
-    // --- 事件 Tags ---
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
     FGameplayTag DamageDealEventTag;
 
@@ -90,19 +69,15 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
     FGameplayTag NextAttackInputTag;
 
-    /** 自动索敌检测半径 */
     UPROPERTY(EditDefaultsOnly, Category = "Config|Orientation")
     float OrientRadius = 400.0f;
 
-    /** 索敌检测的对象类型 */
     UPROPERTY(EditDefaultsOnly, Category = "Config|Orientation")
     TArray<TEnumAsByte<EObjectTypeQuery>> OrientObjectTypes;
 
-    /** 敌人的 Actor 标签，用于筛选 */
     UPROPERTY(EditDefaultsOnly, Category = "Config|Orientation")
     FName EnemyActorTag = FName("Enemy");
 
-    // --- 命中判定检测 (Trace) ---
     UPROPERTY(EditDefaultsOnly, Category = "Config|Trace")
     float TraceRadius = 120.0f;
 
@@ -116,25 +91,15 @@ protected:
     TArray<TEnumAsByte<EObjectTypeQuery>> TraceObjectTypes;
 
 private:
-    // ==========================================
-    // 运行时状态 (Runtime State)
-    // ==========================================
-
     int32 ComboIndex = 0;
     bool bCanTriggerAttack = true;
 
-    // 记录已经受击的敌人，防止一次挥砍造成多次伤害
     UPROPERTY()
     TArray<AActor*> HitActors;
-
-    FActiveGameplayEffectHandle AttackingStateEffectHandle;
 
     UPROPERTY()
     TObjectPtr<APlayerCharacter> CachedPlayer;
 
-    // ==========================================
-    // 缓存的任务指针
-    // ==========================================
     UPROPERTY()
     TObjectPtr<UAbilityTask_PlayMontageAndWait> MontageTask;
 

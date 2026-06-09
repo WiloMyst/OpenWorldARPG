@@ -5,6 +5,7 @@
 #include "Core/PlayerStates/MainGamePlayerState.h"
 #include "Managers/TeamManagerSubsystem.h"
 #include "Managers/UIManagerSubsystem.h"
+#include "AbilitySystemComponent.h"
 #include "AbilitySystemBlueprintLibrary.h"
 #include "Blueprint/UserWidget.h"
 #include "EnhancedInputComponent.h"
@@ -54,7 +55,7 @@ void AMainGamePlayerController::SetupInputComponent()
         // 跳跃
         if (IA_Jump)
         {
-            EnhancedInputComponent->BindAction(IA_Jump, ETriggerEvent::Triggered, this, &AMainGamePlayerController::Input_JumpStart);
+            EnhancedInputComponent->BindAction(IA_Jump, ETriggerEvent::Started, this, &AMainGamePlayerController::Input_JumpStart);
             EnhancedInputComponent->BindAction(IA_Jump, ETriggerEvent::Completed, this, &AMainGamePlayerController::Input_JumpStop);
         }
 
@@ -66,35 +67,31 @@ void AMainGamePlayerController::SetupInputComponent()
         }
 
         // 行走 (FlipFlop)
-        if (IA_Walk) EnhancedInputComponent->BindAction(IA_Walk, ETriggerEvent::Triggered, this, &AMainGamePlayerController::Input_Walk);
-        // 滑翔
-        if (IA_Glide) EnhancedInputComponent->BindAction(IA_Glide, ETriggerEvent::Triggered, this, &AMainGamePlayerController::Input_Glide);
+        if (IA_Walk) EnhancedInputComponent->BindAction(IA_Walk, ETriggerEvent::Started, this, &AMainGamePlayerController::Input_Walk);
         // 钩索
-        if (IA_Hook) EnhancedInputComponent->BindAction(IA_Hook, ETriggerEvent::Triggered, this, &AMainGamePlayerController::Input_Hook);
+        if (IA_Hook) EnhancedInputComponent->BindAction(IA_Hook, ETriggerEvent::Started, this, &AMainGamePlayerController::Input_Hook);
         // 拾取
-        if (IA_PickUp) EnhancedInputComponent->BindAction(IA_PickUp, ETriggerEvent::Triggered, this, &AMainGamePlayerController::Input_PickUp);
+        if (IA_PickUp) EnhancedInputComponent->BindAction(IA_PickUp, ETriggerEvent::Started, this, &AMainGamePlayerController::Input_PickUp);
         // 打开背包
-        if (IA_ToggleInventory) EnhancedInputComponent->BindAction(IA_ToggleInventory, ETriggerEvent::Triggered, this, &AMainGamePlayerController::Input_ToggleInventory);
+        if (IA_ToggleInventory) EnhancedInputComponent->BindAction(IA_ToggleInventory, ETriggerEvent::Started, this, &AMainGamePlayerController::Input_ToggleInventory);
         // 头发布料模拟 (FlipFlop)
-        if (IA_ClothSimulation) EnhancedInputComponent->BindAction(IA_ClothSimulation, ETriggerEvent::Triggered, this, &AMainGamePlayerController::Input_ClothSimulation);
+        if (IA_ClothSimulation) EnhancedInputComponent->BindAction(IA_ClothSimulation, ETriggerEvent::Started, this, &AMainGamePlayerController::Input_ClothSimulation);
 
         // 队伍切换 1~4
-        if (IA_Switch_1) EnhancedInputComponent->BindAction(IA_Switch_1, ETriggerEvent::Triggered, this, &AMainGamePlayerController::Input_Switch1);
-        if (IA_Switch_2) EnhancedInputComponent->BindAction(IA_Switch_2, ETriggerEvent::Triggered, this, &AMainGamePlayerController::Input_Switch2);
-        if (IA_Switch_3) EnhancedInputComponent->BindAction(IA_Switch_3, ETriggerEvent::Triggered, this, &AMainGamePlayerController::Input_Switch3);
-        if (IA_Switch_4) EnhancedInputComponent->BindAction(IA_Switch_4, ETriggerEvent::Triggered, this, &AMainGamePlayerController::Input_Switch4);
+        if (IA_Switch_1) EnhancedInputComponent->BindAction(IA_Switch_1, ETriggerEvent::Started, this, &AMainGamePlayerController::Input_Switch1);
+        if (IA_Switch_2) EnhancedInputComponent->BindAction(IA_Switch_2, ETriggerEvent::Started, this, &AMainGamePlayerController::Input_Switch2);
+        if (IA_Switch_3) EnhancedInputComponent->BindAction(IA_Switch_3, ETriggerEvent::Started, this, &AMainGamePlayerController::Input_Switch3);
+        if (IA_Switch_4) EnhancedInputComponent->BindAction(IA_Switch_4, ETriggerEvent::Started, this, &AMainGamePlayerController::Input_Switch4);
 
         if (IA_NormalAttack) EnhancedInputComponent->BindAction(IA_NormalAttack, ETriggerEvent::Triggered, this, &AMainGamePlayerController::Input_NormalAttack);
         if (IA_HeavyAttack)  EnhancedInputComponent->BindAction(IA_HeavyAttack, ETriggerEvent::Triggered, this, &AMainGamePlayerController::Input_HeavyAttack);
         if (IA_AimAttack)    EnhancedInputComponent->BindAction(IA_AimAttack, ETriggerEvent::Triggered, this, &AMainGamePlayerController::Input_AimAttack);
-        if (IA_Aim)          EnhancedInputComponent->BindAction(IA_Aim, ETriggerEvent::Triggered, this, &AMainGamePlayerController::Input_Aim);
-        if (IA_PlungeAttack) EnhancedInputComponent->BindAction(IA_PlungeAttack, ETriggerEvent::Triggered, this, &AMainGamePlayerController::Input_PlungeAttack);
+        if (IA_Aim)          EnhancedInputComponent->BindAction(IA_Aim, ETriggerEvent::Started, this, &AMainGamePlayerController::Input_Aim);
+        if (IA_PlungeAttack) EnhancedInputComponent->BindAction(IA_PlungeAttack, ETriggerEvent::Started, this, &AMainGamePlayerController::Input_PlungeAttack);
     }
 }
 
-// ==========================================
-// 角色切换 (Server RPC)
-// ==========================================
+// --- 角色切换 (Server RPC) ---
 
 void AMainGamePlayerController::HandleSwitchCharacterInput(int32 Index)
 {
@@ -110,9 +107,7 @@ bool AMainGamePlayerController::Server_SwitchCharacter_Validate(int32 TargetInde
 
 void AMainGamePlayerController::Server_SwitchCharacter_Implementation(int32 TargetIndex)
 {
-    // ==========================================
-    // 服务器端：验证 + 执行角色切换
-    // ==========================================
+    // 服务器端：验证 + 通过 GA 流水线执行角色切换
 
     AMainGamePlayerState* MyPlayerState = GetPlayerState<AMainGamePlayerState>();
     if (!MyPlayerState) return;
@@ -139,30 +134,89 @@ void AMainGamePlayerController::Server_SwitchCharacter_Implementation(int32 Targ
         return;
     }
 
-    // ==========================================
-    // 执行角色切换流水线
-    // ==========================================
+    // 5. 缓存目标索引，供 GA_SwapOut 完成回调使用
+    PendingSwapTargetIndex = TargetIndex;
 
-    // 5. 旧角色下场 (保存 Transform、生成特效、进入待机)
-    FTransform SwapTransform;
-    OldCharacter->PerformSwapOut(SwapTransform);
+    // 6. 绑定旧角色的退场完成委托（如果尚未绑定）
+    //    GA_SwapOut::EndAbility 会通过 NotifySwapOutCompleted 广播此委托
+    OldCharacter->OnSwapOutCompleted.AddDynamic(this, &AMainGamePlayerController::OnSwapOutCompleted);
 
-    // 6. 解除旧角色控制
+    // 7. 激活 GA_SwapOut（退场技能）
+    //    如果没有配置 GA 类，降级使用旧的直接切换逻辑
+    if (OldCharacter->SwapOutAbilityClass && OldCharacter->GetAbilitySystemComponent())
+    {
+        OldCharacter->GetAbilitySystemComponent()->TryActivateAbilityByClass(OldCharacter->SwapOutAbilityClass);
+    }
+    else
+    {
+        // 降级路径：直接执行旧的同步切换
+        UE_LOG(LogTemp, Warning, TEXT("Server_SwitchCharacter: SwapOutAbilityClass 未配置，使用降级路径"));
+
+        FTransform SwapTransform;
+        OldCharacter->PerformSwapOut(SwapTransform);
+
+        FRotator OldControlRotation = GetControlRotation();
+        UnPossess();
+
+        NewCharacter->PerformSwapIn(SwapTransform);
+        Possess(NewCharacter);
+        SetControlRotation(OldControlRotation);
+
+        MyPlayerState->SetActiveCharacterIndex(TargetIndex);
+        Client_OnCharacterSwitched(TargetIndex);
+        PendingSwapTargetIndex = -1;
+    }
+}
+
+void AMainGamePlayerController::OnSwapOutCompleted(APlayerCharacter* SwappedOutCharacter, FTransform SwapTransform)
+{
+    if (!SwappedOutCharacter) return;
+
+    // 解绑委托，防止重复触发
+    SwappedOutCharacter->OnSwapOutCompleted.RemoveDynamic(this, &AMainGamePlayerController::OnSwapOutCompleted);
+
+    AMainGamePlayerState* MyPlayerState = GetPlayerState<AMainGamePlayerState>();
+    if (!MyPlayerState || PendingSwapTargetIndex < 0) return;
+
+    // 1. 获取目标角色
+    APlayerCharacter* NewCharacter = MyPlayerState->GetTeamCharacterByIndex(PendingSwapTargetIndex);
+    if (!NewCharacter)
+    {
+        PendingSwapTargetIndex = -1;
+        return;
+    }
+
+    // 2. 解除旧角色控制
     FRotator OldControlRotation = GetControlRotation();
     UnPossess();
 
-    // 7. 新角色上场 (设置 Transform、解除待机)
-    NewCharacter->PerformSwapIn(SwapTransform);
+    // 3. 写入出场 Transform 供 GA_SwapIn 读取
+    NewCharacter->SetPendingSwapInTransform(SwapTransform);
 
-    // 8. 接管新角色并恢复摄像机视角
+    // 4. 接管新角色
     Possess(NewCharacter);
     SetControlRotation(OldControlRotation);
 
-    // 9. 更新 PlayerState 的激活索引（触发全网同步）
-    MyPlayerState->SetActiveCharacterIndex(TargetIndex);
+    // 5. 激活 GA_SwapIn（出场技能）
+    if (NewCharacter->SwapInAbilityClass && NewCharacter->GetAbilitySystemComponent())
+    {
+        NewCharacter->GetAbilitySystemComponent()->TryActivateAbilityByClass(NewCharacter->SwapInAbilityClass);
+    }
+    else
+    {
+        // 降级路径：直接执行旧的出场逻辑
+        UE_LOG(LogTemp, Warning, TEXT("OnSwapOutCompleted: SwapInAbilityClass 未配置，使用降级路径"));
+        NewCharacter->PerformSwapIn(SwapTransform);
+    }
 
-    // 10. 通知客户端完成切换（客户端执行本地表现）
-    Client_OnCharacterSwitched(TargetIndex);
+    // 6. 更新 PlayerState 的激活索引（触发全网同步）
+    MyPlayerState->SetActiveCharacterIndex(PendingSwapTargetIndex);
+
+    // 7. 通知客户端完成切换
+    Client_OnCharacterSwitched(PendingSwapTargetIndex);
+
+    // 8. 清理缓存
+    PendingSwapTargetIndex = -1;
 }
 
 void AMainGamePlayerController::Client_OnCharacterSwitched_Implementation(int32 NewActiveIndex)
@@ -173,7 +227,6 @@ void AMainGamePlayerController::Client_OnCharacterSwitched_Implementation(int32 
     UE_LOG(LogTemp, Log, TEXT("Client_OnCharacterSwitched: 切换完成，新激活索引 = %d"), NewActiveIndex);
 }
 
-// ==========================================
 // 输入回调实现 (邮局原则：只转发，不拦截)
 //
 // 注意 [联机安全]: SendGameplayEventToActor 在客户端本地执行。
@@ -181,7 +234,6 @@ void AMainGamePlayerController::Client_OnCharacterSwitched_Implementation(int32 
 // 但如果是 ServerInitiated 技能，客户端调用 SendGameplayEventToActor 不会触发服务器执行，
 // 需要改为 Server RPC 调用 TryActivateAbility。
 // 请确保所有战斗技能的 NetExecutionPolicy 设置正确。
-// ==========================================
 
 void AMainGamePlayerController::Input_Move(const FInputActionValue& Value)
 {
@@ -211,7 +263,7 @@ void AMainGamePlayerController::Input_JumpStart()
         return;
     }
 
-    PC->HandleJumpStartInput();
+    PC->HandleSpacebarInput();
 }
 
 void AMainGamePlayerController::Input_JumpStop()
@@ -250,14 +302,6 @@ void AMainGamePlayerController::Input_Walk()
 
     if (TagToSend.IsValid())
         UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(PC, TagToSend, FGameplayEventData());
-}
-
-void AMainGamePlayerController::Input_Glide()
-{
-    APlayerCharacter* PC = Cast<APlayerCharacter>(GetPawn());
-    if (!PC) return;
-
-    PC->ToggleGlide();
 }
 
 void AMainGamePlayerController::Input_Hook()

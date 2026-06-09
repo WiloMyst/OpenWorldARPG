@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #pragma once
 
@@ -22,36 +22,25 @@ public:
     virtual void EndAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateEndAbility, bool bWasCancelled) override;
 
 protected:
-    // ==========================================
-    // 核心流程 API
-    // ==========================================
+    // --- 核心流程 ---
 
-    /** 执行开火核心逻辑 */
     void ExecuteAttack();
-
-    /** 对应蓝图：应用伤害 (两次射线法) */
     void ApplyDamage();
 
-    // ==========================================
-    // 回调函数
-    // ==========================================
+    // --- 回调 ---
 
     UFUNCTION()
     void OnMontageFinished();
 
 protected:
-    // ==========================================
-    // 策划配置项 (Config)
-    // ==========================================
+    // --- 配置 ---
 
-    // --- 动画 ---
     UPROPERTY(EditDefaultsOnly, Category = "Config|Animation")
     TObjectPtr<UAnimMontage> FireMontage;
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Animation")
     float MontagePlayRate = 1.4f;
 
-    // --- 武器与射线参数 ---
     UPROPERTY(EditDefaultsOnly, Category = "Config|Weapon")
     float FireRange = 5000.0f;
 
@@ -61,15 +50,10 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Config|Weapon")
     TEnumAsByte<ECollisionChannel> TraceChannel = ECC_Visibility;
 
-    // --- 伤害与特效 ---
     UPROPERTY(EditDefaultsOnly, Category = "Config|Effects")
     TSubclassOf<UGameplayEffect> DamageEffectClass;
 
 private:
-    // ==========================================
-    // 运行时缓存
-    // ==========================================
-
     UPROPERTY()
     TObjectPtr<APlayerCharacter> CachedPlayer;
 

@@ -37,6 +37,10 @@ FGenericTeamId AOpenWorldARPGCharacter::GetGenericTeamId() const
 
 void AOpenWorldARPGCharacter::HandleDeath_Implementation()
 {
+	// 防止重入：死亡处理只执行一次
+	if (bIsDead) return;
+	bIsDead = true;
+
 	// 基类默认实现：禁用碰撞和移动
 	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())

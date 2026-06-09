@@ -5,8 +5,6 @@
 #include "CoreMinimal.h"
 #include "WeaponTypes.generated.h"
 
-// ======= 武器结构体 =======
-
 USTRUCT(BlueprintType)
 struct FWeaponInstanceData
 {

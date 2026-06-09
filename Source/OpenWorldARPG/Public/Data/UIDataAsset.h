@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #pragma once
 
@@ -10,7 +10,7 @@
 class UBaseMenuWidget;
 
 /**
- * 
+ * UI Tag → Widget 映射资产。
  */
 UCLASS()
 class OPENWORLDARPG_API UUIDataAsset : public UPrimaryDataAsset
@@ -18,7 +18,7 @@ class OPENWORLDARPG_API UUIDataAsset : public UPrimaryDataAsset
 	GENERATED_BODY()
 
 public:
-	// 将UI的GameplayTag映射到对应的BaseMenuWidget蓝图类。
+	/** UI Tag → Widget 蓝图类映射。 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI Mapping")
 	TMap<FGameplayTag, TSubclassOf<UBaseMenuWidget>> UIMap;
 

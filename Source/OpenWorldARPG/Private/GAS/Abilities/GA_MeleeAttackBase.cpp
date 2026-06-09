@@ -31,15 +31,7 @@ void UGA_MeleeAttackBase::ActivateAbility(const FGameplayAbilitySpecHandle Handl
         return;
     }
 
-    // 1. 赋予攻击状态 GE (对应图1)
-    if (AttackingStateEffectClass)
-    {
-        UAbilitySystemComponent* ASC = ActorInfo->AbilitySystemComponent.Get();
-        FGameplayEffectContextHandle Context = ASC->MakeEffectContext();
-        Context.AddSourceObject(this);
-        FGameplayEffectSpecHandle SpecHandle = ASC->MakeOutgoingSpec(AttackingStateEffectClass, 1.0f, Context);
-        AttackingStateEffectHandle = ASC->ApplyGameplayEffectSpecToSelf(*SpecHandle.Data.Get());
-    }
+    // 1. 状态 Tag 由 ActivationOwnedTags 管理，GA 不再通过 GE 重复注入
 
     // 2. 初始化连招状态
     ComboIndex = 0;
@@ -102,17 +94,13 @@ void UGA_MeleeAttackBase::ExecuteAttack()
         return;
     }
 
-    // ==========================================
-    // 连招核心重置区 (对应图3)
-    // ==========================================
-    bCanTriggerAttack = false;
+        // 连招核心重置区 (对应图3)
+        bCanTriggerAttack = false;
     HitActors.Empty(); // 清空受击数组，新一刀重新判定
     ClearAllTasks();   // 清除上一刀残留的所有监听，防止事件乱窜！
 
-    // ==========================================
-    // 开始监听各种事件
-    // ==========================================
-
+        // 开始监听各种事件
+    
     // 任务1：播放蒙太奇
     MontageTask = UAbilityTask_PlayMontageAndWait::CreatePlayMontageAndWaitProxy(this, NAME_None, MontageToPlay, 1.0f, NAME_None, true, 1.0f, 0.0f);
     MontageTask->OnCompleted.AddDynamic(this, &UGA_MeleeAttackBase::OnMontageFinished);
@@ -221,6 +209,10 @@ void UGA_MeleeAttackBase::ApplyDamageToTargets()
 {
     if (!CachedPlayer) return;
 
+    // LocalPredicted GA：伤害应用必须只在权威端（服务器）执行
+    // 客户端调用 ApplyGameplayEffectSpecToTarget 无权修改目标属性，会被回滚
+    if (!GetAvatarActorFromActorInfo()->HasAuthority()) return;
+
     UAbilitySystemComponent* SourceASC = GetAbilitySystemComponentFromActorInfo();
     if (!SourceASC || !DamageEffectClass) return;
 
@@ -261,7 +253,10 @@ void UGA_MeleeAttackBase::ApplyDamageToTargets()
                 Context.AddSourceObject(this);
 
                 FGameplayEffectSpecHandle SpecHandle = SourceASC->MakeOutgoingSpec(DamageEffectClass, GetAbilityLevel(), Context);
-                SourceASC->ApplyGameplayEffectSpecToTarget(*SpecHandle.Data.Get(), TargetASC);
+                if (SpecHandle.IsValid())
+                {
+                    SourceASC->ApplyGameplayEffectSpecToTarget(*SpecHandle.Data.Get(), TargetASC);
+                }
             }
         }
     }
@@ -302,14 +297,7 @@ void UGA_MeleeAttackBase::OnMontageFinished()
 
 void UGA_MeleeAttackBase::EndAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateEndAbility, bool bWasCancelled)
 {
-    UAbilitySystemComponent* ASC = ActorInfo->AbilitySystemComponent.Get();
-
-    // 对应图1结尾：移除状态 GE
-    if (ASC && AttackingStateEffectHandle.IsValid())
-    {
-        ASC->RemoveActiveGameplayEffect(AttackingStateEffectHandle);
-        AttackingStateEffectHandle.Invalidate();
-    }
+    // 状态 Tag 由 ActivationOwnedTags 管理，GA 不再负责 GE 的移除
 
     ClearAllTasks();
 

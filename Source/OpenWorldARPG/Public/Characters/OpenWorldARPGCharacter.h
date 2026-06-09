@@ -9,6 +9,9 @@
 #include "Types/CustomMovementModeTypes.h"
 #include "OpenWorldARPGCharacter.generated.h"
 
+/**
+ * 角色基类。提供队伍 ID 和死亡处理等通用逻辑。
+ */
 UCLASS(config=Game)
 class AOpenWorldARPGCharacter : public ACharacter, public IGenericTeamAgentInterface, public ICombatInterface
 {
@@ -17,20 +20,18 @@ class AOpenWorldARPGCharacter : public ACharacter, public IGenericTeamAgentInter
 public:
 	AOpenWorldARPGCharacter(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
 
-	/** ICombatInterface 默认实现：子类可重写 */
 	virtual void HandleDeath_Implementation() override;
 
-	/** 修正角色朝向，将 Pitch 和 Roll 归零（修复 Root Motion 造成的异常旋转） */
 	UFUNCTION(BlueprintCallable, Category = "Character|Movement")
 	void CorrectPawnOrient();
 
+	/** 是否已经执行过死亡处理，防止重入 */
+	bool bIsDead = false;
+
 protected:
-	// 声明一个用于存储队伍ID的属性
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
 	FGenericTeamId TeamId;
 
-	// 声明将要重写的接口函数
 	virtual FGenericTeamId GetGenericTeamId() const override;
-
 };
 

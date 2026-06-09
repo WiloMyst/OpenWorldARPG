@@ -97,8 +97,8 @@ void AEnemyCharacter::UpdateHealthBar()
     if (UpdateFunc)
     {
         struct {
-            float Current;
-            float Max;
+            double Current;
+            double Max;
         } Params;
 
         Params.Current = AttributeSet->GetHealth();
@@ -221,13 +221,18 @@ void AEnemyCharacter::OnHealthAttributeChanged(const FOnAttributeChangeData& Dat
     // 对应蓝图：血量变化时检查是否死亡
     if (Data.NewValue <= 0.0f && Data.OldValue > 0.0f)
     {
+        // 死亡GA（GA_DieBase）会调用 HandleDeath()，这里不再重复调用
+        // 只负责触发死亡GA
         if (AbilitySystemComponent && DeathAbilityTag.IsValid())
         {
             FGameplayTagContainer TagContainer(DeathAbilityTag);
             AbilitySystemComponent->TryActivateAbilitiesByTag(TagContainer, true);
         }
-
-        OnDead();
+        else
+        {
+            // 没有死亡GA时，直接执行死亡处理
+            OnDead();
+        }
     }
 }
 

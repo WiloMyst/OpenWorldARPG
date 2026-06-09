@@ -8,8 +8,6 @@
 #include "Types/ItemTypes.h"
 #include "InventoryUITypes.generated.h"
 
-// ======= 背包分类标签页数据 =======
-
 USTRUCT(BlueprintType)
 struct FInventoryCategoryTabData : public FTableRowBase
 {
