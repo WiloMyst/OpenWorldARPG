@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "GAS/Abilities/GA_MeleeAttackBase.h"
 #include "AbilitySystemComponent.h"
@@ -298,6 +298,15 @@ void UGA_MeleeAttackBase::OnMontageFinished()
 void UGA_MeleeAttackBase::EndAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateEndAbility, bool bWasCancelled)
 {
     // 状态 Tag 由 ActivationOwnedTags 管理，GA 不再负责 GE 的移除
+
+    // 被其他 GA Cancel 时，武器回到背上
+    if (bWasCancelled && CachedPlayer)
+    {
+        if (UCharacterWeaponComponent* WeaponComp = CachedPlayer->FindComponentByClass<UCharacterWeaponComponent>())
+        {
+            WeaponComp->WeaponToBack();
+        }
+    }
 
     ClearAllTasks();
 

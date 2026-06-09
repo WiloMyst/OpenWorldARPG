@@ -87,10 +87,6 @@ void UCharacterWeaponComponent::WeaponToHand()
 {
     if (!CharacterWeapon || !CachedCharacter || !CachedCharacter->GetMesh())
     {
-        UE_LOG(LogTemp, Warning, TEXT("[WeaponComp] WeaponToHand: SKIP (CharacterWeapon=%s, CachedCharacter=%s, Mesh=%s)"),
-            CharacterWeapon ? *CharacterWeapon->GetName() : TEXT("NULL"),
-            CachedCharacter ? *CachedCharacter->GetName() : TEXT("NULL"),
-            (CachedCharacter && CachedCharacter->GetMesh()) ? TEXT("Valid") : TEXT("NULL"));
         return;
     }
 
@@ -99,9 +95,6 @@ void UCharacterWeaponComponent::WeaponToHand()
 
     // 更新状态机
     bIsWeaponStowed = false;
-    UE_LOG(LogTemp, Warning, TEXT("[WeaponComp] WeaponToHand: Attached to socket=%s, bHidden=%s"),
-        *HandSocketName.ToString(),
-        CharacterWeapon->IsHidden() ? TEXT("true") : TEXT("false"));
 }
 
 void UCharacterWeaponComponent::WeaponToBack()

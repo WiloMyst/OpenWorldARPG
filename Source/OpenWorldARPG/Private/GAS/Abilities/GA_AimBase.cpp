@@ -88,6 +88,19 @@ void UGA_AimBase::EndAbility(const FGameplayAbilitySpecHandle Handle, const FGam
     
     // 状态 Tag 由 ActivationOwnedTags 管理，GA 不再负责 GE 的移除
 
+    // 被其他 GA Cancel 时，武器回到背上
+    if (bWasCancelled)
+    {
+        ACharacter* Character = Cast<ACharacter>(ActorInfo->AvatarActor.Get());
+        if (Character)
+        {
+            if (UCharacterWeaponComponent* WeaponComp = Character->FindComponentByClass<UCharacterWeaponComponent>())
+            {
+                WeaponComp->WeaponToBack();
+            }
+        }
+    }
+
     // 停止异步等待任务
     if (WaitEventTask)
     {

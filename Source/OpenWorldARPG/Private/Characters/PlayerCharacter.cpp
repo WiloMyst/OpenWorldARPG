@@ -413,6 +413,7 @@ void APlayerCharacter::ApplyStandbyMode(bool bNewStandbyState)
 	}
 	else
 	{
+		// 恢复碰撞
 		if (UCapsuleComponent* Capsule = GetCapsuleComponent())
 		{
 			Capsule->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
@@ -424,13 +425,20 @@ void APlayerCharacter::ApplyStandbyMode(bool bNewStandbyState)
 			SKMesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 		}
 
-		SetActorHiddenInGame(false);
-
+		// 先恢复骨骼/动画更新，但保持隐藏
 		if (USkeletalMeshComponent* SKMesh = GetMesh())
 		{
 			SKMesh->bNoSkeletonUpdate = false;
 			SKMesh->SetUpdateAnimationInEditor(true);
+
+			// 强制立即更新一帧动画，让动画蓝图从 A-Pose 默认姿态计算到正确的 idle 骨骼姿态
+			// 这样在显示角色时，玩家不会看到 A-Pose → idle 的跳变
+			SKMesh->TickAnimation(0.0f, false);
+			SKMesh->RefreshBoneTransforms();
 		}
+
+		// 动画已更新到正确姿态，现在可以安全显示角色
+		SetActorHiddenInGame(false);
 
 		if (WeaponComponent)
 		{

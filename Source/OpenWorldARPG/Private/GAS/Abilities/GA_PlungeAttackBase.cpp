@@ -227,6 +227,15 @@ void UGA_PlungeAttackBase::CorrectPawnOrient()
 
 void UGA_PlungeAttackBase::EndAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateEndAbility, bool bWasCancelled)
 {
+    // 被其他 GA Cancel 时，武器回到背上
+    if (bWasCancelled && CachedPlayer)
+    {
+        if (UCharacterWeaponComponent* WeaponComp = CachedPlayer->FindComponentByClass<UCharacterWeaponComponent>())
+        {
+            WeaponComp->WeaponToBack();
+        }
+    }
+
     ClearAllTasks();
     Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
 }

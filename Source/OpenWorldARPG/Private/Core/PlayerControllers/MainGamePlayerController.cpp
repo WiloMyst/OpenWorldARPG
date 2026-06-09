@@ -59,11 +59,11 @@ void AMainGamePlayerController::SetupInputComponent()
             EnhancedInputComponent->BindAction(IA_Jump, ETriggerEvent::Completed, this, &AMainGamePlayerController::Input_JumpStop);
         }
 
-        // 冲刺
+        // 冲刺/闪避：按下 Shift 触发 GA_Dash，GA_Dash 结束时自动判断是否过渡到 GA_Sprint
         if (IA_Sprint)
         {
-            EnhancedInputComponent->BindAction(IA_Sprint, ETriggerEvent::Triggered, this, &AMainGamePlayerController::Input_SprintStart);
-            EnhancedInputComponent->BindAction(IA_Sprint, ETriggerEvent::Completed, this, &AMainGamePlayerController::Input_SprintStop);
+            EnhancedInputComponent->BindAction(IA_Sprint, ETriggerEvent::Started, this, &AMainGamePlayerController::Input_ShiftAction);
+            EnhancedInputComponent->BindAction(IA_Sprint, ETriggerEvent::Completed, this, &AMainGamePlayerController::Input_ShiftReleased);
         }
 
         // 行走 (FlipFlop)
@@ -274,17 +274,20 @@ void AMainGamePlayerController::Input_JumpStop()
     }
 }
 
-void AMainGamePlayerController::Input_SprintStart()
+void AMainGamePlayerController::Input_ShiftAction()
 {
+    // 按下 Shift → 无脑触发 GA_Dash
+    // GA_Dash 结束时会检测 Shift 是否仍按住 + 移动输入 + 体力，决定是否过渡到 GA_Sprint
     if (APlayerCharacter* PC = Cast<APlayerCharacter>(GetPawn()))
     {
-        if (SprintStartEventTag.IsValid())
-            UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(PC, SprintStartEventTag, FGameplayEventData());
+        if (DashEventTag.IsValid())
+            UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(PC, DashEventTag, FGameplayEventData());
     }
 }
 
-void AMainGamePlayerController::Input_SprintStop()
+void AMainGamePlayerController::Input_ShiftReleased()
 {
+    // 释放 Shift → 发送 SprintStop 事件，GA_Sprint 内部监听此事件后结束
     if (APlayerCharacter* PC = Cast<APlayerCharacter>(GetPawn()))
     {
         if (SprintStopEventTag.IsValid())

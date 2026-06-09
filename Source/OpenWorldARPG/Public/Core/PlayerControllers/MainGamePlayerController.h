@@ -58,8 +58,8 @@ protected:
     void Input_JumpStart();
     void Input_JumpStop();
 
-    void Input_SprintStart();
-    void Input_SprintStop();
+    void Input_ShiftAction();
+    void Input_ShiftReleased();
 
     void Input_Walk();
     void Input_Hook();
@@ -139,7 +139,7 @@ protected:
     FGameplayTag InventoryUITag;
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
-    FGameplayTag SprintStartEventTag;
+    FGameplayTag DashEventTag;
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
     FGameplayTag SprintStopEventTag;
