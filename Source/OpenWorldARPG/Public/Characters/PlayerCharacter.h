@@ -14,10 +14,11 @@ class UCharacterDataAsset;
 class USpringArmComponent;
 class UCameraComponent;
 class USceneComponent;
-class UCharacterWeaponComponent;
+class UWeaponManagerComponent;
 class UAS_Player;
 class UOpenWorldARPGCharacterMovementComponent;
-class UBackpackComponent;
+class UInteractionComponent;
+class UTargetingComponent;
 class UGameplayAbility;
 class UClimbingComponent;
 class AWeaponBase;
@@ -165,6 +166,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Weapon")
 	USceneComponent* GetWeaponRestSocket() const { return WeaponRestSocket; }
 
+	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Targeting")
+	UTargetingComponent* GetTargetingComponent() const { return TargetingComponent; }
+
+	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Climbing")
+	UClimbingComponent* GetClimbingComponent() const { return ClimbingComponent; }
+
 	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|GAS")
 	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
 
@@ -244,7 +251,16 @@ protected:
 	TObjectPtr<USceneComponent> WeaponRestSocket;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlayerCharacter|Weapon")
-	TObjectPtr<UCharacterWeaponComponent> WeaponComponent;
+	TObjectPtr<UWeaponManagerComponent> WeaponComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlayerCharacter|Interaction")
+	TObjectPtr<UInteractionComponent> InteractionComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlayerCharacter|Targeting")
+	TObjectPtr<UTargetingComponent> TargetingComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlayerCharacter|Climbing")
+	TObjectPtr<UClimbingComponent> ClimbingComponent;
 
 	// --- 输入缓存 ---
 

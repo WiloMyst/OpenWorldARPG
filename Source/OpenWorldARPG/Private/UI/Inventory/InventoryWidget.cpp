@@ -7,7 +7,7 @@
 #include "Components/VerticalBox.h"
 #include "Components/Button.h"
 #include "Characters/PlayerCharacter.h"
-#include "Components/BackpackComponent.h"
+#include "Components/InteractionComponent.h"
 #include "Managers/InventoryManagerSubsystem.h"
 #include "Managers/UIManagerSubsystem.h"
 #include "Managers/GameAssetManagerSubsystem.h"
@@ -142,7 +142,7 @@ void UInventoryWidget::OnDiscardButtonClicked()
 
     if (APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(GetOwningPlayerPawn()))
     {
-        if (UBackpackComponent* Backpack = PlayerChar->GetComponentByClass<UBackpackComponent>())
+        if (UInteractionComponent* Backpack = PlayerChar->GetComponentByClass<UInteractionComponent>())
         {
             // 使用 GUID 驱动的丢弃，不再依赖数组索引
             Backpack->DropItemByGUID(CachedSelectedItemGUID, 1);

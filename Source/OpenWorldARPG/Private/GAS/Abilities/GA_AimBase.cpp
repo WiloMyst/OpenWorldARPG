@@ -1,11 +1,11 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "GAS/Abilities/GA_AimBase.h"
 #include "AbilitySystemComponent.h"
 #include "Abilities/Tasks/AbilityTask_WaitGameplayEvent.h"
 #include "AbilitySystemBlueprintLibrary.h"
 #include "Components/OpenWorldARPGCharacterMovementComponent.h"
-#include "Components/CharacterWeaponComponent.h"
+#include "Components/WeaponManagerComponent.h"
 #include "GAS/ARPGGameplayAbilityActorInfo.h"
 #include "GameFramework/Character.h"
 
@@ -42,7 +42,7 @@ void UGA_AimBase::ActivateAbility(const FGameplayAbilitySpecHandle Handle, const
         // GA 职责：意愿和表现
 
     // 0. 武器拿到手上
-    if (UCharacterWeaponComponent* WeaponComp = Character->FindComponentByClass<UCharacterWeaponComponent>())
+    if (UWeaponManagerComponent* WeaponComp = Character->FindComponentByClass<UWeaponManagerComponent>())
     {
         WeaponComp->WeaponToHand();
     }
@@ -94,7 +94,7 @@ void UGA_AimBase::EndAbility(const FGameplayAbilitySpecHandle Handle, const FGam
         ACharacter* Character = Cast<ACharacter>(ActorInfo->AvatarActor.Get());
         if (Character)
         {
-            if (UCharacterWeaponComponent* WeaponComp = Character->FindComponentByClass<UCharacterWeaponComponent>())
+            if (UWeaponManagerComponent* WeaponComp = Character->FindComponentByClass<UWeaponManagerComponent>())
             {
                 WeaponComp->WeaponToBack();
             }

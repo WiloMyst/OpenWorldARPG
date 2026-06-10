@@ -5,18 +5,18 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "GameplayTagContainer.h"
-#include "BackpackComponent.generated.h"
+#include "InteractionComponent.generated.h"
 
 class AItemBase;
 class UInventoryManagerSubsystem;
 
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
-class OPENWORLDARPG_API UBackpackComponent : public UActorComponent
+class OPENWORLDARPG_API UInteractionComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UBackpackComponent();
+    UInteractionComponent();
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 protected:

@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "TargetSelectionComponent.generated.h"
+#include "TargetingComponent.generated.h"
 
 class ACharacter;
 class APlayerController;
@@ -16,12 +16,12 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBestTargetChanged, AActor*, OldT
  * 视野目标选取组件。维护周围有效目标列表，基于摄像机朝向筛选最优目标。
  */
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
-class OPENWORLDARPG_API UTargetSelectionComponent : public UActorComponent
+class OPENWORLDARPG_API UTargetingComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UTargetSelectionComponent();
+    UTargetingComponent();
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
     // --- 目标管理 ---

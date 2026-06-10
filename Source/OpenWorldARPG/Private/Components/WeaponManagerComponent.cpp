@@ -1,6 +1,6 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
-#include "Components/CharacterWeaponComponent.h"
+#include "Components/WeaponManagerComponent.h"
 #include "Characters/PlayerCharacter.h"
 #include "Weapons/WeaponBase.h"
 #include "AbilitySystemComponent.h"
@@ -9,13 +9,13 @@
 
 // --- 生命周期与初始化 ---
 
-UCharacterWeaponComponent::UCharacterWeaponComponent()
+UWeaponManagerComponent::UWeaponManagerComponent()
 {
     // 开启 Tick，用于检测移动状态以自动收起武器
     PrimaryComponentTick.bCanEverTick = true;
 }
 
-void UCharacterWeaponComponent::BeginPlay()
+void UWeaponManagerComponent::BeginPlay()
 {
     Super::BeginPlay();
 
@@ -25,7 +25,7 @@ void UCharacterWeaponComponent::BeginPlay()
 
 // --- 核心武器状态机 ---
 
-void UCharacterWeaponComponent::InitializeCharacterWeapon()
+void UWeaponManagerComponent::InitializeCharacterWeapon()
 {
     // CachedCharacter 可能在 BeginPlay 之前调用时为空，主动获取一次
     if (!CachedCharacter)
@@ -83,7 +83,7 @@ void UCharacterWeaponComponent::InitializeCharacterWeapon()
     }
 }
 
-void UCharacterWeaponComponent::WeaponToHand()
+void UWeaponManagerComponent::WeaponToHand()
 {
     if (!CharacterWeapon || !CachedCharacter || !CachedCharacter->GetMesh())
     {
@@ -97,7 +97,7 @@ void UCharacterWeaponComponent::WeaponToHand()
     bIsWeaponStowed = false;
 }
 
-void UCharacterWeaponComponent::WeaponToBack()
+void UWeaponManagerComponent::WeaponToBack()
 {
     USceneComponent* RestSocket = CachedCharacter ? CachedCharacter->GetWeaponRestSocket() : nullptr;
     if (!CharacterWeapon || !RestSocket) return;
@@ -115,7 +115,7 @@ void UCharacterWeaponComponent::WeaponToBack()
     bIsWeaponStowed = true;
 }
 
-void UCharacterWeaponComponent::SetWeaponHidden(bool bHidden)
+void UWeaponManagerComponent::SetWeaponHidden(bool bHidden)
 {
     if (CharacterWeapon)
     {
@@ -130,7 +130,7 @@ void UCharacterWeaponComponent::SetWeaponHidden(bool bHidden)
 
 // --- 状态轮询 (自动收回逻辑) ---
 
-void UCharacterWeaponComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UWeaponManagerComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 

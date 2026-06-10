@@ -1,23 +1,23 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
-#include "Components/TargetSelectionComponent.h"
+#include "Components/TargetingComponent.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/PlayerController.h"
 #include "Characters/SelectableTargetActor.h"
 
-UTargetSelectionComponent::UTargetSelectionComponent()
+UTargetingComponent::UTargetingComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
     PrimaryComponentTick.bStartWithTickEnabled = true;
 }
 
-void UTargetSelectionComponent::BeginPlay()
+void UTargetingComponent::BeginPlay()
 {
     Super::BeginPlay();
     OwnerCharacter = Cast<ACharacter>(GetOwner());
 }
 
-void UTargetSelectionComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UTargetingComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     if (!OwnerCharacter) return;
@@ -59,7 +59,7 @@ void UTargetSelectionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
     }
 }
 
-void UTargetSelectionComponent::AddTarget(AActor* NewTarget)
+void UTargetingComponent::AddTarget(AActor* NewTarget)
 {
     if (NewTarget && !AvailableTargets.Contains(NewTarget))
     {
@@ -67,7 +67,7 @@ void UTargetSelectionComponent::AddTarget(AActor* NewTarget)
     }
 }
 
-void UTargetSelectionComponent::RemoveTarget(AActor* TargetToRemove)
+void UTargetingComponent::RemoveTarget(AActor* TargetToRemove)
 {
     if (TargetToRemove)
     {
@@ -93,7 +93,7 @@ void UTargetSelectionComponent::RemoveTarget(AActor* TargetToRemove)
     }
 }
 
-float UTargetSelectionComponent::CalculateAngleDot(AActor* Target) const
+float UTargetingComponent::CalculateAngleDot(AActor* Target) const
 {
     if (!OwnerCharacter || !Target) return -1.0f;
 
@@ -106,7 +106,7 @@ float UTargetSelectionComponent::CalculateAngleDot(AActor* Target) const
     return FVector::DotProduct(CameraForward, DirectionToTarget);
 }
 
-AActor* UTargetSelectionComponent::FindBestTarget() const
+AActor* UTargetingComponent::FindBestTarget() const
 {
     AActor* BestTarget = nullptr;
     float BestDotValue = MinDotThreshold;

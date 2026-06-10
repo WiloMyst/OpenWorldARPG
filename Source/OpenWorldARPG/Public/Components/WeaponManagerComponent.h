@@ -5,18 +5,18 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "GameplayTagContainer.h"
-#include "CharacterWeaponComponent.generated.h"
+#include "WeaponManagerComponent.generated.h"
 
 class APlayerCharacter;
 class AWeaponBase;
 
 UCLASS(Blueprintable, ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
-class OPENWORLDARPG_API UCharacterWeaponComponent : public UActorComponent
+class OPENWORLDARPG_API UWeaponManagerComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UCharacterWeaponComponent();
+    UWeaponManagerComponent();
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 protected:

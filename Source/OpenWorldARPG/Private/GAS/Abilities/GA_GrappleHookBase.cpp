@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 
 #include "GAS/Abilities/GA_GrappleHookBase.h"
@@ -7,7 +7,8 @@
 #include "Abilities/Tasks/AbilityTask_WaitDelay.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Components/TargetSelectionComponent.h"
+#include "Components/TargetingComponent.h"
+#include "Characters/PlayerCharacter.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraComponent.h"
@@ -36,7 +37,11 @@ void UGA_GrappleHookBase::ActivateAbility(const FGameplayAbilitySpecHandle Handl
     }
 
     // 1. 对应蓝图图1：获取最优钩索锚点
-    UTargetSelectionComponent* GrappleComp = CachedCharacter->FindComponentByClass<UTargetSelectionComponent>();
+    UTargetingComponent* GrappleComp = nullptr;
+    if (APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(CachedCharacter))
+    {
+        GrappleComp = PlayerChar->GetTargetingComponent();
+    }
     if (GrappleComp)
     {
         CurrentHookTarget = GrappleComp->GetBestTarget();

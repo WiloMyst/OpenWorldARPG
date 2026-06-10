@@ -7,7 +7,7 @@
 #include "Abilities/Tasks/AbilityTask_WaitGameplayEvent.h"
 #include "Abilities/Tasks/AbilityTask_WaitMovementModeChange.h"
 #include "Characters/PlayerCharacter.h"
-#include "Components/CharacterWeaponComponent.h"
+#include "Components/WeaponManagerComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/KismetSystemLibrary.h"
 
@@ -42,7 +42,7 @@ void UGA_PlungeAttackBase::ExecuteAttack()
     bInterruptedByLand = false;
 
     // 1. Weapon to Hand
-    if (UCharacterWeaponComponent* WeaponComp = CachedPlayer->FindComponentByClass<UCharacterWeaponComponent>())
+    if (UWeaponManagerComponent* WeaponComp = CachedPlayer->FindComponentByClass<UWeaponManagerComponent>())
     {
         WeaponComp->WeaponToHand();
     }
@@ -230,7 +230,7 @@ void UGA_PlungeAttackBase::EndAbility(const FGameplayAbilitySpecHandle Handle, c
     // 被其他 GA Cancel 时，武器回到背上
     if (bWasCancelled && CachedPlayer)
     {
-        if (UCharacterWeaponComponent* WeaponComp = CachedPlayer->FindComponentByClass<UCharacterWeaponComponent>())
+        if (UWeaponManagerComponent* WeaponComp = CachedPlayer->FindComponentByClass<UWeaponManagerComponent>())
         {
             WeaponComp->WeaponToBack();
         }

@@ -1,11 +1,9 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Animation/PlayerAnimInstance.h"
 #include "Characters/PlayerCharacter.h"
 #include "Components/OpenWorldARPGCharacterMovementComponent.h"
-#include "Components/TargetSelectionComponent.h"
 #include "GameFramework/PlayerController.h"
-#include "Kismet/KismetMathLibrary.h"
 
 UPlayerAnimInstance::UPlayerAnimInstance()
     : Super()
@@ -27,9 +25,6 @@ void UPlayerAnimInstance::NativeInitializeAnimation()
         {
             CachedPlayerController = PC;
         }
-
-        // 缓存目标选取组件（用于读取锁定状态）
-        CachedTargetSelectionComp = PlayerChar->FindComponentByClass<UTargetSelectionComponent>();
     }
 }
 
@@ -37,16 +32,22 @@ void UPlayerAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 {
     Super::NativeUpdateAnimation(DeltaSeconds);
 
-        // GameThread 快照：目标锁定状态
-    // TargetSelectionComponent 的 GetBestTarget 不是线程安全的
-    
-    bSnapshotTargetLocking = false;
-    if (CachedTargetSelectionComp.IsValid())
+    // GameThread 快照：所有非线程安全的读取必须在此完成
+    const ACharacter* Character = CachedCharacter.Get();
+    if (Character)
     {
-        bSnapshotTargetLocking = (CachedTargetSelectionComp->GetBestTarget() != nullptr);
+        SnapshotActorRotation = Character->GetActorRotation();
+        SnapshotActorLocation = Character->GetActorLocation();
+        SnapshotActorForwardVector = Character->GetActorForwardVector();
+        SnapshotActorRightVector = Character->GetActorRightVector();
     }
 
-    // 拍下脚部位置快照供工作线程使用
+    const APlayerController* PC = CachedPlayerController.Get();
+    if (PC)
+    {
+        SnapshotControlRotation = PC->GetControlRotation();
+    }
+
     if (USkeletalMeshComponent* MeshComp = GetSkelMeshComponent())
     {
         SnapshotLeftFootLoc = MeshComp->GetSocketLocation(LeftFootBoneName);
@@ -68,28 +69,23 @@ void UPlayerAnimInstance::NativeThreadSafeUpdateAnimation(float DeltaSeconds)
     }
 
     // 1. 瞄准数据 (AimPitch / AimYaw)
-    //
-    // 计算逻辑：Controller ControlRotation - Actor Rotation
-    // Controller 旋转由玩家输入在 GameThread 驱动
-    // Worker Thread 读取时可能有一帧延迟，但对动画表现完全可接受
+    // 使用 GameThread 快照，避免在工作线程访问非线程安全的 Controller/Actor 状态
     
-    const APlayerController* PC = CachedPlayerController.Get();
-    if (PC)
+    const FRotator ControlRotation = SnapshotControlRotation;
+    const FRotator ActorRotation = SnapshotActorRotation;
+
+    if (!ControlRotation.IsZero() || !ActorRotation.IsZero())
     {
-        const FRotator ControlRotation = PC->GetControlRotation();
-        const FRotator ActorRotation = Character->GetActorRotation();
-
         // 差值旋转：将 Controller 旋转转换到角色本地空间
-        const FRotator DeltaRotation = UKismetMathLibrary::NormalizedDeltaRotator(ControlRotation, ActorRotation);
+        const FRotator DeltaRotation = (ControlRotation - ActorRotation).GetNormalized();
 
-        AimPitch = FMath::Clamp(DeltaRotation.Pitch, -90.0f, 90.0f);
+        AimPitch = FMath::Clamp(DeltaRotation.Pitch, -90.0, 90.0f);
         AimYaw = DeltaRotation.Yaw;
 
         // SpineRotation：用于上半身扭转动画
-        // 将 AimYaw 按比例映射到脊椎旋转范围（通常 ±45 度）
         SpineRotation = FRotator(
-            FMath::Clamp(AimPitch * 0.5f, -45.0f, 45.0f),  // Pitch 映射到脊椎前倾/后仰
-            FMath::Clamp(AimYaw * 0.6f, -60.0f, 60.0f),     // Yaw 映射到脊椎扭转
+            FMath::Clamp(AimPitch * 0.5f, -45.0f, 45.0f),
+            FMath::Clamp(AimYaw * 0.6f, -60.0f, 60.0f),
             0.0f
         );
     }
@@ -108,19 +104,15 @@ void UPlayerAnimInstance::NativeThreadSafeUpdateAnimation(float DeltaSeconds)
     bIsClimbing = MoveComp->IsClimbing();
     bIsGliding = MoveComp->IsGliding();
 
-        // 3. 目标锁定状态 (主线程快照)
-    
-    bIsTargetLocking = bSnapshotTargetLocking;
-
         // 4. 输入数据
     // 从 CMC 的 GetLastInputVector 推算本地空间输入方向
-    // 不依赖 APlayerCharacter 的 protected 成员，保持解耦
+    // 使用 GameThread 快照的 ActorRotation，避免工作线程访问非线程安全数据
     
     const FVector LastInput = MoveComp->GetLastInputVector();
     AccelerationVector = LastInput.GetSafeNormal(0.0001f);
     if (!LastInput.IsNearlyZero(0.01f))
     {
-        const FVector LocalInput = Character->GetActorRotation().UnrotateVector(LastInput);
+        const FVector LocalInput = SnapshotActorRotation.UnrotateVector(LastInput);
         InputX = LocalInput.X;
         InputY = LocalInput.Y;
     }
@@ -135,7 +127,7 @@ void UPlayerAnimInstance::NativeThreadSafeUpdateAnimation(float DeltaSeconds)
     if (bIsClimbing)
     {
         // 攀爬状态：取出归一化的输入方向，转换到本地空间
-        const FVector LocalAcceleration = Character->GetActorRotation().UnrotateVector(AccelerationVector);
+        const FVector LocalAcceleration = SnapshotActorRotation.UnrotateVector(AccelerationVector);
 
         // 使用 Y 和 Z 轴驱动
         float TargetX = LocalAcceleration.Y * 100.0f; // 左右
@@ -151,9 +143,9 @@ void UPlayerAnimInstance::NativeThreadSafeUpdateAnimation(float DeltaSeconds)
         
         DirectionCurrent = FMath::VInterpTo(DirectionCurrent, TargetVelocity, DeltaSeconds, 5.0f);
 
-        // 使用点乘 (Dot Product) 提取相对于角色朝向的前后/左右速度分量
-        SpeedX = FVector::DotProduct(DirectionCurrent, Character->GetActorRightVector());
-        SpeedY = FVector::DotProduct(DirectionCurrent, Character->GetActorForwardVector());
+        // 使用快照的方向向量，避免工作线程访问非线程安全数据
+        SpeedX = FVector::DotProduct(DirectionCurrent, SnapshotActorRightVector);
+        SpeedY = FVector::DotProduct(DirectionCurrent, SnapshotActorForwardVector);
     }
 
     // Update Step Stop State
@@ -174,10 +166,10 @@ void UPlayerAnimInstance::NativeThreadSafeUpdateAnimation(float DeltaSeconds)
         SpeedOnStop = GroundSpeed;
 
         // 计算停步时是左脚还是右脚在前
-        if (Character) // 确保前面已经获取了 CachedCharacter.Get()
+        if (Character)
         {
-            const FVector RootLoc = Character->GetActorLocation();
-            const FVector ForwardDir = Character->GetActorForwardVector();
+            const FVector RootLoc = SnapshotActorLocation;
+            const FVector ForwardDir = SnapshotActorForwardVector;
 
             // 将脚部位置向量与角色面朝前向向量做点乘 (Dot Product)
             // 结果越大，说明这只脚在角色面朝方向上越靠前

@@ -5,8 +5,9 @@
 #include "Data/CharacterGeneralDataAsset.h"
 #include "GAS/AttributeSets/AS_Player.h"
 #include "Components/OpenWorldARPGCharacterMovementComponent.h"
-#include "Components/CharacterWeaponComponent.h"
-#include "Components/BackpackComponent.h"
+#include "Components/WeaponManagerComponent.h"
+#include "Components/InteractionComponent.h"
+#include "Components/TargetingComponent.h"
 #include "Components/ClimbingComponent.h"
 
 #include "Camera/CameraComponent.h"
@@ -61,7 +62,13 @@ APlayerCharacter::APlayerCharacter(const FObjectInitializer& ObjectInitializer)
 	WeaponRestSocket = CreateDefaultSubobject<USceneComponent>(TEXT("WeaponRestSocket"));
 	WeaponRestSocket->SetupAttachment(WeaponSpringArm);
 
-	WeaponComponent = CreateDefaultSubobject<UCharacterWeaponComponent>(TEXT("WeaponComponent"));
+	WeaponComponent = CreateDefaultSubobject<UWeaponManagerComponent>(TEXT("WeaponComponent"));
+
+	InteractionComponent = CreateDefaultSubobject<UInteractionComponent>(TEXT("InteractionComponent"));
+
+	TargetingComponent = CreateDefaultSubobject<UTargetingComponent>(TEXT("TargetingComponent"));
+
+	ClimbingComponent = CreateDefaultSubobject<UClimbingComponent>(TEXT("ClimbingComponent"));
 
 	AbilitySystemComponent = CreateDefaultSubobject<UAbilitySystemComponent>(TEXT("AbilitySystemComponent"));
 	AbilitySystemComponent->SetIsReplicated(true);
@@ -532,9 +539,9 @@ void APlayerCharacter::HandleMovementInputCompleted()
 
 void APlayerCharacter::HandleInteractInput()
 {
-	// 拾取逻辑由 Character 内部查找 BackpackComponent 执行
+	// 拾取逻辑由 Character 内部查找 InteractionComponent 执行
 	// Controller 不再 FindComponentByClass 微操
-	if (UBackpackComponent* Backpack = FindComponentByClass<UBackpackComponent>())
+	if (UInteractionComponent* Backpack = FindComponentByClass<UInteractionComponent>())
 	{
 		Backpack->PickUpItem();
 	}
@@ -602,7 +609,7 @@ void APlayerCharacter::HandleJumpStartInput()
 		&& AbilitySystemComponent->HasMatchingGameplayTag(ClimbingStateTag))
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[PlayerChar] Climbing state detected, exiting climb"));
-		if (UClimbingComponent* ClimbComp = FindComponentByClass<UClimbingComponent>())
+		if (UClimbingComponent* ClimbComp = GetClimbingComponent())
 		{
 			ClimbComp->ExitClimb();
 		}

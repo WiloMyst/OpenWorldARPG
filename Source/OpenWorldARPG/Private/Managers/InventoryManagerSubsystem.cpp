@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Managers/InventoryManagerSubsystem.h"
 #include "Engine/DataTable.h"
@@ -510,7 +510,7 @@ bool UInventoryManagerSubsystem::UseItem(FGuid ItemGUID, int32 TargetCharacterID
     {
         // TODO: 通过 TargetCharacterID 找到对应的 APlayerCharacter，获取 ASC 应用 GE
         // 当前框架中 Subsystem 无法直接访问 World 中的 Actor
-        // 这部分逻辑应在调用方 (如 BackpackComponent 或 Lua 脚本) 中实现
+        // 这部分逻辑应在调用方 (如 InteractionComponent 或 Lua 脚本) 中实现
         UE_LOG(LogTemp, Log, TEXT("UseItem: 物品ID %d 使用效果需要由调用方应用。"), Item.ItemID);
     }
 

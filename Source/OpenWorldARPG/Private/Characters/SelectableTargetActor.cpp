@@ -1,10 +1,11 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Characters/SelectableTargetActor.h"
 #include "Components/SphereComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Camera/PlayerCameraManager.h"
-#include "Components/TargetSelectionComponent.h" // 包含选取组件以进行自动注册
+#include "Components/TargetingComponent.h"
+#include "Characters/PlayerCharacter.h"
 
 ASelectableTargetActor::ASelectableTargetActor()
 {
@@ -49,9 +50,12 @@ void ASelectableTargetActor::OnDetectSphereBeginOverlap(UPrimitiveComponent* Ove
 {
     if (OtherActor)
     {
-        if (UTargetSelectionComponent* TargetComp = OtherActor->FindComponentByClass<UTargetSelectionComponent>())
+        if (APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(OtherActor))
         {
-            TargetComp->AddTarget(this);
+            if (UTargetingComponent* TargetComp = PlayerChar->GetTargetingComponent())
+            {
+                TargetComp->AddTarget(this);
+            }
         }
     }
 }
@@ -60,9 +64,12 @@ void ASelectableTargetActor::OnDetectSphereEndOverlap(UPrimitiveComponent* Overl
 {
     if (OtherActor)
     {
-        if (UTargetSelectionComponent* TargetComp = OtherActor->FindComponentByClass<UTargetSelectionComponent>())
+        if (APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(OtherActor))
         {
-            TargetComp->RemoveTarget(this);
+            if (UTargetingComponent* TargetComp = PlayerChar->GetTargetingComponent())
+            {
+                TargetComp->RemoveTarget(this);
+            }
         }
     }
 }

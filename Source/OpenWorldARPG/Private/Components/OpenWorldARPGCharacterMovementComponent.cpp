@@ -1,7 +1,8 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Components/OpenWorldARPGCharacterMovementComponent.h"
 #include "Components/ClimbingComponent.h"
+#include "Characters/PlayerCharacter.h"
 #include "GameFramework/Character.h"
 #include "Components/CapsuleComponent.h"
 #include "AbilitySystemComponent.h"
@@ -18,7 +19,10 @@ void UOpenWorldARPGCharacterMovementComponent::CacheOwnerReferences()
 	CachedOwnerCharacter = Cast<ACharacter>(GetOwner());
 	if (CachedOwnerCharacter)
 	{
-		CachedClimbingComp = CachedOwnerCharacter->FindComponentByClass<UClimbingComponent>();
+		if (APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(CachedOwnerCharacter))
+		{
+			CachedClimbingComp = PlayerChar->GetClimbingComponent();
+		}
 		CachedASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(CachedOwnerCharacter);
 	}
 }

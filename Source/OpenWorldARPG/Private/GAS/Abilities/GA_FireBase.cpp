@@ -5,7 +5,7 @@
 #include "AbilitySystemBlueprintLibrary.h"
 #include "Abilities/Tasks/AbilityTask_PlayMontageAndWait.h"
 #include "Characters/PlayerCharacter.h"
-#include "Components/CharacterWeaponComponent.h"
+#include "Components/WeaponManagerComponent.h"
 #include "Weapons/GunBase.h"
 #include "Camera/CameraComponent.h"
 #include "Kismet/KismetMathLibrary.h"
@@ -33,7 +33,7 @@ void UGA_FireBase::ActivateAbility(const FGameplayAbilitySpecHandle Handle, cons
     }
 
     // 2. 缓存武器 (告别 BP_Gun 强转)
-    if (UCharacterWeaponComponent* WeaponComp = CachedPlayer->FindComponentByClass<UCharacterWeaponComponent>())
+    if (UWeaponManagerComponent* WeaponComp = CachedPlayer->FindComponentByClass<UWeaponManagerComponent>())
     {
         CachedWeapon = WeaponComp->CharacterWeapon;
     }

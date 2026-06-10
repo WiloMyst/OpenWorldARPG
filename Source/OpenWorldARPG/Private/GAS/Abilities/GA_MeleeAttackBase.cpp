@@ -6,7 +6,7 @@
 #include "Abilities/Tasks/AbilityTask_PlayMontageAndWait.h"
 #include "Abilities/Tasks/AbilityTask_WaitGameplayEvent.h"
 #include "Characters/PlayerCharacter.h"
-#include "Components/CharacterWeaponComponent.h"
+#include "Components/WeaponManagerComponent.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Kismet/KismetMathLibrary.h"
 
@@ -52,7 +52,7 @@ void UGA_MeleeAttackBase::ExecuteAttack()
     }
 
     // 1. 获取武器并执行 Weapon To Hand (对应图2)
-    if (UCharacterWeaponComponent* WeaponComp = CachedPlayer->FindComponentByClass<UCharacterWeaponComponent>())
+    if (UWeaponManagerComponent* WeaponComp = CachedPlayer->FindComponentByClass<UWeaponManagerComponent>())
     {
         WeaponComp->WeaponToHand();
     }
@@ -302,7 +302,7 @@ void UGA_MeleeAttackBase::EndAbility(const FGameplayAbilitySpecHandle Handle, co
     // 被其他 GA Cancel 时，武器回到背上
     if (bWasCancelled && CachedPlayer)
     {
-        if (UCharacterWeaponComponent* WeaponComp = CachedPlayer->FindComponentByClass<UCharacterWeaponComponent>())
+        if (UWeaponManagerComponent* WeaponComp = CachedPlayer->FindComponentByClass<UWeaponManagerComponent>())
         {
             WeaponComp->WeaponToBack();
         }

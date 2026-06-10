@@ -8,7 +8,6 @@
 
 class APlayerCharacter;
 class APlayerController;
-class UTargetSelectionComponent;
 
 /**
  * 玩家专属动画实例。追加瞄准/锁定/冲刺等玩家专属状态。
@@ -75,10 +74,6 @@ public:
 
     // --- Player States ---
 
-    /** 是否锁定了敌人（从 TargetSelectionComponent 快照） */
-    UPROPERTY(BlueprintReadOnly, Category = "AnimData|PlayerState")
-    bool bIsTargetLocking = false;
-
     /** 是否在冲刺 */
     UPROPERTY(BlueprintReadOnly, Category = "AnimData|PlayerState")
     bool bIsSprinting = false;
@@ -114,11 +109,15 @@ private:
 
     TWeakObjectPtr<APlayerCharacter> CachedPlayerCharacter;
     TWeakObjectPtr<APlayerController> CachedPlayerController;
-    TWeakObjectPtr<UTargetSelectionComponent> CachedTargetSelectionComp;
 
     // --- 主线程快照 ---
 
-    bool bSnapshotTargetLocking = false;
+    // 瞄准数据快照 (GameThread 写入，Worker Thread 只读)
+    FRotator SnapshotControlRotation = FRotator::ZeroRotator;
+    FRotator SnapshotActorRotation = FRotator::ZeroRotator;
+    FVector SnapshotActorLocation = FVector::ZeroVector;
+    FVector SnapshotActorForwardVector = FVector::ForwardVector;
+    FVector SnapshotActorRightVector = FVector::RightVector;
 
     // 用于记录主线程的脚部世界坐标
     FVector SnapshotLeftFootLoc = FVector::ZeroVector;

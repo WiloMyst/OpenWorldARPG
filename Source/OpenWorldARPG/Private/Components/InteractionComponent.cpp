@@ -1,6 +1,6 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
-#include "Components/BackpackComponent.h"
+#include "Components/InteractionComponent.h"
 #include "Items/ItemBase.h"
 #include "Managers/InventoryManagerSubsystem.h"
 #include "Characters/PlayerCharacter.h"
@@ -9,7 +9,7 @@
 #include "Kismet/KismetSystemLibrary.h"
 #include "Net/UnrealNetwork.h"
 
-UBackpackComponent::UBackpackComponent()
+UInteractionComponent::UInteractionComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
     PrimaryComponentTick.TickInterval = 0.1f;
@@ -18,7 +18,7 @@ UBackpackComponent::UBackpackComponent()
     SetIsReplicatedByDefault(true);
 }
 
-void UBackpackComponent::BeginPlay()
+void UInteractionComponent::BeginPlay()
 {
     Super::BeginPlay();
 
@@ -27,17 +27,17 @@ void UBackpackComponent::BeginPlay()
         InventorySubsystem = GI->GetSubsystem<UInventoryManagerSubsystem>();
         if (InventorySubsystem)
         {
-            InventorySubsystem->OnItemDropped.AddDynamic(this, &UBackpackComponent::HandleOnItemDropped);
+            InventorySubsystem->OnItemDropped.AddDynamic(this, &UInteractionComponent::HandleOnItemDropped);
         }
     }
 }
 
-void UBackpackComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+void UInteractionComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 }
 
-void UBackpackComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UInteractionComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
@@ -67,7 +67,7 @@ void UBackpackComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
     CurrentPickableItem = bHit && HitResult.GetActor() ? Cast<AItemBase>(HitResult.GetActor()) : nullptr;
 }
 
-bool UBackpackComponent::IsCharacterInStandby() const
+bool UInteractionComponent::IsCharacterInStandby() const
 {
     APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(GetOwner());
     if (PlayerChar)
@@ -81,7 +81,7 @@ bool UBackpackComponent::IsCharacterInStandby() const
     return false;
 }
 
-int32 UBackpackComponent::GetOwnerCharacterID() const
+int32 UInteractionComponent::GetOwnerCharacterID() const
 {
     APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(GetOwner());
     if (PlayerChar)
@@ -93,7 +93,7 @@ int32 UBackpackComponent::GetOwnerCharacterID() const
 
 // --- 拾取物品 (Client → Server RPC) ---
 
-void UBackpackComponent::PickUpItem()
+void UInteractionComponent::PickUpItem()
 {
     // 客户端：只发送请求到服务器
     if (IsCharacterInStandby() || !CurrentPickableItem.IsValid()) return;
@@ -102,12 +102,12 @@ void UBackpackComponent::PickUpItem()
     Server_PickUpItem(PickableItem->ItemID, PickableItem->ItemAmount);
 }
 
-bool UBackpackComponent::Server_PickUpItem_Validate(int32 ItemID, int32 Amount)
+bool UInteractionComponent::Server_PickUpItem_Validate(int32 ItemID, int32 Amount)
 {
     return ItemID > 0 && Amount > 0;
 }
 
-void UBackpackComponent::Server_PickUpItem_Implementation(int32 ItemID, int32 Amount)
+void UInteractionComponent::Server_PickUpItem_Implementation(int32 ItemID, int32 Amount)
 {
     // 服务器端：执行拾取逻辑（权威操作）
     if (IsCharacterInStandby() || !InventorySubsystem) return;
@@ -115,13 +115,6 @@ void UBackpackComponent::Server_PickUpItem_Implementation(int32 ItemID, int32 Am
     InventorySubsystem->AddItem(ItemID, Amount);
 
     // 服务器端销毁可拾取物品
-    // 注意：需要找到对应的世界物品 Actor 并销毁
-    // 由于客户端只传了 ItemID 和 Amount，服务器需要自行查找
-    // 简化方案：客户端检测到物品后，通过 RPC 传递引用
-    // 但 Actor 引用不能直接通过 RPC 传递，所以用 ItemID 方案
-
-    // TODO: 未来可改为通过 NetId 或更可靠的引用方式
-    // 当前简化实现：服务器在附近搜索匹配 ItemID 的 AItemBase 并销毁
     AActor* OwnerActor = GetOwner();
     if (!OwnerActor) return;
 
@@ -156,49 +149,49 @@ void UBackpackComponent::Server_PickUpItem_Implementation(int32 ItemID, int32 Am
 
 // --- 丢弃物品 (Client → Server RPC) ---
 
-void UBackpackComponent::DropItemByGUID(FGuid ItemGUID, int32 DropAmount)
+void UInteractionComponent::DropItemByGUID(FGuid ItemGUID, int32 DropAmount)
 {
     // 客户端：只发送请求到服务器
     Server_DropItemByGUID(ItemGUID, DropAmount);
 }
 
-bool UBackpackComponent::Server_DropItemByGUID_Validate(FGuid ItemGUID, int32 DropAmount)
+bool UInteractionComponent::Server_DropItemByGUID_Validate(FGuid ItemGUID, int32 DropAmount)
 {
     return DropAmount > 0;
 }
 
-void UBackpackComponent::Server_DropItemByGUID_Implementation(FGuid ItemGUID, int32 DropAmount)
+void UInteractionComponent::Server_DropItemByGUID_Implementation(FGuid ItemGUID, int32 DropAmount)
 {
     // 服务器端：执行丢弃逻辑（权威操作）
     if (!InventorySubsystem) return;
     InventorySubsystem->RemoveItemByGUID(ItemGUID, DropAmount);
 }
 
-void UBackpackComponent::DropItem(int32 DropIndex, int32 DropAmount)
+void UInteractionComponent::DropItem(int32 DropIndex, int32 DropAmount)
 {
     if (!InventorySubsystem) return;
     InventorySubsystem->RemoveItemByIndex(DropIndex, DropAmount);
 }
 
-bool UBackpackComponent::UseItemByGUID(FGuid ItemGUID, int32 UseAmount)
+bool UInteractionComponent::UseItemByGUID(FGuid ItemGUID, int32 UseAmount)
 {
     if (!InventorySubsystem) return false;
     return InventorySubsystem->UseItem(ItemGUID, GetOwnerCharacterID(), UseAmount);
 }
 
-bool UBackpackComponent::EquipItemByGUID(FGuid ItemGUID)
+bool UInteractionComponent::EquipItemByGUID(FGuid ItemGUID)
 {
     if (!InventorySubsystem) return false;
     return InventorySubsystem->EquipItem(ItemGUID, GetOwnerCharacterID());
 }
 
-bool UBackpackComponent::UnequipItemByGUID(FGuid ItemGUID)
+bool UInteractionComponent::UnequipItemByGUID(FGuid ItemGUID)
 {
     if (!InventorySubsystem) return false;
     return InventorySubsystem->UnequipItem(ItemGUID);
 }
 
-void UBackpackComponent::HandleOnItemDropped(int32 ItemID, int32 DroppedAmount)
+void UInteractionComponent::HandleOnItemDropped(int32 ItemID, int32 DroppedAmount)
 {
     // 仅在服务器端生成丢弃物品（服务器权威）
     if (!GetOwner()->HasAuthority()) return;
@@ -207,7 +200,7 @@ void UBackpackComponent::HandleOnItemDropped(int32 ItemID, int32 DroppedAmount)
     SpawnDroppedItem(ItemID, DroppedAmount);
 }
 
-void UBackpackComponent::SpawnDroppedItem(int32 ItemID, int32 DroppedAmount)
+void UInteractionComponent::SpawnDroppedItem(int32 ItemID, int32 DroppedAmount)
 {
     AActor* OwnerActor = GetOwner();
     if (!OwnerActor) return;
