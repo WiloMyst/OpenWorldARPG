@@ -6,6 +6,7 @@
 #include "Characters/PlayerCharacter.h"
 #include "AbilitySystemComponent.h"
 #include "Engine/World.h"
+#include "Engine/OverlapResult.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Net/UnrealNetwork.h"
 

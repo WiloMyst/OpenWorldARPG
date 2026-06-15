@@ -23,7 +23,9 @@ public class OpenWorldARPG : ModuleRules
 			"GameplayTags",
 			"GameplayTasks",
 			"AIModule",
-            "DeveloperSettings"
+            "DeveloperSettings",
+            "ChaosVehicles",
+			"MotionWarping"
         });
 	}
 }

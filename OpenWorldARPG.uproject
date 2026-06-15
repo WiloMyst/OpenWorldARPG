@@ -1,6 +1,6 @@
 {
 	"FileVersion": 3,
-	"EngineAssociation": "5.2",
+	"EngineAssociation": "{322B8F69-4405-C9AC-896B-049BF034B201}",
 	"Category": "",
 	"Description": "",
 	"Modules": [
@@ -26,15 +26,19 @@
 			]
 		},
 		{
+			"Name": "EnhancedInput",
+			"Enabled": true
+		},
+		{
 			"Name": "GameplayAbilities",
 			"Enabled": true
 		},
 		{
-			"Name": "ChaosVehiclesPlugin",
+			"Name": "MotionWarping",
 			"Enabled": true
 		},
 		{
-			"Name": "VirtualSoldier",
+			"Name": "ChaosVehiclesPlugin",
 			"Enabled": true
 		}
 	]
