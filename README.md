@@ -4,7 +4,7 @@
 
 ## 概述
 
-基于 UE5.2 C++ 与蓝图混合开发的开放世界 ARPG 原型，参考原神式的多角色配队战斗与开放世界探索玩法。项目以 GAS 为核心驱动框架，实现了自定义移动组件（攀爬/滑翔/墙角过渡）、多角色零延迟切换、数据驱动的背包装备系统等功能模块。（仅提供 Content 目录结构，无第三方资源）
+基于 UE5.5 C++ 与蓝图混合开发的开放世界 ARPG 原型，参考原神式的多角色配队战斗与开放世界探索玩法。项目以 GAS 为核心驱动框架，实现了自定义移动组件（攀爬/滑翔/墙角过渡）、多角色零延迟切换、数据驱动的背包装备系统等功能模块。（仅提供 Content 目录结构，无第三方资源）
 
 ## 演示
 
@@ -100,19 +100,18 @@
 
 ## 版本
 
-- Unreal Engine 5.2+
-- Visual Studio 2022, MSVC 14.34+
+- Unreal Engine 5.5+
+- Visual Studio 2022, MSVC 14.38+
 
 ## 资源
 
 Plugins：
 
 - [KawaiiPhysics](https://github.com/pafuhana1213/KawaiiPhysics) — 物理骨骼动画
-- [SPCRJointDynamics](https://github.com/SPARK-inc/SPCRJointDynamics) — 布料/头发物理模拟
 - [UnLua](https://github.com/Tencent/UnLua) — Lua 脚本绑定
-- [cats-blender-plugin](https://github.com/absolute-quantum/cats-blender-plugin) — Blender MMD 模型修整
 
 Models：
 
 - [模之屋 (PlayBox)](https://www.aplaybox.com/)
+- [cats-blender-plugin](https://github.com/absolute-quantum/cats-blender-plugin) — Blender MMD 模型转换
 
