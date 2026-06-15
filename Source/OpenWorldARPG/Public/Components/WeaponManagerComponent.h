@@ -10,7 +10,7 @@
 class APlayerCharacter;
 class AWeaponBase;
 
-UCLASS(Blueprintable, ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
+UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class OPENWORLDARPG_API UWeaponManagerComponent : public UActorComponent
 {
     GENERATED_BODY()

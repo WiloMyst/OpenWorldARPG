@@ -172,9 +172,15 @@ void AMainGamePlayerController::OnSwapOutCompleted(APlayerCharacter* SwappedOutC
 {
     if (!SwappedOutCharacter) return;
 
-    // 解绑委托，防止重复触发
-    SwappedOutCharacter->OnSwapOutCompleted.RemoveDynamic(this, &AMainGamePlayerController::OnSwapOutCompleted);
-
+    // 延迟一帧解绑委托，防止重复触发
+    GetWorldTimerManager().SetTimerForNextTick([this, SwappedOutCharacter]()
+	{
+		if (IsValid(SwappedOutCharacter))
+		{
+			SwappedOutCharacter->OnSwapOutCompleted.RemoveDynamic(this, &AMainGamePlayerController::OnSwapOutCompleted);
+		}
+	});
+    
     AMainGamePlayerState* MyPlayerState = GetPlayerState<AMainGamePlayerState>();
     if (!MyPlayerState || PendingSwapTargetIndex < 0) return;
 

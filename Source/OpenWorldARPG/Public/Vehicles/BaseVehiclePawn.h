@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "WheeledVehiclePawn.h"
+#include "InputActionValue.h"
 #include "Data/VehicleConfigDataAsset.h"
 #include "BaseVehiclePawn.generated.h"
 
@@ -28,8 +29,8 @@ public:
 
     // --- 组件访问 ---
 
-    /** 获取 Chaos 载具移动组件 */
-    UChaosWheeledVehicleMovementComponent* GetVehicleMovementComp() const { return ChaosVehicleMovement; }
+    /** 获取 Chaos 载具移动组件（Wheeled 版本） */
+    UChaosWheeledVehicleMovementComponent* GetWheeledVehicleMovement() const { return CachedWheeledMovement; }
 
     /** 获取弹簧臂组件 */
     USpringArmComponent* GetSpringArm() const { return SpringArm; }
@@ -56,8 +57,8 @@ public:
         meta = (DisplayName = "离开载具"))
     void ExitVehicle();
 
-    /** 当前驾驶员 */
-    UPROPERTY(BlueprintReadOnly, Category = "Vehicle|Possession",
+    /** 当前驾驶员（网络同步） */
+    UPROPERTY(ReplicatedUsing = OnRep_Driver, BlueprintReadOnly, Category = "Vehicle|Possession",
         meta = (DisplayName = "当前驾驶员"))
     ACharacter* Driver = nullptr;
 
@@ -102,7 +103,7 @@ protected:
 
     // --- 初始化 ---
 
-    /** 从 VehicleConfig 读取参数并应用到 ChaosVehicleMovement */
+    /** 从 VehicleConfig 读取参数并应用到移动组件和车轮实例 */
     void ApplyVehicleConfig();
 
     /** 初始化相机系统默认值 */
@@ -150,6 +151,10 @@ protected:
     float CurrentSpeedKPH = 0.0f;
 
 private:
+
+    /** 缓存的 Wheeled 移动组件指针（避免每次 Cast） */
+    UPROPERTY(Transient)
+    TObjectPtr<UChaosWheeledVehicleMovementComponent> CachedWheeledMovement;
 
     /** 相机插值当前 Alpha（0=基础，1=最大） */
     float CameraAlpha = 0.0f;

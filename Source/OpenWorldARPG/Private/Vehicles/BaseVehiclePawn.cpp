@@ -2,6 +2,7 @@
 
 #include "Vehicles/BaseVehiclePawn.h"
 #include "ChaosWheeledVehicleMovementComponent.h"
+#include "ChaosVehicleWheel.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Camera/CameraComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -24,12 +25,9 @@ ABaseVehiclePawn::ABaseVehiclePawn()
     PrimaryActorTick.bCanEverTick = true;
     PrimaryActorTick.TickGroup = TG_PostPhysics;
 
-    // --- Chaos 载具移动组件 ---
-    // AWheeledVehiclePawn 已在内部创建了 ChaosVehicleMovement，
-    // 这里只需确保它存在并做基础配置
-    ChaosVehicleMovement = CreateDefaultSubobject<UChaosWheeledVehicleMovementComponent>(TEXT("ChaosVehicleMovement"));
-    ChaosVehicleMovement->SetIsReplicated(true);
-    ChaosVehicleMovement->bReverseAsBrake = true;
+    // 注意：AWheeledVehiclePawn 已在父类构造函数中创建了
+    // VehicleMovementComponent (UChaosWheeledVehicleMovementComponent) 和 Mesh，
+    // 这里不需要再次 CreateDefaultSubobject
 
     // --- 弹簧臂 ---
     SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
@@ -54,12 +52,16 @@ ABaseVehiclePawn::ABaseVehiclePawn()
 }
 
 // ============================================================================
-// BeginPlay：从 DataAsset 读取配置并应用
+// BeginPlay：缓存移动组件指针，从 DataAsset 读取配置并应用
 // ============================================================================
 void ABaseVehiclePawn::BeginPlay()
 {
     Super::BeginPlay();
 
+    // 缓存 Wheeled 移动组件指针（父类以基类指针存储，这里做一次 Cast）
+    CachedWheeledMovement = Cast<UChaosWheeledVehicleMovementComponent>(GetVehicleMovement());
+
+    // 在物理车辆创建之前应用配置，确保参数生效
     ApplyVehicleConfig();
     InitCameraDefaults();
 }
@@ -72,9 +74,10 @@ void ABaseVehiclePawn::Tick(float DeltaTime)
     Super::Tick(DeltaTime);
 
     // 缓存当前速度 (km/h)
-    if (ChaosVehicleMovement)
+    if (CachedWheeledMovement)
     {
-        CurrentSpeedKPH = ChaosVehicleMovement->GetForwardSpeed() * 0.036f; // cm/s → km/h
+        // GetForwardSpeed() 返回 cm/s，转换为 km/h
+        CurrentSpeedKPH = CachedWheeledMovement->GetForwardSpeed() * 0.036f;
     }
 
     UpdateDynamicCamera(DeltaTime);
@@ -148,89 +151,98 @@ void ABaseVehiclePawn::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 }
 
 // ============================================================================
-// 从 VehicleConfig 读取参数并应用到 ChaosVehicleMovement
+// 从 VehicleConfig 读取参数并应用到移动组件和车轮实例
+// UE5.5 Chaos Vehicles 使用 FVehicleEngineConfig / FVehicleTransmissionConfig /
+// FVehicleSteeringConfig 等结构体，悬挂和轮胎参数在 UChaosVehicleWheel 上
 // ============================================================================
 void ABaseVehiclePawn::ApplyVehicleConfig()
 {
-    if (!VehicleConfig || !ChaosVehicleMovement) return;
+    if (!VehicleConfig || !CachedWheeledMovement) return;
 
     // --- 车身物理 ---
-    ChaosVehicleMovement->Mass = VehicleConfig->Mass;
-    ChaosVehicleMovement->DragCoefficient = VehicleConfig->DragCoefficient;
-    ChaosVehicleMovement->DownforceCoefficient = VehicleConfig->DownforceCoefficient;
+    CachedWheeledMovement->Mass = VehicleConfig->Mass;
+    CachedWheeledMovement->DragCoefficient = VehicleConfig->DragCoefficient;
+    CachedWheeledMovement->DownforceCoefficient = VehicleConfig->DownforceCoefficient;
 
-    // --- 引擎 ---
-    ChaosVehicleMovement->MaxEngineRPM = VehicleConfig->MaxRPM;
-    ChaosVehicleMovement->EngineIdleRPM = VehicleConfig->IdleRPM;
-    ChaosVehicleMovement->EngineBrakeEffect = VehicleConfig->EngineBrakeEffect;
+    // --- 引擎配置 (FVehicleEngineConfig) ---
+    FVehicleEngineConfig& Engine = CachedWheeledMovement->EngineSetup;
+    Engine.MaxRPM = VehicleConfig->MaxRPM;
+    Engine.EngineIdleRPM = VehicleConfig->IdleRPM;
+    Engine.EngineBrakeEffect = VehicleConfig->EngineBrakeEffect;
 
+    // 转矩曲线：将 UCurveFloat 的 FRichCurve 拷贝到 FRuntimeFloatCurve
     if (VehicleConfig->TorqueCurve)
     {
-        ChaosVehicleMovement->TorqueCurve.EditorCurveData = VehicleConfig->TorqueCurve->EditorCurveData;
+        Engine.TorqueCurve.EditorCurveData = VehicleConfig->TorqueCurve->FloatCurve;
     }
 
-    // --- 变速箱 ---
-    ChaosVehicleMovement->FinalRatio = VehicleConfig->FinalDriveRatio;
-    ChaosVehicleMovement->bAutomaticTransmission = VehicleConfig->bAutomaticTransmission;
-    ChaosVehicleMovement->GearAutoBoxLatency = VehicleConfig->GearAutoBoxLatency;
-    ChaosVehicleMovement->UpShiftRPM = VehicleConfig->UpShiftRPM;
-    ChaosVehicleMovement->DownShiftRPM = VehicleConfig->DownShiftRPM;
+    // --- 变速箱配置 (FVehicleTransmissionConfig) ---
+    FVehicleTransmissionConfig& Transmission = CachedWheeledMovement->TransmissionSetup;
+    Transmission.bUseAutomaticGears = VehicleConfig->bAutomaticTransmission;
+    Transmission.bUseAutoReverse = VehicleConfig->bAutomaticTransmission;
+    Transmission.FinalRatio = VehicleConfig->FinalDriveRatio;
+    Transmission.ChangeUpRPM = VehicleConfig->UpShiftRPM;
+    Transmission.ChangeDownRPM = VehicleConfig->DownShiftRPM;
+    Transmission.GearChangeTime = VehicleConfig->GearAutoBoxLatency;
 
-    // 齿轮比：将 FGearConfig 数组转换为 FVehicleTransmissionConfig 的 GearSetup
-    ChaosVehicleMovement->TransmissionSetup.ForwardGears.Reset();
-    ChaosVehicleMovement->TransmissionSetup.ReverseGears.Reset();
+    // 将 FGearConfig 数组映射到 UE5.5 的 ForwardGearRatios / ReverseGearRatios
+    Transmission.ForwardGearRatios.Reset();
+    Transmission.ReverseGearRatios.Reset();
 
     for (int32 i = 0; i < VehicleConfig->GearRatios.Num(); ++i)
     {
         const FGearConfig& Gear = VehicleConfig->GearRatios[i];
-        FVehicleGearData GearData;
-        GearData.Ratio = Gear.Ratio;
-        GearData.Efficiency = Gear.Efficiency;
-
         if (i == 0)
         {
             // 索引0 = 倒挡
-            ChaosVehicleMovement->TransmissionSetup.ReverseGears.Add(GearData);
+            Transmission.ReverseGearRatios.Add(Gear.Ratio);
+            Transmission.TransmissionEfficiency = Gear.Efficiency;
         }
-        else if (i == 1)
+        else if (i >= 2)
         {
-            // 索引1 = 空挡，Chaos 内部自动处理
-            ChaosVehicleMovement->TransmissionSetup.NeutralGear = GearData;
-        }
-        else
-        {
-            // 索引2起 = 前进挡
-            ChaosVehicleMovement->TransmissionSetup.ForwardGears.Add(GearData);
+            // 索引2起 = 前进挡（索引1 = 空挡，Chaos 内部自动处理）
+            Transmission.ForwardGearRatios.Add(Gear.Ratio);
         }
     }
 
-    // --- 转向 ---
-    ChaosVehicleMovement->SteeringSetup.MaxSteerAngle = VehicleConfig->MaxSteeringAngle;
+    // --- 转向配置 (FVehicleSteeringConfig) ---
+    FVehicleSteeringConfig& Steering = CachedWheeledMovement->SteeringSetup;
+    if (VehicleConfig->SpeedSteeringCurve)
+    {
+        Steering.SteeringCurve.EditorCurveData = VehicleConfig->SpeedSteeringCurve->FloatCurve;
+    }
 
-    // --- 悬挂 ---
+    // --- 车轮实例：悬挂 + 轮胎 + 制动 ---
+    // UE5.5 中这些参数在 UChaosVehicleWheel 实例上设置
     const FSuspensionConfig& Susp = VehicleConfig->SuspensionSetup;
-    for (FWheelSetup& WheelSetup : ChaosVehicleMovement->WheelSetups)
-    {
-        WheelSetup.SuspensionMaxDrop = Susp.MaxDrop;
-        WheelSetup.SuspensionMaxRaise = Susp.MaxRaise;
-        WheelSetup.SuspensionSpringRate = Susp.SpringRate;
-        WheelSetup.SuspensionDampingRate = Susp.DampingRate;
-        WheelSetup.SuspensionPreLoad = Susp.PreLoad;
-    }
-
-    // --- 轮胎 ---
     const FTireConfig& Tire = VehicleConfig->TireSetup;
-    for (FWheelSetup& WheelSetup : ChaosVehicleMovement->WheelSetups)
-    {
-        WheelSetup.TireConfig.LateralStiffness = Tire.LateralStiffness;
-        WheelSetup.TireConfig.LongitudinalStiffness = Tire.LongitudinalStiffness;
-        WheelSetup.TireConfig.FrictionScale = Tire.FrictionScale;
-        WheelSetup.TireConfig.LatStiffnessLoad = Tire.LateralSlipFrictionScale;
-    }
 
-    // --- 制动 ---
-    ChaosVehicleMovement->MaxBrakeTorque = VehicleConfig->MaxBrakeTorque;
-    ChaosVehicleMovement->HandbrakeTorque = VehicleConfig->HandbrakeTorque;
+    for (UChaosVehicleWheel* Wheel : CachedWheeledMovement->Wheels)
+    {
+        if (!Wheel) continue;
+
+        // 悬挂参数
+        Wheel->SpringRate = Susp.SpringRate;
+        Wheel->SuspensionDampingRatio = FMath::Clamp(Susp.DampingRate / 10000.0f, 0.0f, 1.0f);
+        Wheel->SuspensionMaxDrop = Susp.MaxDrop;
+        Wheel->SuspensionMaxRaise = Susp.MaxRaise;
+        Wheel->SpringPreload = Susp.PreLoad;
+
+        // 轮胎参数
+        Wheel->CorneringStiffness = Tire.LateralStiffness;
+        Wheel->FrictionForceMultiplier = Tire.FrictionScale;
+        Wheel->SideSlipModifier = Tire.LateralSlipFrictionScale;
+
+        // 制动参数
+        Wheel->MaxBrakeTorque = VehicleConfig->MaxBrakeTorque;
+        Wheel->MaxHandBrakeTorque = VehicleConfig->HandbrakeTorque;
+
+        // 转向角度（仅对受转向影响的车轮生效）
+        if (Wheel->bAffectedBySteering)
+        {
+            Wheel->MaxSteerAngle = VehicleConfig->MaxSteeringAngle;
+        }
+    }
 }
 
 // ============================================================================
@@ -249,30 +261,26 @@ void ABaseVehiclePawn::InitCameraDefaults()
 // ============================================================================
 void ABaseVehiclePawn::InputThrottle(const FInputActionValue& Value)
 {
-    if (!ChaosVehicleMovement) return;
-    const float ThrottleInput = Value.Get<float>();
-    ChaosVehicleMovement->SetThrottleInput(ThrottleInput);
+    if (!CachedWheeledMovement) return;
+    CachedWheeledMovement->SetThrottleInput(Value.Get<float>());
 }
 
 void ABaseVehiclePawn::InputBrake(const FInputActionValue& Value)
 {
-    if (!ChaosVehicleMovement) return;
-    const float BrakeInput = Value.Get<float>();
-    ChaosVehicleMovement->SetBrakeInput(BrakeInput);
+    if (!CachedWheeledMovement) return;
+    CachedWheeledMovement->SetBrakeInput(Value.Get<float>());
 }
 
 void ABaseVehiclePawn::InputSteering(const FInputActionValue& Value)
 {
-    if (!ChaosVehicleMovement) return;
-    const float SteerInput = Value.Get<float>();
-    ChaosVehicleMovement->SetSteeringInput(SteerInput);
+    if (!CachedWheeledMovement) return;
+    CachedWheeledMovement->SetSteeringInput(Value.Get<float>());
 }
 
 void ABaseVehiclePawn::InputHandbrake(const FInputActionValue& Value)
 {
-    if (!ChaosVehicleMovement) return;
-    const bool bHandbrake = Value.Get<bool>();
-    ChaosVehicleMovement->SetHandbrakeInput(bHandbrake);
+    if (!CachedWheeledMovement) return;
+    CachedWheeledMovement->SetHandbrakeInput(Value.Get<bool>());
 }
 
 void ABaseVehiclePawn::InputExitVehicle(const FInputActionValue& Value)
@@ -293,7 +301,9 @@ void ABaseVehiclePawn::UpdateDynamicCamera(float DeltaTime)
     if (VehicleConfig->SpeedCameraCurve)
     {
         // 曲线 X=速度(km/h)，Y=Alpha(0~1)
-        TargetAlpha = FMath::Clamp(VehicleConfig->SpeedCameraCurve->GetFloatValue(FMath::Abs(CurrentSpeedKPH)), 0.0f, 1.0f);
+        TargetAlpha = FMath::Clamp(
+            VehicleConfig->SpeedCameraCurve->GetFloatValue(FMath::Abs(CurrentSpeedKPH)),
+            0.0f, 1.0f);
     }
     else
     {
@@ -305,12 +315,10 @@ void ABaseVehiclePawn::UpdateDynamicCamera(float DeltaTime)
     CameraAlpha = FMath::FInterpTo(CameraAlpha, TargetAlpha, DeltaTime, 3.0f);
 
     // 插值臂长
-    const float ArmLength = FMath::Lerp(VehicleConfig->BaseArmLength, VehicleConfig->MaxArmLength, CameraAlpha);
-    SpringArm->TargetArmLength = ArmLength;
+    SpringArm->TargetArmLength = FMath::Lerp(VehicleConfig->BaseArmLength, VehicleConfig->MaxArmLength, CameraAlpha);
 
     // 插值 FOV
-    const float FOV = FMath::Lerp(VehicleConfig->BaseFOV, VehicleConfig->MaxFOV, CameraAlpha);
-    FollowCamera->FieldOfView = FOV;
+    FollowCamera->FieldOfView = FMath::Lerp(VehicleConfig->BaseFOV, VehicleConfig->MaxFOV, CameraAlpha);
 }
 
 // ============================================================================
@@ -320,7 +328,6 @@ void ABaseVehiclePawn::EnterVehicle(ACharacter* InDriver)
 {
     if (!InDriver || Driver) return;
 
-    // 服务器端执行，客户端通过 RPC 或 RepNotify 同步
     Driver = InDriver;
 
     // 隐藏驾驶员 Mesh，挂载到载具骨骼 Socket
@@ -334,7 +341,7 @@ void ABaseVehiclePawn::EnterVehicle(ACharacter* InDriver)
             VehicleConfig ? VehicleConfig->DriverSocketName : FName("DriverSeat"));
     }
 
-    // 关闭驾驶员碰撞
+    // 关闭驾驶员碰撞和移动
     InDriver->SetActorEnableCollision(false);
     if (UCharacterMovementComponent* CMC = InDriver->GetCharacterMovement())
     {
@@ -395,12 +402,12 @@ void ABaseVehiclePawn::ExitVehicle()
     Driver = nullptr;
 
     // 重置载具输入
-    if (ChaosVehicleMovement)
+    if (CachedWheeledMovement)
     {
-        ChaosVehicleMovement->SetThrottleInput(0.0f);
-        ChaosVehicleMovement->SetSteeringInput(0.0f);
-        ChaosVehicleMovement->SetBrakeInput(0.0f);
-        ChaosVehicleMovement->SetHandbrakeInput(false);
+        CachedWheeledMovement->SetThrottleInput(0.0f);
+        CachedWheeledMovement->SetSteeringInput(0.0f);
+        CachedWheeledMovement->SetBrakeInput(0.0f);
+        CachedWheeledMovement->SetHandbrakeInput(false);
     }
 
     // 移除载具输入映射上下文
@@ -471,5 +478,4 @@ bool ABaseVehiclePawn::FindSafeExitLocation(FVector& OutLocation) const
 void ABaseVehiclePawn::OnRep_Driver()
 {
     // 客户端收到 Driver 同步后，可在此处理 UI 更新等
-    // 目前留空，后续可扩展
 }

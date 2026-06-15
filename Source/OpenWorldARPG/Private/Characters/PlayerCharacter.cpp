@@ -62,7 +62,7 @@ APlayerCharacter::APlayerCharacter(const FObjectInitializer& ObjectInitializer)
 	WeaponRestSocket = CreateDefaultSubobject<USceneComponent>(TEXT("WeaponRestSocket"));
 	WeaponRestSocket->SetupAttachment(WeaponSpringArm);
 
-	WeaponComponent = CreateDefaultSubobject<UWeaponManagerComponent>(TEXT("WeaponComponent"));
+	WeaponManagerComponent = CreateDefaultSubobject<UWeaponManagerComponent>(TEXT("WeaponManagerComponent"));
 
 	InteractionComponent = CreateDefaultSubobject<UInteractionComponent>(TEXT("InteractionComponent"));
 
@@ -282,15 +282,15 @@ void APlayerCharacter::InitializeCharacter(const FCharacterSaveData& InSaveData,
 			UAS_Player::GetHealthAttribute()).AddUObject(this, &APlayerCharacter::OnHealthAttributeChanged);
 	}
 
-	if (WeaponComponent)
+	if (WeaponManagerComponent)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[PlayerChar] Calling InitializeCharacterWeapon, DataSourceAsset=%s"),
 			DataSourceAsset ? *DataSourceAsset->GetName() : TEXT("NULL"));
-		WeaponComponent->InitializeCharacterWeapon();
+		WeaponManagerComponent->InitializeCharacterWeapon();
 	}
 	else
 	{
-		UE_LOG(LogTemp, Error, TEXT("[PlayerChar] WeaponComponent is NULL at InitCharacterData!"));
+		UE_LOG(LogTemp, Error, TEXT("[PlayerChar] WeaponManagerComponent is NULL at InitCharacterData!"));
 	}
 }
 
@@ -400,10 +400,9 @@ void APlayerCharacter::ApplyStandbyMode(bool bNewStandbyState)
 			SetActorTickEnabled(false);
 			MoveComp->SetComponentTickEnabled(false);
 		}
-
-		if (WeaponComponent)
+		if (WeaponManagerComponent)
 		{
-			WeaponComponent->SetWeaponHidden(true);
+			WeaponManagerComponent->SetWeaponHidden(true);
 		}
 
 		if (USkeletalMeshComponent* SKMesh = GetMesh())
@@ -446,10 +445,9 @@ void APlayerCharacter::ApplyStandbyMode(bool bNewStandbyState)
 
 		// 动画已更新到正确姿态，现在可以安全显示角色
 		SetActorHiddenInGame(false);
-
-		if (WeaponComponent)
+		if (WeaponManagerComponent)
 		{
-			WeaponComponent->SetWeaponHidden(false);
+			WeaponManagerComponent->SetWeaponHidden(false);
 		}
 
 		MoveComp->SetMovementMode(MOVE_Walking);
@@ -889,9 +887,9 @@ void APlayerCharacter::HandleDeath_Implementation()
 {
 	Super::HandleDeath_Implementation();
 
-	if (WeaponComponent)
+	if (WeaponManagerComponent)
 	{
-		WeaponComponent->SetWeaponHidden(true);
+		WeaponManagerComponent->SetWeaponHidden(true);
 	}
 }
 

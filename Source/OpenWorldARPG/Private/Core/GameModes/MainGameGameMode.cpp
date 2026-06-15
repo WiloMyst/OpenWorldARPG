@@ -42,7 +42,7 @@ void AMainGameGameMode::PostLogin(APlayerController* NewPlayer)
 void AMainGameGameMode::GeneratePlayerCharacters(APlayerController* PlayerController)
 {
     // TODO [联机架构缺陷]: CharacterManagerSubsystem 和 TeamManagerSubsystem 是全局共享的
-    // GameInstanceSubsystem，多玩家连入时 LoadBuffer 和 TeamTags 会互相覆盖。
+    // GameInstanceSubsystem，多玩家连入时数据会互相覆盖。
     // 联机时需要改为按玩家隔离的数据源（如从 PlayerState 或存档系统按玩家 ID 加载）。
     // 当前单机/Listen Server 场景下只有 Host 一个玩家，暂时安全。
 
@@ -72,8 +72,11 @@ void AMainGameGameMode::GeneratePlayerCharacters(APlayerController* PlayerContro
         return;
     }
 
-    UE_LOG(LogTemp, Log, TEXT("GeneratePlayerCharacters: LoadBuffer 数量 = %d"), CharManager->GetLoadBuffer().Num());
-    UE_LOG(LogTemp, Log, TEXT("GeneratePlayerCharacters: 队伍成员 = %d, 活跃索引 = %d"), TeamManager->GetCurrentTeamCharacterTags().Num(), TeamManager->GetActiveCharacterIndex());
+    // 获取当前队伍成员 Tag 列表（仅队伍中的角色才生成实体）
+    const TArray<FGameplayTag> TeamTags = TeamManager->GetCurrentTeamCharacterTags();
+
+    UE_LOG(LogTemp, Log, TEXT("GeneratePlayerCharacters: 玩家拥有角色数 = %d, 队伍成员数 = %d, 活跃索引 = %d"),
+        CharManager->GetOwnedCharacterCount(), TeamTags.Num(), TeamManager->GetActiveCharacterIndex());
 
     // 1. 获取生成位置
     AActor* StartSpot = FindPlayerStart(PlayerController, DefaultPlayerStartTag.ToString());
@@ -86,82 +89,79 @@ void AMainGameGameMode::GeneratePlayerCharacters(APlayerController* PlayerContro
 
     FActorSpawnParameters SpawnParams;
     SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-    SpawnParams.Owner = PlayerController; // 设置 Owner 为 PlayerController，便于权限判定
+    SpawnParams.Owner = PlayerController;
 
-    // 2. 队伍角色实例数组（按队伍顺序存储）
+    // 2. 队伍角色实例数组（按队伍顺序存储，索引与 TeamTags 一一对应）
     TArray<APlayerCharacter*> TeamActors;
-    TArray<FGameplayTag> TeamTags = TeamManager->GetCurrentTeamCharacterTags();
+    TeamActors.SetNum(TeamTags.Num());
 
-    // 3. 为所有拥有的角色生成 PlayerCharacter 实体并初始化
-    for (const auto& SaveData : CharManager->GetLoadBuffer())
+    // 3. 仅遍历队伍成员 Tag，按需生成角色实体
+    for (int32 TeamIndex = 0; TeamIndex < TeamTags.Num(); ++TeamIndex)
     {
-        UE_LOG(LogTemp, Log, TEXT("GeneratePlayerCharacters: 尝试生成角色 Tag=%s"), *SaveData.CharacterTag.ToString());
+        const FGameplayTag& CharacterTag = TeamTags[TeamIndex];
 
-        FCharacterInfoRow InfoRow;
-        if (CharManager->GetCharacterInfoRowByTag(SaveData.CharacterTag, InfoRow))
+        // 从 CharacterManagerSubsystem 查询该角色的存档数据
+        FCharacterSaveData SaveData;
+        if (!CharManager->GetCharacterSaveData(CharacterTag, SaveData))
         {
-            APlayerCharacter* SpawnedChar = GetWorld()->SpawnActor<APlayerCharacter>(
-                PlayerCharacterClass,
-                SpawnTransform,
-                SpawnParams
-            );
+            // 队伍 Tag 在玩家拥有的角色中找不到，输出 Error 并跳过
+            UE_LOG(LogTemp, Error, TEXT("GeneratePlayerCharacters: 队伍角色 Tag=%s 在玩家拥有的角色存档中未找到！跳过生成。"), *CharacterTag.ToString());
+            continue;
+        }
 
-            if (SpawnedChar)
-            {
-                // 初始化: SaveData 移入 RuntimeData
-                SpawnedChar->InitializeCharacter(SaveData, InfoRow.CharacterDataAsset);
+        // 查询角色静态配置数据
+        FCharacterInfoRow InfoRow;
+        if (!CharManager->GetCharacterInfoRowByTag(CharacterTag, InfoRow))
+        {
+            UE_LOG(LogTemp, Error, TEXT("GeneratePlayerCharacters: 角色 Tag=%s 在 CharacterInfoTable 中未找到！跳过生成。"), *CharacterTag.ToString());
+            continue;
+        }
 
-                // 如果是队伍成员，按队伍顺序加入 TeamActors
-                int32 TeamIndex = TeamTags.Find(SaveData.CharacterTag);
-                if (TeamIndex != INDEX_NONE)
-                {
-                    // 确保数组足够大
-                    if (TeamActors.Num() <= TeamIndex)
-                    {
-                        TeamActors.SetNum(TeamIndex + 1);
-                    }
-                    TeamActors[TeamIndex] = SpawnedChar;
-                }
+        UE_LOG(LogTemp, Log, TEXT("GeneratePlayerCharacters: 尝试生成队伍角色 Tag=%s (索引=%d)"), *CharacterTag.ToString(), TeamIndex);
 
-                // 默认进入待机模式
-                SpawnedChar->SetStandbyMode(true);
+        // 生成角色实体
+        APlayerCharacter* SpawnedChar = GetWorld()->SpawnActor<APlayerCharacter>(
+            PlayerCharacterClass,
+            SpawnTransform,
+            SpawnParams
+        );
 
-                UE_LOG(LogTemp, Log, TEXT("GeneratePlayerCharacters: 角色 Tag=%s 生成成功。"), *SaveData.CharacterTag.ToString());
-            }
-            else
-            {
-                UE_LOG(LogTemp, Error, TEXT("GeneratePlayerCharacters: 角色 Tag=%s SpawnActor 失败！"), *SaveData.CharacterTag.ToString());
-            }
+        if (SpawnedChar)
+        {
+            // 初始化: SaveData 移入 RuntimeData
+            SpawnedChar->InitializeCharacter(SaveData, InfoRow.CharacterDataAsset);
+
+            // 按队伍索引存入 TeamActors
+            TeamActors[TeamIndex] = SpawnedChar;
+
+            // 默认进入待机模式
+            SpawnedChar->SetStandbyMode(true);
+
+            UE_LOG(LogTemp, Log, TEXT("GeneratePlayerCharacters: 队伍角色 Tag=%s 生成成功。"), *CharacterTag.ToString());
         }
         else
         {
-            UE_LOG(LogTemp, Error, TEXT("GeneratePlayerCharacters: 角色 Tag=%s 在 CharacterInfoTable 中未找到！"), *SaveData.CharacterTag.ToString());
+            UE_LOG(LogTemp, Error, TEXT("GeneratePlayerCharacters: 角色 Tag=%s SpawnActor 失败！"), *CharacterTag.ToString());
         }
     }
 
-    // 4. 所有角色已生成并初始化，清空加载缓冲区
-    CharManager->ClearLoadBuffer();
-
-    // 5. 将队伍角色存入 PlayerState（Replicated，全网同步）
+    // 4. 将队伍角色存入 PlayerState（Replicated，全网同步）
     PlayerState->SetTeamCharacterActors(TeamActors);
 
     UE_LOG(LogTemp, Log, TEXT("GeneratePlayerCharacters: 队伍成员 %d 个已存入 PlayerState。"), TeamActors.Num());
 
-    // 6. 激活当前激活索引的角色
+    // 5. 激活当前激活索引的角色
     int32 ActiveIndex = TeamManager->GetActiveCharacterIndex();
-    if (TeamActors.IsValidIndex(ActiveIndex))
+    if (TeamActors.IsValidIndex(ActiveIndex) && TeamActors[ActiveIndex])
     {
         APlayerCharacter* ActiveCharacter = TeamActors[ActiveIndex];
-        if (ActiveCharacter)
-        {
-            ActiveCharacter->SetStandbyMode(false);
-            PlayerController->Possess(ActiveCharacter);
+        ActiveCharacter->SetStandbyMode(false);
+        PlayerController->Possess(ActiveCharacter);
 
-            // 设置 PlayerState 的激活索引（触发全网同步）
-            PlayerState->SetActiveCharacterIndex(ActiveIndex);
+        // 设置 PlayerState 的激活索引（触发全网同步）
+        PlayerState->SetActiveCharacterIndex(ActiveIndex);
 
-            UE_LOG(LogTemp, Log, TEXT("GeneratePlayerCharacters: 激活角色索引 %d 并 Possess。"), ActiveIndex);
-        }
+        UE_LOG(LogTemp, Log, TEXT("GeneratePlayerCharacters: 激活角色索引 %d 并 Possess。"), ActiveIndex);
     }
     else
     {

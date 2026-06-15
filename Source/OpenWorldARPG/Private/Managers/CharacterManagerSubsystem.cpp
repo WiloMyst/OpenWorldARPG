@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Managers/CharacterManagerSubsystem.h"
 #include "Characters/PlayerCharacter.h"
@@ -22,7 +22,7 @@ void UCharacterManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection
 
 void UCharacterManagerSubsystem::Deinitialize()
 {
-	LoadBuffer.Empty();
+	OwnedCharactersSaveData.Empty();
 	TagToRowNameMap.Empty();
 
 	Super::Deinitialize();
@@ -38,9 +38,23 @@ void UCharacterManagerSubsystem::InitializeFromDataObject(UObject* InDataObject)
 		return;
 	}
 
-	LoadBuffer = ConfigData->InitialOwnedCharacters;
+	// 将初始拥有角色数据存入持久化 Map（以 CharacterTag 为键）
+	OwnedCharactersSaveData.Empty();
+	OwnedCharactersSaveData.Reserve(ConfigData->InitialOwnedCharacters.Num());
 
-	UE_LOG(LogTemp, Log, TEXT("InitializeFromDataObject: 成功填充 LoadBuffer，数量为 %d"), LoadBuffer.Num());
+	for (const FCharacterSaveData& SaveData : ConfigData->InitialOwnedCharacters)
+	{
+		if (SaveData.CharacterTag.IsValid())
+		{
+			OwnedCharactersSaveData.Add(SaveData.CharacterTag, SaveData);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("InitializeFromDataObject: 跳过无效 CharacterTag 的存档数据。"));
+		}
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("InitializeFromDataObject: 成功填充 OwnedCharactersSaveData，数量为 %d"), OwnedCharactersSaveData.Num());
 }
 
 const bool UCharacterManagerSubsystem::GetCharacterInfoRowByTag(const FGameplayTag& CharacterTag, FCharacterInfoRow& OutRow) const
@@ -77,6 +91,33 @@ FName UCharacterManagerSubsystem::GetRowNameByTag(const FGameplayTag& CharacterT
 
 	const FName* RowNamePtr = TagToRowNameMap.Find(CharacterTag);
 	return RowNamePtr ? *RowNamePtr : NAME_None;
+}
+
+bool UCharacterManagerSubsystem::GetCharacterSaveData(const FGameplayTag& CharacterTag, FCharacterSaveData& OutData) const
+{
+	const FCharacterSaveData* FoundData = OwnedCharactersSaveData.Find(CharacterTag);
+	if (FoundData)
+	{
+		OutData = *FoundData;
+		return true;
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("GetCharacterSaveData: Tag [%s] 不在 OwnedCharactersSaveData 中！共 %d 条记录"),
+		*CharacterTag.ToString(), OwnedCharactersSaveData.Num());
+	return false;
+}
+
+void UCharacterManagerSubsystem::UpdateCharacterSaveData(const FGameplayTag& CharacterTag, const FCharacterSaveData& NewData)
+{
+	FCharacterSaveData* ExistingData = OwnedCharactersSaveData.Find(CharacterTag);
+	if (ExistingData)
+	{
+		*ExistingData = NewData;
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("UpdateCharacterSaveData: Tag [%s] 不存在于 OwnedCharactersSaveData 中，跳过更新。"), *CharacterTag.ToString());
+	}
 }
 
 void UCharacterManagerSubsystem::CollectSaveDataFromCharacters(const TArray<APlayerCharacter*>& CharacterActors, TArray<FCharacterSaveData>& OutSaveData) const

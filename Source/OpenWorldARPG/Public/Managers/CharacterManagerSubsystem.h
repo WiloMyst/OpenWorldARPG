@@ -16,6 +16,7 @@ struct FCharacterInfoRow;
 
 /**
  * 角色数据管理子系统（纯数据层，不持有 Actor 引用）。
+ * 持久化存储玩家拥有的所有角色存档数据，按需查询，不再一次性加载全部角色实体。
  */
 UCLASS()
 class OPENWORLDARPG_API UCharacterManagerSubsystem : public UGameInstanceSubsystem
@@ -30,7 +31,7 @@ public:
 
 	// --- 核心 API ---
 
-	/** 从 StartingRosterConfig 填充加载缓冲区，仅在游戏初始化时调用 */
+	/** 从 StartingRosterConfig 填充玩家拥有的角色存档数据，仅在游戏初始化时调用 */
 	UFUNCTION(BlueprintCallable, Category = "CharacterManager|Initialization")
 	void InitializeFromDataObject(UObject* InDataObject);
 
@@ -42,13 +43,21 @@ public:
 	UFUNCTION(BlueprintPure, Category = "CharacterManager|Data")
 	FName GetRowNameByTag(const FGameplayTag& CharacterTag) const;
 
-	/** 获取加载缓冲区（仅在 GeneratePlayerCharacters 期间使用）。 */
-	const TArray<FCharacterSaveData>& GetLoadBuffer() const { return LoadBuffer; }
+	// --- 存档数据 API ---
 
-	/** 清空加载缓冲区（角色全部生成并初始化后调用）。 */
-	void ClearLoadBuffer() { LoadBuffer.Empty(); }
+	/** 通过角色 Tag 获取对应的存档数据。找到返回 true，否则 false */
+	UFUNCTION(BlueprintCallable, Category = "CharacterManager|SaveData")
+	bool GetCharacterSaveData(const FGameplayTag& CharacterTag, FCharacterSaveData& OutData) const;
 
-	/** 从当前关卡的角色实例中收集存档数据。 */
+	/** 更新指定角色的存档数据（用于存档同步、运行时属性变更等）。Tag 不存在则不操作 */
+	UFUNCTION(BlueprintCallable, Category = "CharacterManager|SaveData")
+	void UpdateCharacterSaveData(const FGameplayTag& CharacterTag, const FCharacterSaveData& NewData);
+
+	/** 获取玩家拥有的角色总数 */
+	UFUNCTION(BlueprintPure, Category = "CharacterManager|SaveData")
+	int32 GetOwnedCharacterCount() const { return OwnedCharactersSaveData.Num(); }
+
+	/** 从当前关卡的角色实例中收集存档数据 */
 	void CollectSaveDataFromCharacters(const TArray<APlayerCharacter*>& CharacterActors, TArray<FCharacterSaveData>& OutSaveData) const;
 
 private:
@@ -58,9 +67,11 @@ private:
 	void EnsureTagMapBuilt() const;
 
 protected:
-	/** 初始化阶段暂存 StartingRosterConfig 数据的缓冲区，角色全部生成后应调用 ClearLoadBuffer() 清空 */
+	/** 玩家拥有的所有角色存档数据，以 CharacterTag 为键持久化存储。
+	 *  替代原先的 LoadBuffer：不再一次性加载全部角色实体，
+	 *  仅在需要生成队伍角色时按 Tag 查询对应的 SaveData。 */
 	UPROPERTY()
-	TArray<FCharacterSaveData> LoadBuffer;
+	TMap<FGameplayTag, FCharacterSaveData> OwnedCharactersSaveData;
 
 	/** 角色 Tag → DataTable 行名的映射表 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "CharacterManager|Config")

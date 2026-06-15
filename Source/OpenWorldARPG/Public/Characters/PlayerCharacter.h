@@ -251,7 +251,7 @@ protected:
 	TObjectPtr<USceneComponent> WeaponRestSocket;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlayerCharacter|Weapon")
-	TObjectPtr<UWeaponManagerComponent> WeaponComponent;
+	TObjectPtr<UWeaponManagerComponent> WeaponManagerComponent;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlayerCharacter|Interaction")
 	TObjectPtr<UInteractionComponent> InteractionComponent;
