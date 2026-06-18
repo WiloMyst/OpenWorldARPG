@@ -1,10 +1,11 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Managers/GameAssetManagerSubsystem.h"
 #include "Managers/CharacterManagerSubsystem.h"
 #include "Core/OpenWorldARPGSettings.h"
-#include "Data/CharacterDataAsset.h"
-#include "Data/CharacterInfoRow.h"
+#include "Data/CharacterVisualDataAsset.h"
+#include "Data/CharacterCombatDataAsset.h"
+#include "Data/CharacterRegistryRow.h"
 #include "Data/CharacterGeneralDataAsset.h"
 #include "Data/UIDataAsset.h"
 #include "UI/LoadingScreenWidget.h"
@@ -221,47 +222,39 @@ void UGameAssetManagerSubsystem::StartTeamAssetLoading(const TArray<FGameplayTag
             FName RowName = CharManager->GetRowNameByTag(CharTag);
             if (RowName == NAME_None) continue;
 
-            FCharacterInfoRow* Row = LoadedTable->FindRow<FCharacterInfoRow>(RowName, TEXT(""));
-            if (Row && Row->CharacterDataAsset)
+            FCharacterRegistryRow* Row = LoadedTable->FindRow<FCharacterRegistryRow>(RowName, TEXT(""));
+            if (Row)
             {
-                UCharacterDataAsset* DataAsset = Row->CharacterDataAsset;
-                if (DataAsset)
-                {
-                    AssetPathsToLoad.Add(DataAsset->HeadIcon.ToSoftObjectPath());
-                    AssetPathsToLoad.Add(DataAsset->SplashArt.ToSoftObjectPath());
-                    AssetPathsToLoad.Add(DataAsset->CharacterMesh.ToSoftObjectPath());
+                // ==========================================
+                // UI 资产：从 FCharacterRegistryRow (DataTable) 加载
+                // SSOT 原则：UI 展示数据只在此处配置
+                // ==========================================
+                AssetPathsToLoad.Add(Row->HeadIcon.ToSoftObjectPath());
+                AssetPathsToLoad.Add(Row->SplashArt.ToSoftObjectPath());
 
-                    AssetPathsToLoad.Add(DataAsset->NormalAttack.Icon.ToSoftObjectPath());
-                    for (TSoftObjectPtr<UAnimMontage> Montage : DataAsset->NormalAttack.Montages)
+                // ==========================================
+                // 外观资产：从 UCharacterVisualDataAsset 加载
+                // 三层解耦：VisualData 通过 TSoftObjectPtr 桥梁引用
+                // ==========================================
+                if (UCharacterVisualDataAsset* VisualData = Row->VisualData.Get())
+                {
+                    AssetPathsToLoad.Add(VisualData->CharacterMesh.ToSoftObjectPath());
+                }
+
+                // ==========================================
+                // 战斗资产：从 UCharacterCombatDataAsset 加载
+                // 三层解耦：CombatData 通过 TSoftObjectPtr 桥梁引用
+                // ==========================================
+                if (UCharacterCombatDataAsset* CombatData = Row->CombatData.Get())
+                {
+                    for (const auto& TalentPair : CombatData->CharacterTalents)
                     {
-                        AssetPathsToLoad.Add(Montage.ToSoftObjectPath());
-                    }
-                    AssetPathsToLoad.Add(DataAsset->HeavyAttack.Icon.ToSoftObjectPath());
-                    for (TSoftObjectPtr<UAnimMontage> Montage : DataAsset->HeavyAttack.Montages)
-                    {
-                        AssetPathsToLoad.Add(Montage.ToSoftObjectPath());
-                    }
-                    AssetPathsToLoad.Add(DataAsset->PlungeAttack.Icon.ToSoftObjectPath());
-                    for (TSoftObjectPtr<UAnimMontage> Montage : DataAsset->PlungeAttack.Montages)
-                    {
-                        AssetPathsToLoad.Add(Montage.ToSoftObjectPath());
-                    }
-                    AssetPathsToLoad.Add(DataAsset->SkillAttack.Icon.ToSoftObjectPath());
-                    for (TSoftObjectPtr<UAnimMontage> Montage : DataAsset->SkillAttack.Montages)
-                    {
-                        AssetPathsToLoad.Add(Montage.ToSoftObjectPath());
-                    }
-                    AssetPathsToLoad.Add(DataAsset->UltimateAttack.Icon.ToSoftObjectPath());
-                    for (TSoftObjectPtr<UAnimMontage> Montage : DataAsset->UltimateAttack.Montages)
-                    {
-                        AssetPathsToLoad.Add(Montage.ToSoftObjectPath());
-                    }
-                    for (const FTalentConfig& Talent : DataAsset->PassiveTalents)
-                    {
+                        const FTalentConfig& Talent = TalentPair.Value;
                         AssetPathsToLoad.Add(Talent.Icon.ToSoftObjectPath());
-                        for (TSoftObjectPtr<UAnimMontage> Montage : Talent.Montages)
+                        // 连招图中的蒙太奇需要预加载
+                        for (const auto& NodePair : Talent.ComboGraph)
                         {
-                            AssetPathsToLoad.Add(Montage.ToSoftObjectPath());
+                            AssetPathsToLoad.Add(NodePair.Value.Montage.ToSoftObjectPath());
                         }
                     }
                 }

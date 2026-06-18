@@ -1,10 +1,11 @@
 // Copyright 2025 WiloMyst. All Rights Reserved.
 
-#include "GAS/Abilities/GA_SwapOut.h"
+#include "GAS/Abilities/GA_SwapOutBase.h"
 #include "Characters/PlayerCharacter.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "NiagaraFunctionLibrary.h"
 
-UGA_SwapOut::UGA_SwapOut()
+UGA_SwapOutBase::UGA_SwapOutBase()
 {
     InstancingPolicy = EGameplayAbilityInstancingPolicy::InstancedPerActor;
     NetExecutionPolicy = EGameplayAbilityNetExecutionPolicy::LocalPredicted;
@@ -13,7 +14,7 @@ UGA_SwapOut::UGA_SwapOut()
     // 例如：BlockAbilitiesWithTag 包含 State.Dead、State.KnockedUp 等
 }
 
-void UGA_SwapOut::ActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, const FGameplayEventData* TriggerEventData)
+void UGA_SwapOutBase::ActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, const FGameplayEventData* TriggerEventData)
 {
     if (!CommitAbility(Handle, ActorInfo, ActivationInfo))
     {
@@ -28,7 +29,15 @@ void UGA_SwapOut::ActivateAbility(const FGameplayAbilitySpecHandle Handle, const
         return;
     }
 
-    // 1. 保存当前 Transform 供 GA_SwapIn 使用
+    // 验证：已死亡的角色必须允许退场，否则检查移动模式
+    if (!CachedPlayer->bIsDead && !ValidateSwapOutConditions())
+    {
+        // 验证失败，取消退场
+        EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+        return;
+    }
+
+    // 1. 保存当前 Transform 供 GA_SwapInBase 使用
     SaveSwapTransform();
 
     // 2. 播放退场视觉表现
@@ -42,7 +51,7 @@ void UGA_SwapOut::ActivateAbility(const FGameplayAbilitySpecHandle Handle, const
     EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
 }
 
-void UGA_SwapOut::EndAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateEndAbility, bool bWasCancelled)
+void UGA_SwapOutBase::EndAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateEndAbility, bool bWasCancelled)
 {
     // 仅在权威端（服务器）且非取消时，通过角色委托通知 Controller
     // 客户端的 GA 预测执行不应驱动 Possess
@@ -54,7 +63,24 @@ void UGA_SwapOut::EndAbility(const FGameplayAbilitySpecHandle Handle, const FGam
     Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
 }
 
-void UGA_SwapOut::SaveSwapTransform()
+bool UGA_SwapOutBase::ValidateSwapOutConditions() const
+{
+    // 移动模式拦截：只允许在指定运动模式下切换下场
+    if (!AllowedSwapOutMovementModes.IsEmpty())
+    {
+        if (const UCharacterMovementComponent* MoveComp = CachedPlayer->GetCharacterMovement())
+        {
+            if (!AllowedSwapOutMovementModes.Contains(TEnumAsByte<EMovementMode>(MoveComp->MovementMode)))
+            {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+void UGA_SwapOutBase::SaveSwapTransform()
 {
     if (CachedPlayer)
     {
@@ -62,7 +88,7 @@ void UGA_SwapOut::SaveSwapTransform()
     }
 }
 
-void UGA_SwapOut::PlaySwapOutVisuals()
+void UGA_SwapOutBase::PlaySwapOutVisuals()
 {
     if (!CachedPlayer) return;
 
@@ -80,7 +106,7 @@ void UGA_SwapOut::PlaySwapOutVisuals()
     }
 }
 
-void UGA_SwapOut::EnterStandbyMode()
+void UGA_SwapOutBase::EnterStandbyMode()
 {
     if (CachedPlayer)
     {

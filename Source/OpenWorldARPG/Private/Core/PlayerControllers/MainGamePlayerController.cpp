@@ -107,7 +107,9 @@ bool AMainGamePlayerController::Server_SwitchCharacter_Validate(int32 TargetInde
 
 void AMainGamePlayerController::Server_SwitchCharacter_Implementation(int32 TargetIndex)
 {
-    // 服务器端：验证 + 通过 GA 流水线执行角色切换
+    // 服务器端：通过 GA 流水线执行角色切换
+    // 验证逻辑已移入 GA_SwapOutBase/GA_SwapInBase 的 ActivateAbility 中，
+    // Controller 不再预检查，GA 验证失败会 Cancel，EndAbility(bWasCancelled=true) 不会触发委托
 
     AMainGamePlayerState* MyPlayerState = GetPlayerState<AMainGamePlayerState>();
     if (!MyPlayerState) return;
@@ -116,56 +118,30 @@ void AMainGamePlayerController::Server_SwitchCharacter_Implementation(int32 Targ
     APlayerCharacter* OldCharacter = Cast<APlayerCharacter>(GetPawn());
     if (!OldCharacter) return;
 
-    // 2. 旧角色状态拦截 (交由 Character 内部判定)
-    if (!OldCharacter->CanSwapOut())
-    {
-        UE_LOG(LogTemp, Log, TEXT("Server_SwitchCharacter: 旧角色状态不允许切换！"));
-        return;
-    }
-
-    // 3. 从 PlayerState 获取队伍角色实例
+    // 2. 从 PlayerState 获取队伍角色实例
     APlayerCharacter* NewCharacter = MyPlayerState->GetTeamCharacterByIndex(TargetIndex);
     if (!NewCharacter || NewCharacter == OldCharacter) return;
 
-    // 4. 新角色状态拦截 (交由 Character 内部判定)
-    if (!NewCharacter->CanSwapIn())
-    {
-        UE_LOG(LogTemp, Log, TEXT("Server_SwitchCharacter: 新角色状态不允许切换！"));
-        return;
-    }
-
-    // 5. 缓存目标索引，供 GA_SwapOut 完成回调使用
+    // 3. 缓存目标索引，供 GA_SwapOutBase 完成回调使用
     PendingSwapTargetIndex = TargetIndex;
 
-    // 6. 绑定旧角色的退场完成委托（如果尚未绑定）
-    //    GA_SwapOut::EndAbility 会通过 NotifySwapOutCompleted 广播此委托
+    // 4. 缓存出场 Transform，供 OnSwapOutCompleted 回调使用
+    PendingSwapTransform = OldCharacter->GetActorTransform();
+
+    // 5. 绑定旧角色的退场完成委托
+    //    GA_SwapOutBase::EndAbility(非Cancel) 会通过 NotifySwapOutCompleted 广播此委托
     OldCharacter->OnSwapOutCompleted.AddDynamic(this, &AMainGamePlayerController::OnSwapOutCompleted);
 
-    // 7. 激活 GA_SwapOut（退场技能）
-    //    如果没有配置 GA 类，降级使用旧的直接切换逻辑
-    if (OldCharacter->SwapOutAbilityClass && OldCharacter->GetAbilitySystemComponent())
+    // 6. 激活 GA_SwapOutBase（退场技能）
+    //    GA 内部会验证 AllowedSwapOutMovementModes，不满足则 Cancel
+    if (!OldCharacter->SwapOutAbilityClass || !OldCharacter->GetAbilitySystemComponent())
     {
-        OldCharacter->GetAbilitySystemComponent()->TryActivateAbilityByClass(OldCharacter->SwapOutAbilityClass);
-    }
-    else
-    {
-        // 降级路径：直接执行旧的同步切换
-        UE_LOG(LogTemp, Warning, TEXT("Server_SwitchCharacter: SwapOutAbilityClass 未配置，使用降级路径"));
-
-        FTransform SwapTransform;
-        OldCharacter->PerformSwapOut(SwapTransform);
-
-        FRotator OldControlRotation = GetControlRotation();
-        UnPossess();
-
-        NewCharacter->PerformSwapIn(SwapTransform);
-        Possess(NewCharacter);
-        SetControlRotation(OldControlRotation);
-
-        MyPlayerState->SetActiveCharacterIndex(TargetIndex);
-        Client_OnCharacterSwitched(TargetIndex);
+        UE_LOG(LogTemp, Error, TEXT("Server_SwitchCharacter: SwapOutAbilityClass 未配置或 ASC 无效，无法切换！"));
+        OldCharacter->OnSwapOutCompleted.RemoveDynamic(this, &AMainGamePlayerController::OnSwapOutCompleted);
         PendingSwapTargetIndex = -1;
+        return;
     }
+    OldCharacter->GetAbilitySystemComponent()->TryActivateAbilityByClass(OldCharacter->SwapOutAbilityClass);
 }
 
 void AMainGamePlayerController::OnSwapOutCompleted(APlayerCharacter* SwappedOutCharacter, FTransform SwapTransform)
@@ -196,23 +172,22 @@ void AMainGamePlayerController::OnSwapOutCompleted(APlayerCharacter* SwappedOutC
     FRotator OldControlRotation = GetControlRotation();
     UnPossess();
 
-    // 3. 写入出场 Transform 供 GA_SwapIn 读取
-    NewCharacter->SetPendingSwapInTransform(SwapTransform);
+    // 3. 设置新角色的出场 Transform（在激活 GA 前完成，GA 从 GetActorTransform 读取）
+    NewCharacter->SetActorTransform(PendingSwapTransform, false, nullptr, ETeleportType::TeleportPhysics);
 
     // 4. 接管新角色
     Possess(NewCharacter);
     SetControlRotation(OldControlRotation);
 
-    // 5. 激活 GA_SwapIn（出场技能）
-    if (NewCharacter->SwapInAbilityClass && NewCharacter->GetAbilitySystemComponent())
+    // 5. 激活 GA_SwapInBase（出场技能）
+    //    GA 内部会验证 PreventSwitchTags，不满足则 Cancel
+    if (!NewCharacter->SwapInAbilityClass || !NewCharacter->GetAbilitySystemComponent())
     {
-        NewCharacter->GetAbilitySystemComponent()->TryActivateAbilityByClass(NewCharacter->SwapInAbilityClass);
+        UE_LOG(LogTemp, Error, TEXT("OnSwapOutCompleted: SwapInAbilityClass 未配置或 ASC 无效！"));
     }
     else
     {
-        // 降级路径：直接执行旧的出场逻辑
-        UE_LOG(LogTemp, Warning, TEXT("OnSwapOutCompleted: SwapInAbilityClass 未配置，使用降级路径"));
-        NewCharacter->PerformSwapIn(SwapTransform);
+        NewCharacter->GetAbilitySystemComponent()->TryActivateAbilityByClass(NewCharacter->SwapInAbilityClass);
     }
 
     // 6. 更新 PlayerState 的激活索引（触发全网同步）
@@ -401,8 +376,11 @@ void AMainGamePlayerController::Input_PlungeAttack()
 
 void AMainGamePlayerController::Input_Aim()
 {
-    APlayerCharacter* PC = Cast<APlayerCharacter>(GetPawn());
-    if (!PC) return;
-
-    PC->ToggleAim();
+    if (APlayerCharacter* PC = Cast<APlayerCharacter>(GetPawn()))
+    {
+        if (AimEventTag.IsValid())
+        {
+            UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(PC, AimEventTag, FGameplayEventData());
+        }
+    }
 }

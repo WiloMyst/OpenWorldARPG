@@ -1,14 +1,17 @@
 // Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Characters/PlayerCharacter.h"
-#include "Data/CharacterDataAsset.h"
+#include "Data/CharacterVisualDataAsset.h"
+#include "Data/CharacterCombatDataAsset.h"
+#include "Data/CharacterRegistryRow.h"
 #include "Data/CharacterGeneralDataAsset.h"
+#include "Managers/GameAssetManagerSubsystem.h"
+#include "Managers/CharacterManagerSubsystem.h"
 #include "GAS/AttributeSets/AS_Player.h"
 #include "Components/OpenWorldARPGCharacterMovementComponent.h"
 #include "Components/WeaponManagerComponent.h"
 #include "Components/InteractionComponent.h"
 #include "Components/TargetingComponent.h"
-#include "Components/ClimbingComponent.h"
 
 #include "Camera/CameraComponent.h"
 #include "GameFramework/SpringArmComponent.h"
@@ -19,7 +22,6 @@
 #include "Engine/AssetManager.h"
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemBlueprintLibrary.h"
-#include "NiagaraFunctionLibrary.h"
 #include "Managers/GameAssetManagerSubsystem.h"
 #include "Net/UnrealNetwork.h"
 #include "GameFramework/GameModeBase.h"
@@ -68,7 +70,7 @@ APlayerCharacter::APlayerCharacter(const FObjectInitializer& ObjectInitializer)
 
 	TargetingComponent = CreateDefaultSubobject<UTargetingComponent>(TEXT("TargetingComponent"));
 
-	ClimbingComponent = CreateDefaultSubobject<UClimbingComponent>(TEXT("ClimbingComponent"));
+	MotionWarpingComp = CreateDefaultSubobject<UMotionWarpingComponent>(TEXT("MotionWarpingComp"));
 
 	AbilitySystemComponent = CreateDefaultSubobject<UAbilitySystemComponent>(TEXT("AbilitySystemComponent"));
 	AbilitySystemComponent->SetIsReplicated(true);
@@ -77,9 +79,9 @@ APlayerCharacter::APlayerCharacter(const FObjectInitializer& ObjectInitializer)
 	AttributeSet = CreateDefaultSubobject<UAS_Player>(TEXT("AttributeSet"));
 }
 
-void APlayerCharacter::InitializeCharacter(const FCharacterSaveData& InSaveData, UCharacterDataAsset* InDataAsset)
+void APlayerCharacter::InitializeCharacter(const FCharacterSaveData& InSaveData, UCharacterVisualDataAsset* InVisualData, UCharacterCombatDataAsset* InCombatData, const FCharacterRegistryRow& InRegistryRow)
 {
-	if (!InDataAsset) return;
+	if (!InVisualData || !InCombatData) return;
 
 	if (UOpenWorldARPGCharacterMovementComponent* CustomMC = GetCustomMovementComp())
 	{
@@ -87,7 +89,8 @@ void APlayerCharacter::InitializeCharacter(const FCharacterSaveData& InSaveData,
 	}
 
 	RuntimeData = InSaveData;
-	DataSourceAsset = InDataAsset;
+	VisualDataAsset = InVisualData;
+	CombatDataAsset = InCombatData;
 
 	if (AbilitySystemComponent)
 	{
@@ -98,26 +101,32 @@ void APlayerCharacter::InitializeCharacter(const FCharacterSaveData& InSaveData,
 			AbilitySystemComponent->AddSpawnedAttribute(AttributeSet);
 		}
 
-		if (InDataAsset->ElementType.IsValid())
+		// ==========================================
+		// 身份 Tag 注入（从 FCharacterRegistryRow 直接获取）
+		// ==========================================
+		// 新架构优势：InitializeCharacter 直接接收 RegistryRow，
+		// 不再需要反查 DataTable 获取 ElementType/WeaponType。
+		FGameplayTag ElementTypeTag = InRegistryRow.ElementType;
+		FGameplayTag WeaponTypeTag = InRegistryRow.WeaponType;
+
+		if (ElementTypeTag.IsValid())
 		{
-			AbilitySystemComponent->AddLooseGameplayTag(InDataAsset->ElementType, 1);
+			AbilitySystemComponent->AddLooseGameplayTag(ElementTypeTag, 1);
 		}
-		if (InDataAsset->WeaponType.IsValid())
+		if (WeaponTypeTag.IsValid())
 		{
-			AbilitySystemComponent->AddLooseGameplayTag(InDataAsset->WeaponType, 1);
+			AbilitySystemComponent->AddLooseGameplayTag(WeaponTypeTag, 1);
 		}
 
 		// 状态驱动同步：将元素/武器 Tag 写入 Replicated 属性
-		// ReplicatedUsing 可正确处理 Join-In-Progress 和 NetCull 恢复
-		// 而 NetMulticast 无法保证这些场景
 		CharacterIdentityTags.Reset();
-		if (InDataAsset->ElementType.IsValid())
+		if (ElementTypeTag.IsValid())
 		{
-			CharacterIdentityTags.AddTag(InDataAsset->ElementType);
+			CharacterIdentityTags.AddTag(ElementTypeTag);
 		}
-		if (InDataAsset->WeaponType.IsValid())
+		if (WeaponTypeTag.IsValid())
 		{
-			CharacterIdentityTags.AddTag(InDataAsset->WeaponType);
+			CharacterIdentityTags.AddTag(WeaponTypeTag);
 		}
 
 		if (UGameInstance* GI = GetGameInstance())
@@ -126,19 +135,9 @@ void APlayerCharacter::InitializeCharacter(const FCharacterSaveData& InSaveData,
 			{
 				if (UCharacterGeneralDataAsset* GeneralData = AssetManager->GetPlayerCharacterGeneralAbilityDataAsset())
 				{
-					UE_LOG(LogTemp, Warning, TEXT("[PlayerChar] Granting GeneralAbilities: Permanent=%d, Normal=%d"),
-						GeneralData->GeneralPermanentAbilityClasses.Num(), GeneralData->GeneralAbilityClasses.Num());
+					UE_LOG(LogTemp, Warning, TEXT("[PlayerChar] Granting GeneralAbilities: %d"),
+						GeneralData->GeneralAbilityClasses.Num());
 
-					for (TSubclassOf<UGameplayAbility> AbilityClass : GeneralData->GeneralPermanentAbilityClasses)
-					{
-						if (AbilityClass)
-						{
-							FGameplayAbilitySpecHandle GrantedHandle = AbilitySystemComponent->GiveAbility(FGameplayAbilitySpec(AbilityClass, 1, INDEX_NONE, this));
-							PermanentAbilitiesToActivate.Add(AbilityClass);
-							UE_LOG(LogTemp, Warning, TEXT("[PlayerChar] Granted PermanentAbility: %s"),
-								*AbilityClass->GetName());
-						}
-					}
 					for (TSubclassOf<UGameplayAbility> AbilityClass : GeneralData->GeneralAbilityClasses)
 					{
 						if (AbilityClass)
@@ -160,15 +159,20 @@ void APlayerCharacter::InitializeCharacter(const FCharacterSaveData& InSaveData,
 			}
 		}
 
-		if (InDataAsset->BaseAttributesEffect)
+		// ==========================================
+		// 战斗属性 GE 注入（从 UCharacterCombatDataAsset 读取）
+		// ==========================================
+		// 基础属性 GE
+		if (InCombatData->BaseAttributesEffect)
 		{
 			FGameplayEffectContextHandle EffectContext = AbilitySystemComponent->MakeEffectContext();
 			EffectContext.AddSourceObject(this);
-			FGameplayEffectSpecHandle SpecHandle = AbilitySystemComponent->MakeOutgoingSpec(InDataAsset->BaseAttributesEffect, 1.0f, EffectContext);
+			FGameplayEffectSpecHandle SpecHandle = AbilitySystemComponent->MakeOutgoingSpec(InCombatData->BaseAttributesEffect, 1.0f, EffectContext);
 			if (SpecHandle.IsValid()) AbilitySystemComponent->ApplyGameplayEffectSpecToSelf(*SpecHandle.Data.Get());
 		}
 
-		for (const auto& Pair : InDataAsset->AscensionBonusEffects)
+		// 突破增益 GE
+		for (const auto& Pair : InCombatData->AscensionBonusEffects)
 		{
 			if (Pair.Key <= RuntimeData.AscensionLevel && Pair.Value)
 			{
@@ -179,51 +183,58 @@ void APlayerCharacter::InitializeCharacter(const FCharacterSaveData& InSaveData,
 			}
 		}
 
-		auto GrantTalentAbilities = [&](const FTalentConfig& Talent)
-			{
-				UE_LOG(LogTemp, Warning, TEXT("[PlayerChar] GrantTalent: Tag=%s, AbilityClasses=%d, Montages=%d"),
-					Talent.TalentTag.IsValid() ? *Talent.TalentTag.ToString() : TEXT("INVALID"),
-					Talent.AbilityClasses.Num(), Talent.Montages.Num());
+		// ==========================================
+		// 天赋技能赋予（字典化遍历 + 智能被动激活）
+		// ==========================================
+		// 遍历 CharacterTalents 字典中的所有天赋配置，
+		// 通过解析 Key 的 GameplayTag 层级自动区分主动/被动天赋：
+		// - 如果 Tag 是 Ability.Passive 的子标签（如 Ability.Passive.CritUp），
+		//   则判定为被动天赋，赋予后自动激活
+		// - 其他 Tag（如 Ability.Attack.Normal）为主动天赋，由玩家输入触发
+		//
+		// 使用 MatchesTag 替代字符串 Contains 检查：
+		// - MatchesTag 是 GameplayTag 系统的原生 API，语义精确
+		// - Ability.Passive.CritUp.MatchesTag(Ability.Passive) == true
+		// - Ability.Attack.Normal.MatchesTag(Ability.Passive) == false
+		const FGameplayTag PassiveTag = FGameplayTag::RequestGameplayTag(FName("Ability.Type.Passive"));
 
-				for (const TSubclassOf<UGameplayAbility>& AbilityClass : Talent.AbilityClasses)
-				{
-					if (AbilityClass)
-					{
-						FGameplayAbilitySpec AbilitySpec(AbilityClass, 1, INDEX_NONE, this);
-						AbilitySpec.DynamicAbilityTags.AddTag(Talent.TalentTag);
-						FGameplayAbilitySpecHandle GrantedHandle = AbilitySystemComponent->GiveAbility(AbilitySpec);
-						UE_LOG(LogTemp, Warning, TEXT("[PlayerChar]   Granted TalentAbility: %s, TalentTag=%s"),
-							*AbilityClass->GetName(), *Talent.TalentTag.ToString());
-					}
-					else
-					{
-						UE_LOG(LogTemp, Error, TEXT("[PlayerChar]   TalentAbility class is NULL for Tag=%s!"), *Talent.TalentTag.ToString());
-					}
-				}
-			};
-
-		GrantTalentAbilities(InDataAsset->NormalAttack);
-		GrantTalentAbilities(InDataAsset->HeavyAttack);
-		GrantTalentAbilities(InDataAsset->PlungeAttack);
-		GrantTalentAbilities(InDataAsset->SkillAttack);
-		GrantTalentAbilities(InDataAsset->UltimateAttack);
-
-		for (const FTalentConfig& PassiveTalent : InDataAsset->PassiveTalents)
+		for (const auto& TalentPair : InCombatData->CharacterTalents)
 		{
-			for (const TSubclassOf<UGameplayAbility>& AbilityClass : PassiveTalent.AbilityClasses)
+			const FGameplayTag& TalentTag = TalentPair.Key;
+			const FTalentConfig& Talent = TalentPair.Value;
+
+			UE_LOG(LogTemp, Warning, TEXT("[PlayerChar] GrantTalent: Tag=%s, AbilityClasses=%d"),
+				TalentTag.IsValid() ? *TalentTag.ToString() : TEXT("INVALID"),
+				Talent.AbilityClasses.Num());
+
+			// 智能被动判定：Tag 是 Ability.Passive 的子标签即为被动天赋
+			bool bIsPassive = TalentTag.IsValid() && TalentTag.MatchesTag(PassiveTag);
+
+			for (const TSubclassOf<UGameplayAbility>& AbilityClass : Talent.AbilityClasses)
 			{
 				if (AbilityClass)
 				{
 					FGameplayAbilitySpec AbilitySpec(AbilityClass, 1, INDEX_NONE, this);
-					AbilitySpec.DynamicAbilityTags.AddTag(PassiveTalent.TalentTag);
+					AbilitySpec.DynamicAbilityTags.AddTag(TalentTag);
 					AbilitySystemComponent->GiveAbility(AbilitySpec);
-					PermanentAbilitiesToActivate.Add(AbilityClass);
+
+					// 被动天赋加入自动激活列表
+					if (bIsPassive)
+					{
+						PermanentAbilitiesToActivate.Add(AbilityClass);
+					}
+
+					UE_LOG(LogTemp, Warning, TEXT("[PlayerChar]   Granted TalentAbility: %s, TalentTag=%s, Passive=%s"),
+						*AbilityClass->GetName(), *TalentTag.ToString(), bIsPassive ? TEXT("true") : TEXT("false"));
+				}
+				else
+				{
+					UE_LOG(LogTemp, Error, TEXT("[PlayerChar]   TalentAbility class is NULL for Tag=%s!"), *TalentTag.ToString());
 				}
 			}
 		}
 
 		// 赋予角色切换 GA（SwapOut / SwapIn）
-		// 这些 GA 由 Controller 在服务端通过 TryActivateAbilityByClass 激活
 		if (SwapOutAbilityClass)
 		{
 			AbilitySystemComponent->GiveAbility(FGameplayAbilitySpec(SwapOutAbilityClass, 1, INDEX_NONE, this));
@@ -253,26 +264,38 @@ void APlayerCharacter::InitializeCharacter(const FCharacterSaveData& InSaveData,
 			AbilitySystemComponent->RegisterGameplayTagEvent(AimingStateTag, EGameplayTagEventType::NewOrRemoved)
 				.AddUObject(this, &APlayerCharacter::OnAimingTagChanged);
 		}
+
+		// 注册游泳 Tag 变化回调 (事件驱动，供动画蓝图读取)
+		if (SwimmingStateTag.IsValid())
+		{
+			AbilitySystemComponent->RegisterGameplayTagEvent(SwimmingStateTag, EGameplayTagEventType::NewOrRemoved)
+				.AddUObject(this, &APlayerCharacter::OnSwimmingTagChanged);
+		}
+		if (FastSwimmingStateTag.IsValid())
+		{
+			AbilitySystemComponent->RegisterGameplayTagEvent(FastSwimmingStateTag, EGameplayTagEventType::NewOrRemoved)
+				.AddUObject(this, &APlayerCharacter::OnSwimmingTagChanged);
+		}
 	}
 
 	if (USkeletalMeshComponent* MeshComponent = GetMesh())
 	{
-		TSoftObjectPtr<USkeletalMesh> MeshToLoad = InDataAsset->CharacterMesh;
+		TSoftObjectPtr<USkeletalMesh> MeshToLoad = InVisualData->CharacterMesh;
 		if (MeshToLoad.IsPending())
 		{
 			FStreamableManager& StreamableManager = UAssetManager::Get().GetStreamableManager();
-			UCharacterDataAsset* CapturedDataAsset = InDataAsset;
+			UCharacterVisualDataAsset* CapturedVisualData = InVisualData;
 			TWeakObjectPtr<APlayerCharacter> WeakThis = this;
 			StreamableManager.RequestAsyncLoad(MeshToLoad.ToSoftObjectPath(),
-				FStreamableDelegate::CreateLambda([WeakThis, CapturedDataAsset]() {
+				FStreamableDelegate::CreateLambda([WeakThis, CapturedVisualData]() {
 					if (WeakThis.IsValid()) {
-						WeakThis->OnMeshLoaded(CapturedDataAsset);
+						WeakThis->OnMeshLoaded(CapturedVisualData);
 					}
 				}));
 		}
 		else if (MeshToLoad.IsValid())
 		{
-			OnMeshLoaded(InDataAsset);
+			OnMeshLoaded(InVisualData);
 		}
 	}
 
@@ -284,8 +307,8 @@ void APlayerCharacter::InitializeCharacter(const FCharacterSaveData& InSaveData,
 
 	if (WeaponManagerComponent)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[PlayerChar] Calling InitializeCharacterWeapon, DataSourceAsset=%s"),
-			DataSourceAsset ? *DataSourceAsset->GetName() : TEXT("NULL"));
+		UE_LOG(LogTemp, Warning, TEXT("[PlayerChar] Calling InitializeCharacterWeapon, VisualDataAsset=%s"),
+			VisualDataAsset ? *VisualDataAsset->GetName() : TEXT("NULL"));
 		WeaponManagerComponent->InitializeCharacterWeapon();
 	}
 	else
@@ -294,20 +317,29 @@ void APlayerCharacter::InitializeCharacter(const FCharacterSaveData& InSaveData,
 	}
 }
 
-void APlayerCharacter::OnMeshLoaded(const UCharacterDataAsset* DataAsset)
+void APlayerCharacter::OnMeshLoaded(const UCharacterVisualDataAsset* VisualData)
 {
 	USkeletalMeshComponent* MeshComponent = GetMesh();
-	if (!MeshComponent || !DataAsset) return;
+	if (!MeshComponent || !VisualData) return;
 
-	USkeletalMesh* LoadedMesh = DataAsset->CharacterMesh.Get();
+	USkeletalMesh* LoadedMesh = VisualData->CharacterMesh.Get();
 	if (!LoadedMesh) return;
 
 	MeshComponent->SetSkeletalMesh(LoadedMesh);
 
-	// 必须在 DataAsset 中配置 AnimationBlueprint，不再回退到 PlayerCharacterAnimInstance
-	if (DataAsset->AnimationBlueprint)
+	// 解析 TSoftClassPtr 获取动画蓝图类
+	if (VisualData->AnimationBlueprint.IsValid())
 	{
-		MeshComponent->SetAnimInstanceClass(DataAsset->AnimationBlueprint);
+		MeshComponent->SetAnimInstanceClass(VisualData->AnimationBlueprint.Get());
+	}
+	else if (!VisualData->AnimationBlueprint.IsNull())
+	{
+		// TSoftClassPtr 尚未加载，同步加载（仅在初始化时，可接受）
+		UClass* AnimBPClass = VisualData->AnimationBlueprint.LoadSynchronous();
+		if (AnimBPClass)
+		{
+			MeshComponent->SetAnimInstanceClass(AnimBPClass);
+		}
 	}
 
 	SetupBaseBehaviorAnimLayers();
@@ -341,19 +373,13 @@ void APlayerCharacter::Multicast_SetStandbyMode_Implementation(bool bNewStandbyS
 
 void APlayerCharacter::OnRep_CharacterIdentityTags()
 {
-	// OnRep 回调：在客户端将服务器同步的 Tag 容器与本地 ASC 对齐
-	// 保证 Join-In-Progress 和 NetCull 恢复后 Tag 状态一致
 	if (!AbilitySystemComponent) return;
 
-	// 先移除旧的 Identity Tag（避免重复计数），再添加新的
 	FGameplayTagContainer OldTags;
 	AbilitySystemComponent->GetOwnedGameplayTags(OldTags);
 
-	// 只清理属于 Identity 范畴的 Tag（元素、武器），不影响其他状态 Tag
-	// 通过 CharacterIdentityTags 中记录的 Tag 来精确移除
 	for (const FGameplayTag& Tag : CharacterIdentityTags)
 	{
-		// 移除可能存在的旧计数，再重新添加确保计数为 1
 		if (OldTags.HasTag(Tag))
 		{
 			AbilitySystemComponent->RemoveLooseGameplayTag(Tag);
@@ -383,7 +409,6 @@ void APlayerCharacter::ApplyStandbyMode(bool bNewStandbyState)
 			SKMesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
 		}
 
-		// 仅在服务器端保存和关闭 Tick（客户端不需要管理 TickingComponentsSnapshot）
 		if (HasAuthority())
 		{
 			TickingComponentsSnapshot.Empty();
@@ -419,7 +444,6 @@ void APlayerCharacter::ApplyStandbyMode(bool bNewStandbyState)
 	}
 	else
 	{
-		// 恢复碰撞
 		if (UCapsuleComponent* Capsule = GetCapsuleComponent())
 		{
 			Capsule->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
@@ -431,19 +455,14 @@ void APlayerCharacter::ApplyStandbyMode(bool bNewStandbyState)
 			SKMesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 		}
 
-		// 先恢复骨骼/动画更新，但保持隐藏
 		if (USkeletalMeshComponent* SKMesh = GetMesh())
 		{
 			SKMesh->bNoSkeletonUpdate = false;
 			SKMesh->SetUpdateAnimationInEditor(true);
-
-			// 强制立即更新一帧动画，让动画蓝图从 A-Pose 默认姿态计算到正确的 idle 骨骼姿态
-			// 这样在显示角色时，玩家不会看到 A-Pose → idle 的跳变
 			SKMesh->TickAnimation(0.0f, false);
 			SKMesh->RefreshBoneTransforms();
 		}
 
-		// 动画已更新到正确姿态，现在可以安全显示角色
 		SetActorHiddenInGame(false);
 		if (WeaponManagerComponent)
 		{
@@ -452,7 +471,6 @@ void APlayerCharacter::ApplyStandbyMode(bool bNewStandbyState)
 
 		MoveComp->SetMovementMode(MOVE_Walking);
 
-		// 仅在服务器端恢复 Tick
 		if (HasAuthority())
 		{
 			for (const TWeakObjectPtr<UActorComponent>& WeakComp : TickingComponentsSnapshot)
@@ -473,7 +491,6 @@ void APlayerCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
-	// 仅做摄像机插值，不查 GAS Tag (事件驱动)
 	AdjustAimingCamera(DeltaTime);
 }
 
@@ -481,8 +498,6 @@ void APlayerCharacter::OnRep_PlayerState()
 {
 	Super::OnRep_PlayerState();
 
-	// 客户端收到 PlayerState 后，需要重新初始化 ASC 的 AbilityActorInfo
-	// 否则客户端的 ASC 无法正确预测技能和接收 GameplayEffect
 	if (AbilitySystemComponent)
 	{
 		AbilitySystemComponent->InitAbilityActorInfo(this, this);
@@ -504,7 +519,6 @@ void APlayerCharacter::HandleMovementInput(float InputX, float InputY)
 
 	if (!Controller || !GetCharacterMovement()) return;
 
-	// 不可控状态拦截 (原 Controller 越权逻辑，现回归 Character)
 	if (UncontrollableStateTag.IsValid() && AbilitySystemComponent
 		&& AbilitySystemComponent->HasMatchingGameplayTag(UncontrollableStateTag))
 	{
@@ -521,10 +535,8 @@ void APlayerCharacter::HandleMovementInput(float InputX, float InputY)
 		}
 	}
 
-	// 始终走引擎原生输入管线 (AddMovementInput)
 	NormalMovement(InputX, InputY);
 
-	// 广播输入事件供 ClimbingComponent 等使用
 	OnPlayerMovementInput.Broadcast(InputX, InputY);
 }
 
@@ -537,8 +549,6 @@ void APlayerCharacter::HandleMovementInputCompleted()
 
 void APlayerCharacter::HandleInteractInput()
 {
-	// 拾取逻辑由 Character 内部查找 InteractionComponent 执行
-	// Controller 不再 FindComponentByClass 微操
 	if (UInteractionComponent* Backpack = FindComponentByClass<UInteractionComponent>())
 	{
 		Backpack->PickUpItem();
@@ -564,68 +574,46 @@ void APlayerCharacter::HandleSpacebarInput()
         return;
     }
 
-    // 3. 只要在空中（Falling），且没有处于跳跃初期的保护冷却中，就可以开伞。
+    // 3. 可能在空中（Falling），且没有处于跳跃初期的保护冷却中，就可以开伞
     if (CustomMoveComp->IsFalling())
     {
         if (bCanGlideAfterJump)
         {
-            ToggleGlide(); 
+            ToggleGlide();
         }
-        // 如果 bCanGlideAfterJump 是 false (刚按完跳跃)，则吃掉这个输入，无事发生。
+        // 如果 bCanGlideAfterJump 为 false (刚按完跳跃)，则吃掉这个输入，无事发生
         return;
     }
 
-    // 4. 其他常规情况（如在地面），执行跳跃
+    // 4. 其他常规情况（如地面），执行跳跃
     HandleJumpStartInput();
-}
-
-void APlayerCharacter::ResetGlideCooldown()
-{
-    bCanGlideAfterJump = true;
 }
 
 void APlayerCharacter::HandleJumpStartInput()
 {
-	UE_LOG(LogTemp, Warning, TEXT("[PlayerChar] HandleJumpStartInput called"));
-
-	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
-	{
-		UE_LOG(LogTemp, Warning, TEXT("[PlayerChar] MovementMode=%d, IsFalling=%d, IsWalking=%d, IsMovingOnGround=%d"),
-			(int32)MoveComp->MovementMode.GetValue(), MoveComp->IsFalling(), MoveComp->IsWalking(), MoveComp->IsMovingOnGround());
-	}
-
-	// 诊断：检查 ASC 当前拥有的所有 Tag
-	if (AbilitySystemComponent)
-	{
-		FGameplayTagContainer AllTags;
-		AbilitySystemComponent->GetOwnedGameplayTags(AllTags);
-		UE_LOG(LogTemp, Warning, TEXT("[PlayerChar] ASC Tags: %s"), *AllTags.ToStringSimple());
-	}
-
-	// 攀爬状态下按跳跃：退出攀爬
+	// 攀爬状态下按跳跃：发送停止攀爬事件，由 GA_ClimbBase 监听并清理现场后退出
 	if (AbilitySystemComponent && ClimbingStateTag.IsValid()
 		&& AbilitySystemComponent->HasMatchingGameplayTag(ClimbingStateTag))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[PlayerChar] Climbing state detected, exiting climb"));
-		if (UClimbingComponent* ClimbComp = GetClimbingComponent())
+		if (StopClimbEventTag.IsValid())
 		{
-			ClimbComp->ExitClimb();
+			UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(this, StopClimbEventTag, FGameplayEventData());
 		}
 		return;
 	}
 
-	// 发送跳跃 GAS 事件
+	// 发送跳跃 GAS 事件（由 GA_JumpBase 监听并激活）
     if (JumpStartEventTag.IsValid())
     {
         UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(this, JumpStartEventTag, FGameplayEventData());
-        
+
         // 主动跳跃后，短暂禁止开伞
         bCanGlideAfterJump = false;
         GetWorldTimerManager().SetTimer(
-            JumpGlideCooldownTimer, 
-            this, 
-            &APlayerCharacter::ResetGlideCooldown, 
-            GlideCooldownAfterJump, 
+            JumpGlideCooldownTimer,
+            this,
+            &APlayerCharacter::ResetGlideCooldown,
+            GlideCooldownAfterJump,
             false
         );
     }
@@ -633,6 +621,7 @@ void APlayerCharacter::HandleJumpStartInput()
 
 void APlayerCharacter::HandleJumpStopInput()
 {
+	// 发送停止跳跃 GAS 事件（由 GA_JumpBase 监听并结束跳跃）
 	if (JumpStopEventTag.IsValid())
 	{
 		UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(this, JumpStopEventTag, FGameplayEventData());
@@ -643,20 +632,14 @@ void APlayerCharacter::ToggleGlide()
 {
 	if (!AbilitySystemComponent) return;
 
-	UE_LOG(LogTemp, Warning, TEXT("[PlayerChar] ToggleGlide called"));
-
 	// 滑翔只能在空中下落时启动，地面按空格不应触发滑翔
 	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
 	{
 		bool bIsGliding = GlidingStateTag.IsValid() && AbilitySystemComponent->HasMatchingGameplayTag(GlidingStateTag);
 
-		UE_LOG(LogTemp, Warning, TEXT("[PlayerChar] ToggleGlide: bIsGliding=%d, IsFalling=%d, MovementMode=%d, GravityScale=%.2f, VelocityZ=%.2f"),
-			bIsGliding, MoveComp->IsFalling(), (int32)MoveComp->MovementMode.GetValue(), MoveComp->GravityScale, MoveComp->Velocity.Z);
-
 		// 如果当前不在滑翔状态，且不在空中（下落），则不允许启动滑翔
 		if (!bIsGliding && !MoveComp->IsFalling())
 		{
-			UE_LOG(LogTemp, Warning, TEXT("[PlayerChar] ToggleGlide: BLOCKED - not falling and not already gliding"));
 			return;
 		}
 	}
@@ -664,8 +647,6 @@ void APlayerCharacter::ToggleGlide()
 	// 状态翻转：当前滑翔则停止，否则启动
 	bool bIsGliding = GlidingStateTag.IsValid() && AbilitySystemComponent->HasMatchingGameplayTag(GlidingStateTag);
 	FGameplayTag TagToSend = bIsGliding ? GlideStopEventTag : GlideStartEventTag;
-
-	UE_LOG(LogTemp, Warning, TEXT("[PlayerChar] ToggleGlide: sending event %s (bIsGliding=%d)"), *TagToSend.ToString(), bIsGliding);
 
 	if (TagToSend.IsValid())
 	{
@@ -677,140 +658,91 @@ void APlayerCharacter::ToggleAim()
 {
 	if (!AbilitySystemComponent) return;
 
-	// 状态翻转：当前瞄准则停止，否则启动
-	bool bIsAiming = AimingStateTag.IsValid() && AbilitySystemComponent->HasMatchingGameplayTag(AimingStateTag);
-	FGameplayTag TagToSend = bIsAiming ? AimStopEventTag : AimStartEventTag;
-
-	if (TagToSend.IsValid())
+	if (AbilitySystemComponent->HasMatchingGameplayTag(AimingStateTag))
 	{
-		UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(this, TagToSend, FGameplayEventData());
+		AbilitySystemComponent->RemoveLooseGameplayTag(AimingStateTag);
+	}
+	else
+	{
+		AbilitySystemComponent->AddLooseGameplayTag(AimingStateTag);
 	}
 }
 
-void APlayerCharacter::NormalMovement(float InputX, float InputY)
+void APlayerCharacter::NotifySwapOutCompleted(const FTransform& SwapTransform)
 {
-	if (!Controller) return;
-
-	const FRotator Rotation = Controller->GetControlRotation();
-	const FRotator YawRotation(0, Rotation.Yaw, 0);
-
-	const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
-	const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
-
-	AddMovementInput(ForwardDirection, InputY);
-	AddMovementInput(RightDirection, InputX);
+	OnSwapOutCompleted.Broadcast(this, SwapTransform);
 }
 
 void APlayerCharacter::SetupBaseBehaviorAnimLayers()
 {
-	if (DataSourceAsset && DataSourceAsset->BaseBehaviorAnimLayers)
+	if (!VisualDataAsset || !GetMesh()) return;
+
+	UClass* AnimLayerClass = VisualDataAsset->BaseBehaviorAnimLayers.IsValid()
+		? VisualDataAsset->BaseBehaviorAnimLayers.Get()
+		: VisualDataAsset->BaseBehaviorAnimLayers.LoadSynchronous();
+
+	if (AnimLayerClass && GetMesh()->GetAnimInstance())
 	{
-		if (USkeletalMeshComponent* CharacterMesh = GetMesh())
-		{
-			CharacterMesh->LinkAnimClassLayers(DataSourceAsset->BaseBehaviorAnimLayers);
-		}
+		GetMesh()->GetAnimInstance()->LinkAnimClassLayers(AnimLayerClass);
 	}
 }
 
 void APlayerCharacter::SetupAimAnimLayers()
 {
-	if (DataSourceAsset && DataSourceAsset->AimAnimLayers)
+	if (!VisualDataAsset || !GetMesh()) return;
+
+	UClass* AnimLayerClass = VisualDataAsset->AimAnimLayers.IsValid()
+		? VisualDataAsset->AimAnimLayers.Get()
+		: VisualDataAsset->AimAnimLayers.LoadSynchronous();
+
+	if (AnimLayerClass && GetMesh()->GetAnimInstance())
 	{
-		if (USkeletalMeshComponent* CharacterMesh = GetMesh())
-		{
-			CharacterMesh->LinkAnimClassLayers(DataSourceAsset->AimAnimLayers);
-		}
+		GetMesh()->GetAnimInstance()->LinkAnimClassLayers(AnimLayerClass);
 	}
 }
 
 void APlayerCharacter::SetupPhysicsAnimLayers()
 {
-	if (DataSourceAsset && DataSourceAsset->PhysicsAnimLayers)
+	if (!VisualDataAsset || !GetMesh()) return;
+
+	UClass* AnimLayerClass = VisualDataAsset->PhysicsAnimLayers.IsValid()
+		? VisualDataAsset->PhysicsAnimLayers.Get()
+		: VisualDataAsset->PhysicsAnimLayers.LoadSynchronous();
+
+	if (AnimLayerClass && GetMesh()->GetAnimInstance())
 	{
-		if (USkeletalMeshComponent* CharacterMesh = GetMesh())
-		{
-			CharacterMesh->LinkAnimClassLayers(DataSourceAsset->PhysicsAnimLayers);
-		}
+		GetMesh()->GetAnimInstance()->LinkAnimClassLayers(AnimLayerClass);
 	}
 }
 
 void APlayerCharacter::ClearPhysicsAnimLayers()
 {
-	if (DataSourceAsset && DataSourceAsset->PhysicsAnimLayers)
+	if (!VisualDataAsset || !GetMesh()) return;
+
+	UClass* AnimLayerClass = VisualDataAsset->BaseBehaviorAnimLayers.IsValid()
+		? VisualDataAsset->BaseBehaviorAnimLayers.Get()
+		: VisualDataAsset->BaseBehaviorAnimLayers.LoadSynchronous();
+
+	if (AnimLayerClass && GetMesh()->GetAnimInstance())
 	{
-		if (USkeletalMeshComponent* CharacterMesh = GetMesh())
-		{
-			CharacterMesh->UnlinkAnimClassLayers(DataSourceAsset->PhysicsAnimLayers);
-		}
+		GetMesh()->GetAnimInstance()->LinkAnimClassLayers(AnimLayerClass);
 	}
 }
 
 void APlayerCharacter::Client_ResetCameraAndPhysics_Implementation(FRotator TargetRotation)
 {
-	// 1. 【核心修改】在客户端立刻强刷本地的 ControlRotation
-	// 这一步至关重要，能防止因为网络延迟（服务器包还没同步到本地客户端）导致的画面“先回正又弹回”的闪烁现象
-	if (APlayerController* PC = Cast<APlayerController>(GetController()))
-	{
-		PC->SetControlRotation(TargetRotation);
-	}
+	CurrentTargetArmLength = NormalTargetArmLength;
+	CurrentTargetSocketOffset = NormalSocketOffset;
 
-	// 2. 解决 WeaponSpringArm (带有 CameraLag) 的摄像机拉扯问题
-	if (WeaponSpringArm)
+	if (Controller)
 	{
-		bool bWasLagEnabled = WeaponSpringArm->bEnableCameraLag;
-		WeaponSpringArm->bEnableCameraLag = false;
-		// 强制更新世界矩阵，让相机在取消延迟的这一帧直接瞬移到回正后的目标位置
-		WeaponSpringArm->UpdateComponentToWorld();
-		WeaponSpringArm->bEnableCameraLag = bWasLagEnabled;
-	}
-
-	// 3. 解决布料系统 (Chaos Cloth) 在客户端的残留拉扯
-	if (USkeletalMeshComponent* SKMesh = GetMesh())
-	{
-		SKMesh->ForceClothNextUpdateTeleportAndReset();
-
-		// 4. 解决动画物理节点 (AnimDynamics / RigidBody) 的残留拉扯
-		if (UAnimInstance* AnimInst = SKMesh->GetAnimInstance())
-		{
-			AnimInst->ResetDynamics(ETeleportType::TeleportPhysics);
-		}
+		Controller->SetControlRotation(TargetRotation);
 	}
 }
-
-FGameplayTag APlayerCharacter::GetCharacterTag() const { return RuntimeData.CharacterTag; }
-TSubclassOf<AWeaponBase> APlayerCharacter::GetWeaponBlueprint() const { return DataSourceAsset ? DataSourceAsset->WeaponBlueprint : nullptr; }
-TArray<TSoftObjectPtr<UAnimMontage>> APlayerCharacter::GetNormalAttackMontages() const { return DataSourceAsset ? DataSourceAsset->NormalAttack.Montages : TArray<TSoftObjectPtr<UAnimMontage>>(); }
-TArray<TSoftObjectPtr<UAnimMontage>> APlayerCharacter::GetHeavyAttackMontages() const { return DataSourceAsset ? DataSourceAsset->HeavyAttack.Montages : TArray<TSoftObjectPtr<UAnimMontage>>(); }
-TArray<TSoftObjectPtr<UAnimMontage>> APlayerCharacter::GetPlungeAttackMontages() const { return DataSourceAsset ? DataSourceAsset->PlungeAttack.Montages : TArray<TSoftObjectPtr<UAnimMontage>>(); }
-int32 APlayerCharacter::GetCharacterLevel() const { return RuntimeData.CharacterLevel; }
-int32 APlayerCharacter::GetConstellationLevel() const { return RuntimeData.ConstellationLevel; }
-UOpenWorldARPGCharacterMovementComponent* APlayerCharacter::GetCustomMovementComp() const { return Cast<UOpenWorldARPGCharacterMovementComponent>(GetCharacterMovement()); }
-
-void APlayerCharacter::OnHealthAttributeChanged(const FOnAttributeChangeData& Data)
-{
-	if (Data.NewValue <= 0.0f && Data.OldValue > 0.0f)
-	{
-		// 死亡GA（GA_DieBase）会调用 HandleDeath()，这里不再重复调用
-		// 只负责触发死亡GA
-		if (AbilitySystemComponent && DeathAbilityTag.IsValid())
-		{
-			FGameplayTagContainer TagContainer(DeathAbilityTag);
-			AbilitySystemComponent->TryActivateAbilitiesByTag(TagContainer, true);
-		}
-		else
-		{
-			// 没有死亡GA时，直接执行死亡处理
-			HandleDeath();
-		}
-	}
-	OnHealthUpdated.Broadcast();
-}
-
-// --- 越界处理 (引擎原生回调，替代 Tick 中的 CheckKillZAndRespawn) ---
 
 void APlayerCharacter::FellOutOfWorld(const class UDamageType& dmgType)
 {
-	// 1. 传送逻辑必须只在服务器执行
+	// 1. 传递逻辑必须只在服务器执行
 	if (!HasAuthority()) return;
 
 	// 2. 立即清除速度，防止传送后带有惯性
@@ -832,7 +764,7 @@ void APlayerCharacter::FellOutOfWorld(const class UDamageType& dmgType)
 	{
 		FRotator SpawnRotation = StartSpot->GetActorRotation();
 
-		// 4. 物理和位置传送 (带上出生点的朝向)
+		// 4. 物理和位置传递（带上出生点的朝向）
 		SetActorLocationAndRotation(
 			StartSpot->GetActorLocation(),
 			SpawnRotation,
@@ -848,7 +780,7 @@ void APlayerCharacter::FellOutOfWorld(const class UDamageType& dmgType)
 			PC->SetControlRotation(SpawnRotation);
 		}
 
-		// 6. 通知客户端执行视觉防拉扯和本地视角的瞬间硬切
+		// 6. 通知客户端执行视觉防拉影和本地视角的瞬间切断
 		Client_ResetCameraAndPhysics(SpawnRotation);
 	}
 	else
@@ -857,128 +789,124 @@ void APlayerCharacter::FellOutOfWorld(const class UDamageType& dmgType)
 	}
 }
 
-// --- 瞄准摄像机 (事件驱动，Tick 只做插值) ---
+// --- Getters ---
 
-void APlayerCharacter::OnAimingTagChanged(const FGameplayTag Tag, int32 NewCount)
+FGameplayTag APlayerCharacter::GetCharacterTag() const { return RuntimeData.CharacterTag; }
+
+TSubclassOf<AWeaponBase> APlayerCharacter::GetWeaponBlueprint() const
 {
-	// Tag 被添加时 NewCount > 0，被移除时 NewCount == 0
-	if (NewCount > 0)
+	if (!VisualDataAsset) return nullptr;
+	// 解析 TSoftClassPtr：如果已加载直接返回，否则同步加载
+	if (VisualDataAsset->WeaponBlueprint.IsValid())
 	{
-		CurrentTargetArmLength = AimingTargetArmLength;
-		CurrentTargetSocketOffset = AimingSocketOffset;
+		return VisualDataAsset->WeaponBlueprint.Get();
 	}
-	else
+	if (!VisualDataAsset->WeaponBlueprint.IsNull())
 	{
-		CurrentTargetArmLength = NormalTargetArmLength;
-		CurrentTargetSocketOffset = NormalSocketOffset;
+		return VisualDataAsset->WeaponBlueprint.LoadSynchronous();
+	}
+	return nullptr;
+}
+
+const FTalentConfig* APlayerCharacter::FindTalentConfig(const FGameplayTag& TalentTag) const
+{
+	if (!CombatDataAsset) return nullptr;
+	return CombatDataAsset->CharacterTalents.Find(TalentTag);
+}
+
+int32 APlayerCharacter::GetCharacterLevel() const { return RuntimeData.CharacterLevel; }
+int32 APlayerCharacter::GetConstellationLevel() const { return RuntimeData.ConstellationLevel; }
+UOpenWorldARPGCharacterMovementComponent* APlayerCharacter::GetCustomMovementComp() const { return Cast<UOpenWorldARPGCharacterMovementComponent>(GetCharacterMovement()); }
+
+void APlayerCharacter::OnHealthAttributeChanged(const FOnAttributeChangeData& Data)
+{
+	if (Data.NewValue <= 0.0f && Data.OldValue > 0.0f)
+	{
+		OnHealthUpdated.Broadcast();
+		HandleDeath_Implementation();
 	}
 }
 
 void APlayerCharacter::AdjustAimingCamera(float DeltaTime)
 {
-	if (!CameraBoom) return;
+	if (!AbilitySystemComponent) return;
 
-	// 纯插值，不查 GAS Tag
-	CameraBoom->TargetArmLength = FMath::FInterpTo(CameraBoom->TargetArmLength, CurrentTargetArmLength, DeltaTime, CameraInterpSpeed);
-	CameraBoom->SocketOffset = FMath::VInterpTo(CameraBoom->SocketOffset, CurrentTargetSocketOffset, DeltaTime, CameraInterpSpeed);
+	float TargetArmLength = NormalTargetArmLength;
+	FVector TargetSocketOffset = NormalSocketOffset;
+
+	if (AbilitySystemComponent->HasMatchingGameplayTag(AimingStateTag))
+	{
+		TargetArmLength = AimingTargetArmLength;
+		TargetSocketOffset = AimingSocketOffset;
+	}
+
+	CurrentTargetArmLength = FMath::FInterpTo(CurrentTargetArmLength, TargetArmLength, DeltaTime, CameraInterpSpeed);
+	CurrentTargetSocketOffset = FMath::VInterpTo(CurrentTargetSocketOffset, TargetSocketOffset, DeltaTime, CameraInterpSpeed);
+
+	if (CameraBoom)
+	{
+		CameraBoom->TargetArmLength = CurrentTargetArmLength;
+		CameraBoom->SocketOffset = CurrentTargetSocketOffset;
+	}
+}
+
+void APlayerCharacter::OnAimingTagChanged(const FGameplayTag Tag, int32 NewCount)
+{
+	// 事件驱动：Tag 变化时自动切换武器显示状态
+	if (Tag == AimingStateTag)
+	{
+		if (NewCount > 0)
+		{
+			if (WeaponManagerComponent) WeaponManagerComponent->WeaponToHand();
+		}
+	}
 }
 
 void APlayerCharacter::HandleDeath_Implementation()
 {
-	Super::HandleDeath_Implementation();
-
-	if (WeaponManagerComponent)
+	if (DeathAbilityTag.IsValid() && AbilitySystemComponent)
 	{
-		WeaponManagerComponent->SetWeaponHidden(true);
-	}
-}
-
-// --- 角色切换流水线 (邮局原则：视觉表现归 Character，Possess 归 Controller) ---
-
-void APlayerCharacter::PerformSwapOut(FTransform& OutTransform)
-{
-	// 1. 保存当前 Transform 供新角色使用
-	OutTransform = GetActorTransform();
-
-	// 2. 在旧位置生成切换特效 (通过 NetMulticast 同步到所有客户端)
-	if (CharacterSwapFX)
-	{
-		FVector SpawnFXLocation = OutTransform.GetLocation() + SwapFXLocationOffset;
-		Multicast_SpawnSwapFX(SpawnFXLocation);
+		AbilitySystemComponent->AddLooseGameplayTag(DeathAbilityTag);
 	}
 
-	// 3. 进入待机休眠状态
-	SetStandbyMode(true);
-}
+	SetActorTickEnabled(false);
 
-void APlayerCharacter::Multicast_SpawnSwapFX_Implementation(FVector Location)
-{
-	if (CharacterSwapFX)
+	if (USkeletalMeshComponent* SKMesh = GetMesh())
 	{
-		UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-			GetWorld(),
-			CharacterSwapFX,
-			Location,
-			FRotator::ZeroRotator,
-			SwapFXScale
-		);
-	}
-}
-
-void APlayerCharacter::PerformSwapIn(const FTransform& InTransform)
-{
-	// 1. 先解除待机 (恢复碰撞和 Tick)
-	SetStandbyMode(false);
-
-	// 2. 再设置 Transform (避免在 NoCollision 状态下设置位置导致穿透问题)
-	SetActorTransform(InTransform);
-}
-
-bool APlayerCharacter::CanSwapOut() const
-{
-	// 已死亡的角色必须允许切换下场，否则玩家将永远无法操作
-	if (bIsDead) return true;
-
-	// 运动模式拦截：只允许在指定运动模式下切换下场
-	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
-	{
-		if (!AllowedSwapOutMovementModes.IsEmpty()
-			&& !AllowedSwapOutMovementModes.Contains(MoveComp->MovementMode))
+		if (UAnimInstance* AnimInst = SKMesh->GetAnimInstance())
 		{
-			return false;
+			AnimInst->StopAllMontages(0.1f);
 		}
 	}
-
-	return true;
 }
 
-bool APlayerCharacter::CanSwapIn() const
+void APlayerCharacter::NormalMovement(float InputX, float InputY)
 {
-	// GAS 状态标签拦截：拥有 PreventSwitchTags 时禁止切换上场
-	if (AbilitySystemComponent && PreventSwitchTags.IsValid())
+	if (!Controller || !GetCharacterMovement()) return;
+
+	const FRotator Rotation = Controller->GetControlRotation();
+	const FRotator YawRotation(0, Rotation.Yaw, 0);
+
+	const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
+	const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
+
+	AddMovementInput(ForwardDirection, InputY);
+	AddMovementInput(RightDirection, InputX);
+}
+
+void APlayerCharacter::ResetGlideCooldown()
+{
+	bCanGlideAfterJump = true;
+}
+
+void APlayerCharacter::OnSwimmingTagChanged(const FGameplayTag Tag, int32 NewCount)
+{
+	if (Tag == SwimmingStateTag)
 	{
-		if (AbilitySystemComponent->HasAnyMatchingGameplayTags(PreventSwitchTags))
-		{
-			return false;
-		}
+		bIsSwimming = NewCount > 0;
 	}
-
-	return true;
-}
-
-// --- 角色切换 (GA 流水线) ---
-
-void APlayerCharacter::NotifySwapOutCompleted(const FTransform& SwapTransform)
-{
-	// 仅在服务器端广播退场完成委托
-	// Controller 监听此委托，执行 UnPossess → Possess 流程
-	if (HasAuthority() && OnSwapOutCompleted.IsBound())
+	else if (Tag == FastSwimmingStateTag)
 	{
-		OnSwapOutCompleted.Broadcast(this, SwapTransform);
+		bIsFastSwimming = NewCount > 0;
 	}
-}
-
-void APlayerCharacter::SetPendingSwapInTransform(const FTransform& InTransform)
-{
-	PendingSwapInTransform = InTransform;
 }

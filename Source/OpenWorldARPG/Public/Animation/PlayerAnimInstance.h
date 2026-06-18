@@ -94,6 +94,14 @@ public:
     UPROPERTY(BlueprintReadOnly, Category = "AnimData|MovementState")
     bool bIsGliding = false;
 
+    /** 是否在游泳（自定义游泳模式） */
+    UPROPERTY(BlueprintReadOnly, Category = "AnimData|MovementState")
+    bool bIsSwimming = false;
+
+    /** 是否在快速游泳 */
+    UPROPERTY(BlueprintReadOnly, Category = "AnimData|MovementState")
+    bool bIsFastSwimming = false;
+
     // --- Input ---
 
     /** 当前 X 轴输入值 (前后) */

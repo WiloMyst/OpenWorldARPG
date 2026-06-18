@@ -165,6 +165,9 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags|Combat")
     FGameplayTag AimAttackEventTag;
 
+    UPROPERTY(EditDefaultsOnly, Category = "Config|Tags|Combat")
+    FGameplayTag AimEventTag;
+
     // --- 配置：UI ---
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|UI")
@@ -177,6 +180,9 @@ private:
     bool bIsWalking = false;
     bool bIsPhysicsAnimDisabled = false;
 
-    /** 缓存的目标切换角色索引，GA_SwapOut 完成后使用 */
+    /** 缓存的目标切换角色索引，GA_SwapOutBase 完成后使用 */
     int32 PendingSwapTargetIndex = -1;
+
+    /** 缓存的出场 Transform，由 Controller 在激活 GA_SwapInBase 前设置到角色上 */
+    FTransform PendingSwapTransform;
 };

@@ -2,7 +2,7 @@
 
 #include "Managers/CharacterManagerSubsystem.h"
 #include "Characters/PlayerCharacter.h"
-#include "Data/CharacterInfoRow.h"
+#include "Data/CharacterRegistryRow.h"
 #include "Data/StartingRosterConfig.h"
 #include "Managers/GameAssetManagerSubsystem.h"
 
@@ -57,7 +57,7 @@ void UCharacterManagerSubsystem::InitializeFromDataObject(UObject* InDataObject)
 	UE_LOG(LogTemp, Log, TEXT("InitializeFromDataObject: 成功填充 OwnedCharactersSaveData，数量为 %d"), OwnedCharactersSaveData.Num());
 }
 
-const bool UCharacterManagerSubsystem::GetCharacterInfoRowByTag(const FGameplayTag& CharacterTag, FCharacterInfoRow& OutRow) const
+const bool UCharacterManagerSubsystem::GetCharacterRegistryRowByTag(const FGameplayTag& CharacterTag, FCharacterRegistryRow& OutRow) const
 {
 	EnsureTagMapBuilt();
 
@@ -66,17 +66,17 @@ const bool UCharacterManagerSubsystem::GetCharacterInfoRowByTag(const FGameplayT
 	const FName* RowNamePtr = TagToRowNameMap.Find(CharacterTag);
 	if (!RowNamePtr)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("GetCharacterInfoRowByTag: Tag [%s] 不在 TagToRowNameMap 中！Map 共 %d 条，DataTable=%s"),
+		UE_LOG(LogTemp, Warning, TEXT("GetCharacterRegistryRowByTag: Tag [%s] 不在 TagToRowNameMap 中！Map 共 %d 条，DataTable=%s"),
 			*CharacterTag.ToString(), TagToRowNameMap.Num(), LoadedTable ? TEXT("有效") : TEXT("空"));
 		return false;
 	}
 	if (!LoadedTable)
 	{
-		UE_LOG(LogTemp, Error, TEXT("GetCharacterInfoRowByTag: DataTable 为空！"));
+		UE_LOG(LogTemp, Error, TEXT("GetCharacterRegistryRowByTag: DataTable 为空！"));
 		return false;
 	}
 
-	const FCharacterInfoRow* FoundRow = LoadedTable->FindRow<FCharacterInfoRow>(*RowNamePtr, TEXT(""));
+	const FCharacterRegistryRow* FoundRow = LoadedTable->FindRow<FCharacterRegistryRow>(*RowNamePtr, TEXT(""));
 	if (FoundRow)
 	{
 		OutRow = *FoundRow;
@@ -149,7 +149,7 @@ void UCharacterManagerSubsystem::PreloadAndProcessCharacterDataTable()
 
 	for (const FName& RowName : RowNames)
 	{
-		const FCharacterInfoRow* Row = LoadedTable->FindRow<FCharacterInfoRow>(RowName, TEXT(""));
+		const FCharacterRegistryRow* Row = LoadedTable->FindRow<FCharacterRegistryRow>(RowName, TEXT(""));
 		if (Row && Row->CharacterTag.IsValid())
 		{
 			if (TagToRowNameMap.Contains(Row->CharacterTag))

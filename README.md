@@ -27,8 +27,6 @@
 - **角色切换**：GA_SwapOut / GA_SwapIn 实现退场→出场流水线，退场完成后通过委托通知 Controller 执行 Possess，避免 GA 直接引用 Controller 的循环依赖。
 - **自定义 AbilityActorInfo**：重写 `UAbilitySystemGlobals::AllocAbilityActorInfo`，在 `FARPGGameplayAbilityActorInfo` 中缓存 CustomMovementComponent 指针，使 GA 可 O(1) 访问 CMC，替代高频的 `FindComponentByClass` 查找。
 
-<img src="assets/Image01.png" />
-
 ### 2. 自定义角色移动组件（CMC）
 
 继承 `UCharacterMovementComponent`，通过 `PhysCustom` 实现多种自定义移动模式的物理模拟。采用"CMC 管物理，ActorComponent 管检测"的职责分离设计：
@@ -48,8 +46,6 @@
 - **GA 驱动切换流水线**：Controller 发起切换请求 → 激活 GA_SwapOut（保存 Transform → 播放退场特效 → 进入 Standby）→ 委托通知 Controller → UnPossess/Possess → 激活 GA_SwapIn（设置 Transform → 播放出场蒙太奇 → 赋予无敌 GE）。
 - **网络同步**：角色切换通过 Server RPC 发起，StandbyMode 通过 NetMulticast 同步，RuntimeData 通过 `Replicated` 属性复制。
 
-<img src="assets/Image03.png" />
-
 ### 4. 数据驱动的背包与装备系统
 
 基于 `UGameInstanceSubsystem` 实现全局背包管理器，与角色状态解耦、可跨关卡持久化：
@@ -60,15 +56,11 @@
 - **网络交互**：`UBackpackComponent` 作为 ActorComponent 挂载于角色，拾取/丢弃通过 Server RPC 同步，丢弃时生成带物理模拟的 `AItemBase`。
 - **分类容量与排序筛选**：支持按稀有度/等级/时间/名称排序，按分类和稀有度筛选。
 
-<img src="assets/Image04.png" style="zoom:70%;" />
-
 ### 5. 分层动画架构与多线程安全更新
 
 - **继承与复用**：`UOpenWorldARPGAnimInstance`（基类，处理通用运动数据）→ `UPlayerAnimInstance`（玩家专属，追加瞄准/锁定/冲刺状态），父子 AnimInstance 实现逻辑分层。
 - **动画层接口**：通过 `UCharacterDataAsset` 配置 BaseBehavior/Aim/Physics 三组动画层蓝图，运行时按需切换（`SetupBaseBehaviorAnimLayers` / `SetupAimAnimLayers` / `SetupPhysicsAnimLayers`），实现蒙太奇攻击模式与瞄准攻击模式的独立动画逻辑。
 - **多线程动画更新**：`NativeUpdateAnimation` 在主线程快照 ASC Tags 与组件状态，`NativeThreadSafeUpdateAnimation` 在 Worker Thread 只读消费快照数据，避免工作线程访问 UObject 的线程安全问题。
-
-<img src="assets/Image02.png" />
 
 ### 6. 武器系统与材质特效
 
@@ -82,15 +74,11 @@
 - **GAS 集成**：敌人持有独立的 ASC 与 AttributeSet（`UAS_Enemy`），攻击伤害通过 GE 施加，死亡通过 GA 处理（取消标签、延迟销毁）。
 - **动态血条**：Widget Component 实现头顶血条，监听 AttributeSet 的属性变化委托实时更新，每帧 `OrientToScreen` 保持朝向摄像机。
 
-<img src="assets/Image05.png" style="zoom:70%;" />
-
 ### 8. 异步资源加载与转场管理
 
 - **两阶段加载**：`UGameAssetManagerSubsystem` 统一调度关卡加载（20% 权重）与队伍角色资源加载（80% 权重），通过 `FStreamableManager` 异步加载，进度按权重合并计算。
 - **分帧释放**：加载完成后，StreamableHandle 分帧释放（每帧释放 N 个），避免集中 GC 造成的帧率卡顿。
 - **中央资产缓存**：DataTable、DataAsset 等高频访问资产首次延迟加载后缓存，后续直接返回缓存指针。
-
-<img src="assets/Image06.png" style="zoom:70%;" />
 
 ### 9. UI 栈管理与 Tag 路由
 

@@ -7,10 +7,13 @@
 #include "AbilitySystemInterface.h"
 #include "Interfaces/ARPGCharacterInterface.h"
 #include "GameplayEffectTypes.h"
+#include "Data/CharacterVisualDataAsset.h"
+#include "Data/CharacterCombatDataAsset.h"
+#include "Data/CharacterRegistryRow.h"
 #include "Data/CharacterSaveData.h"
+#include "MotionWarpingComponent.h"
 #include "PlayerCharacter.generated.h"
 
-class UCharacterDataAsset;
 class USpringArmComponent;
 class UCameraComponent;
 class USceneComponent;
@@ -20,9 +23,7 @@ class UOpenWorldARPGCharacterMovementComponent;
 class UInteractionComponent;
 class UTargetingComponent;
 class UGameplayAbility;
-class UClimbingComponent;
 class AWeaponBase;
-class UNiagaraSystem;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnPlayerMovementInput, float, InputX, float, InputY);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnHealthUpdated);
@@ -32,6 +33,16 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnSwapOutCompleted, APlayerCharact
 
 /**
  * 玩家角色。持有 ASC、AttributeSet，动态数据通过 FCharacterSaveData 唯一存储。
+ *
+ * 【数据架构：UI / 表现 / 战斗 三层解耦】
+ * 角色持有两个已加载的数据资产引用：
+ * - VisualDataAsset (UCharacterVisualDataAsset)：外观/动画数据，由美术负责
+ * - CombatDataAsset (UCharacterCombatDataAsset)：战斗/天赋数据，由战斗策划负责
+ * UI 展示数据（名称、头像、稀有度等）不存储在角色中，
+ * 而是通过 FCharacterRegistryRow (DataTable) 按需查询。
+ *
+ * 这三层数据通过 FCharacterRegistryRow 的 TSoftObjectPtr 桥梁连接，
+ * 运行时由 GameAssetManagerSubsystem 异步加载后传入 InitializeCharacter。
  */
 UCLASS()
 class OPENWORLDARPG_API APlayerCharacter : public AOpenWorldARPGCharacter, public IAbilitySystemInterface, public IARPGCharacterInterface
@@ -51,8 +62,27 @@ public:
 
 	// --- 初始化 ---
 
+	/**
+	 * 初始化角色。接收表现层和战斗层两个已加载的数据资产，以及注册表行引用。
+	 *
+	 * 【架构设计：三层解耦的初始化流】
+	 * 旧架构：InitializeCharacter(SaveData, CharacterDataAsset)
+	 *   - CharacterDataAsset 是超级资产，包含 UI/外观/战斗所有数据
+	 *   - 美术和策划修改同一资产会互相锁死
+	 *
+	 * 新架构：InitializeCharacter(SaveData, VisualData, CombatData, RegistryRow)
+	 *   - VisualData：纯外观数据（美术负责）
+	 *   - CombatData：纯战斗数据（战斗策划负责）
+	 *   - RegistryRow：UI 元数据 + 身份 Tag（策划A负责）
+	 *   - 三层独立签出，Perforce 不锁死
+	 *
+	 * @param InSaveData 角色运行时存档数据
+	 * @param InVisualData 已加载的外观表现数据资产
+	 * @param InCombatData 已加载的战斗逻辑数据资产
+	 * @param InRegistryRow 角色注册表行（UI 元数据 + 身份 Tag）
+	 */
 	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|Initialization")
-	void InitializeCharacter(const FCharacterSaveData& InSaveData, UCharacterDataAsset* InDataAsset);
+	void InitializeCharacter(const FCharacterSaveData& InSaveData, UCharacterVisualDataAsset* InVisualData, UCharacterCombatDataAsset* InCombatData, const FCharacterRegistryRow& InRegistryRow);
 
 	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|State")
 	void SetStandbyMode(bool bNewStandbyState);
@@ -85,17 +115,6 @@ public:
 
 	// --- 角色切换 ---
 
-	/** [GA流水线] 旧接口，保留向后兼容，新逻辑应使用 GA_SwapOut */
-	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|Swap")
-	void PerformSwapOut(FTransform& OutTransform);
-
-	/** [GA流水线] 旧接口，保留向后兼容，新逻辑应使用 GA_SwapIn */
-	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|Swap")
-	void PerformSwapIn(const FTransform& InTransform);
-
-	UFUNCTION(NetMulticast, Unreliable)
-	void Multicast_SpawnSwapFX(FVector Location);
-
 	UFUNCTION(NetMulticast, Reliable)
 	void Multicast_SetStandbyMode(bool bNewStandbyState);
 
@@ -104,29 +123,15 @@ public:
 	UFUNCTION()
 	void OnRep_CharacterIdentityTags();
 
-	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Swap")
-	bool CanSwapOut() const;
-
-	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Swap")
-	bool CanSwapIn() const;
-
 	// --- 角色切换 (GA 流水线) ---
 
-	/** 退场完成委托：GA_SwapOut::EndAbility 时调用 NotifySwapOutCompleted 触发 */
+	/** 退场完成委托：GA_SwapOutBase::EndAbility 时调用 NotifySwapOutCompleted 触发 */
 	UPROPERTY(BlueprintAssignable, Category = "PlayerCharacter|Swap")
 	FOnSwapOutCompleted OnSwapOutCompleted;
 
-	/** 由 GA_SwapOut 调用，广播退场完成委托（仅服务器端调用） */
+	/** 由 GA_SwapOutBase 调用，广播退场完成委托（仅服务器端调用） */
 	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|Swap")
 	void NotifySwapOutCompleted(const FTransform& SwapTransform);
-
-	/** 设置待传入的出场 Transform，Controller 在激活 GA_SwapIn 前调用 */
-	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|Swap")
-	void SetPendingSwapInTransform(const FTransform& InTransform);
-
-	/** 获取待传入的出场 Transform，GA_SwapIn 在 ActivateAbility 中读取 */
-	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Swap")
-	const FTransform& GetPendingSwapInTransform() const { return PendingSwapInTransform; }
 
 	/** GA_SwapOut 的能力类，Controller 通过此配置激活退场技能 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Swap")
@@ -169,9 +174,6 @@ public:
 	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Targeting")
 	UTargetingComponent* GetTargetingComponent() const { return TargetingComponent; }
 
-	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Climbing")
-	UClimbingComponent* GetClimbingComponent() const { return ClimbingComponent; }
-
 	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|GAS")
 	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
 
@@ -181,10 +183,14 @@ public:
 	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Movement")
 	UOpenWorldARPGCharacterMovementComponent* GetCustomMovementComp() const;
 
-	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Data")
-	UCharacterDataAsset* GetDataSourceAsset() const { return DataSourceAsset; }
+	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|MotionWarping")
+	UMotionWarpingComponent* GetMotionWarpingComp() const { return MotionWarpingComp; }
 
-	virtual UCharacterDataAsset* GetCharacterDataAsset_Implementation() const override { return DataSourceAsset; }
+	/** 获取外观表现数据资产（IARPGCharacterInterface 实现） */
+	virtual UCharacterVisualDataAsset* GetVisualDataAsset_Implementation() const override { return VisualDataAsset; }
+
+	/** 获取战斗逻辑数据资产（IARPGCharacterInterface 实现） */
+	virtual UCharacterCombatDataAsset* GetCombatDataAsset_Implementation() const override { return CombatDataAsset; }
 
 	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Data")
 	FGameplayTag GetCharacterTag() const;
@@ -192,17 +198,20 @@ public:
 	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Data")
 	FGameplayTag GetStandbyStateTag() const { return StandbyStateTag; }
 
+	/**
+	 * 获取武器蓝图类（从 VisualDataAsset 解析 TSoftClassPtr）。
+	 * 注意：TSoftClassPtr 需要在调用前已被加载，否则返回 nullptr。
+	 */
 	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Data")
 	TSubclassOf<AWeaponBase> GetWeaponBlueprint() const;
 
-	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Data")
-	TArray<TSoftObjectPtr<UAnimMontage>> GetNormalAttackMontages() const;
-
-	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Data")
-	TArray<TSoftObjectPtr<UAnimMontage>> GetHeavyAttackMontages() const;
-
-	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Data")
-	TArray<TSoftObjectPtr<UAnimMontage>> GetPlungeAttackMontages() const;
+	/**
+	 * 通过天赋 Tag 查询天赋配置。
+	 * 从 CombatDataAsset 的 CharacterTalents 字典中查找。
+	 * @param TalentTag 天赋标签（如 Ability.Attack.Normal）
+	 * @return 天赋配置指针，未找到返回 nullptr
+	 */
+	const FTalentConfig* FindTalentConfig(const FGameplayTag& TalentTag) const;
 
 	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Data")
 	int32 GetCharacterLevel() const;
@@ -218,7 +227,7 @@ public:
 protected:
 	void NormalMovement(float InputX, float InputY);
 	void ResetGlideCooldown();
-	void OnMeshLoaded(const UCharacterDataAsset* DataAsset);
+	void OnMeshLoaded(const UCharacterVisualDataAsset* VisualData);
 	virtual void OnHealthAttributeChanged(const FOnAttributeChangeData& Data);
 	void AdjustAimingCamera(float DeltaTime);
 
@@ -259,8 +268,8 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlayerCharacter|Targeting")
 	TObjectPtr<UTargetingComponent> TargetingComponent;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlayerCharacter|Climbing")
-	TObjectPtr<UClimbingComponent> ClimbingComponent;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlayerCharacter|MotionWarping")
+	TObjectPtr<UMotionWarpingComponent> MotionWarpingComp;
 
 	// --- 输入缓存 ---
 
@@ -278,10 +287,15 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlayerCharacter|GAS")
 	TObjectPtr<UAS_Player> AttributeSet;
 
-	// --- 数据 ---
+	// --- 数据：三层解耦 ---
 
+	/** 外观表现数据资产（已加载的引用）。美术负责签出修改。 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlayerCharacter|Data")
-	TObjectPtr<UCharacterDataAsset> DataSourceAsset;
+	TObjectPtr<UCharacterVisualDataAsset> VisualDataAsset;
+
+	/** 战斗逻辑数据资产（已加载的引用）。战斗策划负责签出修改。 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlayerCharacter|Data")
+	TObjectPtr<UCharacterCombatDataAsset> CombatDataAsset;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Replicated, Category = "PlayerCharacter|Data")
 	FCharacterSaveData RuntimeData;
@@ -294,9 +308,6 @@ protected:
 	TArray<TSubclassOf<UGameplayAbility>> PermanentAbilitiesToActivate;
 
 	TArray<TWeakObjectPtr<UActorComponent>> TickingComponentsSnapshot;
-
-	/** 待传入的出场 Transform，由 Controller 在激活 GA_SwapIn 前写入 */
-	FTransform PendingSwapInTransform;
 
 	// --- 配置：Tags ---
 
@@ -315,6 +326,10 @@ protected:
 	/** 爬行状态标签 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
 	FGameplayTag ClimbingStateTag;
+
+	/** 停止攀爬事件标签（攀爬中按跳跃时发送，与 CMC 检测到落地时发送的同一 Tag） */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
+	FGameplayTag StopClimbEventTag;
 
 	/** 滑翔状态标签 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
@@ -352,28 +367,6 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "PlayerCharacter|Movement|Glide")
     float GlideCooldownAfterJump = 0.3f;
 
-	// --- 配置：角色切换 ---
-
-	/** 角色切换特效系统 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Swap")
-	TObjectPtr<UNiagaraSystem> CharacterSwapFX;
-
-	/** 角色切换特效位置偏移 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Swap")
-	FVector SwapFXLocationOffset = FVector(0.0f, 0.0f, -100.0f);
-
-	/** 角色切换特效缩放 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Swap")
-	FVector SwapFXScale = FVector(0.5f, 0.5f, 0.5f);
-
-	/** 防止切换标签标签容器 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Swap")
-	FGameplayTagContainer PreventSwitchTags;
-
-	/** 允许切换出的移动模式数组 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Swap")
-	TArray<TEnumAsByte<EMovementMode>> AllowedSwapOutMovementModes;
-
 	// --- 配置：摄像机 ---
 
 	/** 摄像机插值速度 */
@@ -403,4 +396,26 @@ protected:
 
 	FTimerHandle JumpGlideCooldownTimer;
     bool bCanGlideAfterJump = true;
+
+	// --- 游泳状态 (供动画蓝图读取，通过 GAS Tag 监听解耦) ---
+
+	/** 是否正在游泳 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlayerCharacter|State")
+	bool bIsSwimming = false;
+
+	/** 是否正在快速游泳 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlayerCharacter|State")
+	bool bIsFastSwimming = false;
+
+	/** 游泳状态 Tag */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
+	FGameplayTag SwimmingStateTag;
+
+	/** 快速游泳状态 Tag */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
+	FGameplayTag FastSwimmingStateTag;
+
+	/** 游泳 Tag 变化回调 */
+	UFUNCTION()
+	void OnSwimmingTagChanged(const FGameplayTag Tag, int32 NewCount);
 };

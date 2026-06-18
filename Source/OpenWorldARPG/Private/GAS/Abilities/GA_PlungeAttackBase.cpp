@@ -8,6 +8,7 @@
 #include "Abilities/Tasks/AbilityTask_WaitMovementModeChange.h"
 #include "Characters/PlayerCharacter.h"
 #include "Components/WeaponManagerComponent.h"
+#include "Data/CharacterCombatDataAsset.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/KismetSystemLibrary.h"
 
@@ -53,16 +54,23 @@ void UGA_PlungeAttackBase::ExecuteAttack()
         MoveComp->Velocity = FVector::ZeroVector;
     }
 
-    // 3. 获取蒙太奇数组
-    TArray<TSoftObjectPtr<UAnimMontage>> Montages = CachedPlayer->GetPlungeAttackMontages();
-    if (Montages.IsEmpty() || !Montages[0].IsValid())
+    // 3. 从 CombatData 获取下落攻击天赋配置（通过 GA 蓝图中配置的 TalentTag 查询连招图）
+    const FTalentConfig* PlungeTalent = CachedPlayer->FindTalentConfig(TalentTag);
+    if (!PlungeTalent || PlungeTalent->ComboGraph.IsEmpty())
     {
         EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);
         return;
     }
 
-    // 加载 [0] 号蒙太奇（空中下落循环动画）
-    UAnimMontage* FallMontage = Montages[0].LoadSynchronous();
+    // 从 ComboGraph 中查找入口节点的蒙太奇（空中下落循环动画）
+    const FComboActionNode* EntryNode = PlungeTalent->ComboGraph.Find(PlungeTalent->EntryNodeName);
+    if (!EntryNode || !EntryNode->Montage.IsValid())
+    {
+        EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);
+        return;
+    }
+
+    UAnimMontage* FallMontage = EntryNode->Montage.LoadSynchronous();
     if (!FallMontage)
     {
         EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);
@@ -117,27 +125,58 @@ void UGA_PlungeAttackBase::OnMovementModeChanged(EMovementMode NewMovementMode)
         ASC->CurrentMontageStop();
     }
 
-    // 2. 获取并播放 [1] 号蒙太奇（落地砸地动画）
-    TArray<TSoftObjectPtr<UAnimMontage>> Montages = CachedPlayer->GetPlungeAttackMontages();
-    if (Montages.IsValidIndex(1) && Montages[1].IsValid())
+    // 2. 从 ComboGraph 查找落地砸地蒙太奇（事件驱动：通过 LandedTransitionTag 精准匹配）
+    //
+    // 【设计理念：将 GameplayTag 作为状态机事件触发器】
+    // ComboGraph 的 NextNodes 是一个 TMap<FGameplayTag, FName> 派生表：
+    //   - Key   = 触发事件/输入的 GameplayTag（如 Event.Movement.Landed）
+    //   - Value = 目标节点名称（如 Plunge_Land）
+    //
+    // 当角色落地时，使用 LandedTransitionTag 去 NextNodes 中 Find()，
+    // 即可精准取出落地节点名称，再从 ComboGraph 中加载该节点的蒙太奇。
+    //
+    // 相比原 for 循环遍历的优势：
+    //   1. 一个入口节点可配置多条派生路径（落地/被打断/超时），各自用不同 Tag 区分
+    //   2. 策划可自由扩展新事件 Tag，无需修改 C++ 代码
+    //   3. Tag 本身即语义文档，配置表可读性强
+    const FTalentConfig* PlungeTalent = CachedPlayer->FindTalentConfig(TalentTag);
+    UAnimMontage* LandingMontage = nullptr;
+
+    if (PlungeTalent && LandedTransitionTag.IsValid())
     {
-        UAnimMontage* LandingMontage = Montages[1].LoadSynchronous();
-        if (LandingMontage)
+        // 重新查找入口节点
+        const FComboActionNode* LocalEntryNode = PlungeTalent->ComboGraph.Find(PlungeTalent->EntryNodeName);
+        if (LocalEntryNode)
         {
-            LandingMontageTask = UAbilityTask_PlayMontageAndWait::CreatePlayMontageAndWaitProxy(this, NAME_None, LandingMontage, 1.0f, NAME_None, true, 1.0f, 0.0f);
-
-            // 绑定落地动画结束的回调（动画播完后技能才算真正结束）
-            LandingMontageTask->OnCompleted.AddDynamic(this, &UGA_PlungeAttackBase::OnLandingMontageFinished);
-            LandingMontageTask->OnBlendOut.AddDynamic(this, &UGA_PlungeAttackBase::OnLandingMontageFinished);
-            LandingMontageTask->OnInterrupted.AddDynamic(this, &UGA_PlungeAttackBase::OnLandingMontageFinished);
-            LandingMontageTask->OnCancelled.AddDynamic(this, &UGA_PlungeAttackBase::OnLandingMontageFinished);
-
-            LandingMontageTask->ReadyForActivation();
-            return; // 成功播放落地动画，跳出函数等待动画结束
+            // 事件驱动核心：用 LandedTransitionTag 精准 Find，而非遍历整个 NextNodes
+            if (const FName* LandingNodeName = LocalEntryNode->NextNodes.Find(LandedTransitionTag))
+            {
+                if (const FComboActionNode* LandNode = PlungeTalent->ComboGraph.Find(*LandingNodeName))
+                {
+                    if (LandNode->Montage.IsValid())
+                    {
+                        LandingMontage = LandNode->Montage.LoadSynchronous();
+                    }
+                }
+            }
         }
     }
 
-    // 兜底：如果没有配置 [1] 号蒙太奇，落地后直接结束技能
+    if (LandingMontage)
+    {
+        LandingMontageTask = UAbilityTask_PlayMontageAndWait::CreatePlayMontageAndWaitProxy(this, NAME_None, LandingMontage, 1.0f, NAME_None, true, 1.0f, 0.0f);
+
+        // 绑定落地动画结束的回调（动画播完后技能才算真正结束）
+        LandingMontageTask->OnCompleted.AddDynamic(this, &UGA_PlungeAttackBase::OnLandingMontageFinished);
+        LandingMontageTask->OnBlendOut.AddDynamic(this, &UGA_PlungeAttackBase::OnLandingMontageFinished);
+        LandingMontageTask->OnInterrupted.AddDynamic(this, &UGA_PlungeAttackBase::OnLandingMontageFinished);
+        LandingMontageTask->OnCancelled.AddDynamic(this, &UGA_PlungeAttackBase::OnLandingMontageFinished);
+
+        LandingMontageTask->ReadyForActivation();
+        return; // 成功播放落地动画，跳出函数等待动画结束
+    }
+
+    // 兜底：如果 ComboGraph 中没有配置落地节点，落地后直接结束技能
     CorrectPawnOrient();
     EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, false);
 }

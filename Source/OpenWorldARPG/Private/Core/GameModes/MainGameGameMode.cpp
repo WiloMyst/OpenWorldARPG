@@ -3,8 +3,9 @@
 #include "Core/GameModes/MainGameGameMode.h"
 #include "Characters/PlayerCharacter.h"
 #include "Core/PlayerStates/MainGamePlayerState.h"
-#include "Data/CharacterInfoRow.h"
-#include "Data/CharacterDataAsset.h"
+#include "Data/CharacterRegistryRow.h"
+#include "Data/CharacterVisualDataAsset.h"
+#include "Data/CharacterCombatDataAsset.h"
 #include "Managers/CharacterManagerSubsystem.h"
 #include "Managers/TeamManagerSubsystem.h"
 #include "Managers/GameAssetManagerSubsystem.h"
@@ -109,11 +110,20 @@ void AMainGameGameMode::GeneratePlayerCharacters(APlayerController* PlayerContro
             continue;
         }
 
-        // 查询角色静态配置数据
-        FCharacterInfoRow InfoRow;
-        if (!CharManager->GetCharacterInfoRowByTag(CharacterTag, InfoRow))
+        // 查询角色注册表行（UI 元数据 + VisualData/CombatData 软引用桥梁）
+        FCharacterRegistryRow RegistryRow;
+        if (!CharManager->GetCharacterRegistryRowByTag(CharacterTag, RegistryRow))
         {
-            UE_LOG(LogTemp, Error, TEXT("GeneratePlayerCharacters: 角色 Tag=%s 在 CharacterInfoTable 中未找到！跳过生成。"), *CharacterTag.ToString());
+            UE_LOG(LogTemp, Error, TEXT("GeneratePlayerCharacters: 角色 Tag=%s 在 CharacterRegistryTable 中未找到！跳过生成。"), *CharacterTag.ToString());
+            continue;
+        }
+
+        // 解析 TSoftObjectPtr：加载 VisualData 和 CombatData
+        UCharacterVisualDataAsset* VisualData = RegistryRow.VisualData.LoadSynchronous();
+        UCharacterCombatDataAsset* CombatData = RegistryRow.CombatData.LoadSynchronous();
+        if (!VisualData || !CombatData)
+        {
+            UE_LOG(LogTemp, Error, TEXT("GeneratePlayerCharacters: 角色 Tag=%s 的 VisualData 或 CombatData 加载失败！跳过生成。"), *CharacterTag.ToString());
             continue;
         }
 
@@ -128,8 +138,8 @@ void AMainGameGameMode::GeneratePlayerCharacters(APlayerController* PlayerContro
 
         if (SpawnedChar)
         {
-            // 初始化: SaveData 移入 RuntimeData
-            SpawnedChar->InitializeCharacter(SaveData, InfoRow.CharacterDataAsset);
+            // 初始化: SaveData + VisualData + CombatData + RegistryRow（三层解耦）
+            SpawnedChar->InitializeCharacter(SaveData, VisualData, CombatData, RegistryRow);
 
             // 按队伍索引存入 TeamActors
             TeamActors[TeamIndex] = SpawnedChar;

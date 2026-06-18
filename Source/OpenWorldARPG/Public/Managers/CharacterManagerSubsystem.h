@@ -11,7 +11,7 @@ class UObject;
 class UStartingRosterConfig;
 class UDataTable;
 class APlayerCharacter;
-struct FCharacterInfoRow;
+struct FCharacterRegistryRow;
 
 
 /**
@@ -37,7 +37,7 @@ public:
 
 	/** 通过角色 Tag 查找 DT_CharacterInfo 中的完整数据行 */
 	UFUNCTION(BlueprintCallable, Category = "CharacterManager|Data")
-	const bool GetCharacterInfoRowByTag(const FGameplayTag& CharacterTag, FCharacterInfoRow& OutRow) const;
+	const bool GetCharacterRegistryRowByTag(const FGameplayTag& CharacterTag, FCharacterRegistryRow& OutRow) const;
 
 	/** 通过角色 Tag 查找对应的 DataTable 行名，找不到返回 NAME_None */
 	UFUNCTION(BlueprintPure, Category = "CharacterManager|Data")

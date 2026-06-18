@@ -14,9 +14,11 @@ struct FTalentLevelEntry
 {
 	GENERATED_BODY()
 
+	/** 天赋标签 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SaveData")
 	FGameplayTag TalentTag;
 
+	/** 天赋等级 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SaveData")
 	int32 Level = 0;
 };
@@ -29,30 +31,35 @@ struct FCharacterSaveData
 {
 	GENERATED_BODY()
 
+	/** 角色标签 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SaveData")
 	FGameplayTag CharacterTag;
 
+	/** 角色等级 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SaveData")
 	int32 CharacterLevel = 1;
 
+	/** 经验值 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SaveData")
 	int32 Experience = 0;
 
+	/** 升星等级 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SaveData")
 	int32 AscensionLevel = 0;
 
+	/** 星座等级 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SaveData")
 	int32 ConstellationLevel = 0;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SaveData")
-	int32 FriendshipLevel = 1;
-
+	/** 天赋等级列表 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SaveData")
 	TArray<FTalentLevelEntry> TalentLevels;
 
+	/** 已装备武器ID */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SaveData")
 	FName EquippedWeaponID;
 
+	/** 已装备装备ID列表 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "SaveData")
 	TArray<FName> EquippedArtifactIDs;
 };

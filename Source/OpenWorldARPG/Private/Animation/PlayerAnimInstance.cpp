@@ -96,15 +96,17 @@ void UPlayerAnimInstance::NativeThreadSafeUpdateAnimation(float DeltaSeconds)
         SpineRotation = FRotator::ZeroRotator;
     }
 
-        // 2. 玩家专属移动状态 (从 CMC 读取)
+    // 2. 玩家专属移动状态 (从 CMC 读取)
     
     bIsSprinting = MoveComp->IsSprinting();
     bIsWalking = MoveComp->IsWalking();
     bIsAiming = MoveComp->IsAiming();
     bIsClimbing = MoveComp->IsClimbing();
     bIsGliding = MoveComp->IsGliding();
+    bIsSwimming = MoveComp->IsSwimming();
+    bIsFastSwimming = MoveComp->IsFastSwimming();
 
-        // 4. 输入数据
+    // 3. 输入数据
     // 从 CMC 的 GetLastInputVector 推算本地空间输入方向
     // 使用 GameThread 快照的 ActorRotation，避免工作线程访问非线程安全数据
     
@@ -122,7 +124,7 @@ void UPlayerAnimInstance::NativeThreadSafeUpdateAnimation(float DeltaSeconds)
         InputY = 0.0f;
     }
 
-        // Update Velocity (插值计算 Speed X 和 Speed Y)
+    // 4. Update Velocity (插值计算 Speed X 和 Speed Y)
     // 必须在急停判定前计算，因为插值依赖 DeltaSeconds
     if (bIsClimbing)
     {
@@ -132,6 +134,18 @@ void UPlayerAnimInstance::NativeThreadSafeUpdateAnimation(float DeltaSeconds)
         // 使用 Y 和 Z 轴驱动
         float TargetX = LocalAcceleration.Y * 100.0f; // 左右
         float TargetY = LocalAcceleration.Z * 100.0f; // 上下
+
+        SpeedX = FMath::FInterpTo(SpeedX, TargetX, DeltaSeconds, 5.0f);
+        SpeedY = FMath::FInterpTo(SpeedY, TargetY, DeltaSeconds, 5.0f);
+    }
+    else if (bIsSwimming)
+    {
+        // 游泳状态：使用本地空间输入方向驱动混合空间
+        // X 轴 = 左右横移，Y 轴 = 前后纵向
+        const FVector LocalAcceleration = SnapshotActorRotation.UnrotateVector(AccelerationVector);
+
+        float TargetX = LocalAcceleration.Y * 100.0f; // 左右
+        float TargetY = LocalAcceleration.X * 100.0f; // 前后
 
         SpeedX = FMath::FInterpTo(SpeedX, TargetX, DeltaSeconds, 5.0f);
         SpeedY = FMath::FInterpTo(SpeedY, TargetY, DeltaSeconds, 5.0f);

@@ -1,6 +1,6 @@
 // Copyright 2025 WiloMyst. All Rights Reserved.
 
-#include "GAS/Abilities/GA_SwapIn.h"
+#include "GAS/Abilities/GA_SwapInBase.h"
 #include "Characters/PlayerCharacter.h"
 #include "AbilitySystemComponent.h"
 #include "Abilities/Tasks/AbilityTask_PlayMontageAndWait.h"
@@ -8,13 +8,13 @@
 #include "GameFramework/SpringArmComponent.h"
 #include "Animation/AnimInstance.h"
 
-UGA_SwapIn::UGA_SwapIn()
+UGA_SwapInBase::UGA_SwapInBase()
 {
     InstancingPolicy = EGameplayAbilityInstancingPolicy::InstancedPerActor;
     NetExecutionPolicy = EGameplayAbilityNetExecutionPolicy::LocalPredicted;
 }
 
-void UGA_SwapIn::ActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, const FGameplayEventData* TriggerEventData)
+void UGA_SwapInBase::ActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, const FGameplayEventData* TriggerEventData)
 {
     if (!CommitAbility(Handle, ActorInfo, ActivationInfo))
     {
@@ -29,8 +29,16 @@ void UGA_SwapIn::ActivateAbility(const FGameplayAbilitySpecHandle Handle, const 
         return;
     }
 
-    // 从角色读取 Controller 在激活前写入的 SwapIn Transform
-    SwapInTransform = CachedPlayer->GetPendingSwapInTransform();
+    // 验证：检查 PreventSwitchTags
+    if (!ValidateSwapInConditions())
+    {
+        EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+        return;
+    }
+
+    // 出场 Transform 由 Controller 在激活 GA 前直接设置到角色上
+    // GA 读取角色当前位置作为出场点，无需额外数据传递通道
+    SwapInTransform = CachedPlayer->GetActorTransform();
 
     // 1. 解除待机模式并设置 Transform
     ExitStandbyAndSetTransform();
@@ -50,7 +58,7 @@ void UGA_SwapIn::ActivateAbility(const FGameplayAbilitySpecHandle Handle, const 
     }
 }
 
-void UGA_SwapIn::EndAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateEndAbility, bool bWasCancelled)
+void UGA_SwapInBase::EndAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateEndAbility, bool bWasCancelled)
 {
     if (MontageTask)
     {
@@ -61,7 +69,24 @@ void UGA_SwapIn::EndAbility(const FGameplayAbilitySpecHandle Handle, const FGame
     Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
 }
 
-void UGA_SwapIn::ExitStandbyAndSetTransform()
+bool UGA_SwapInBase::ValidateSwapInConditions() const
+{
+    // GAS 状态标签拦截：拥有 PreventSwitchTags 时禁止切换上场
+    if (PreventSwitchTags.IsValid())
+    {
+        if (UAbilitySystemComponent* ASC = CachedPlayer->GetAbilitySystemComponent())
+        {
+            if (ASC->HasAnyMatchingGameplayTags(PreventSwitchTags))
+            {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+void UGA_SwapInBase::ExitStandbyAndSetTransform()
 {
     if (!CachedPlayer) return;
 
@@ -104,22 +129,22 @@ void UGA_SwapIn::ExitStandbyAndSetTransform()
     }
 }
 
-void UGA_SwapIn::PlaySwapInMontage()
+void UGA_SwapInBase::PlaySwapInMontage()
 {
     if (!CachedPlayer || !SwapInMontage) return;
 
     MontageTask = UAbilityTask_PlayMontageAndWait::CreatePlayMontageAndWaitProxy(
         this, NAME_None, SwapInMontage, 1.0f, NAME_None, true, 1.0f, 0.0f);
 
-    MontageTask->OnCompleted.AddDynamic(this, &UGA_SwapIn::OnMontageFinished);
-    MontageTask->OnBlendOut.AddDynamic(this, &UGA_SwapIn::OnMontageFinished);
-    MontageTask->OnInterrupted.AddDynamic(this, &UGA_SwapIn::OnMontageFinished);
-    MontageTask->OnCancelled.AddDynamic(this, &UGA_SwapIn::OnMontageFinished);
+    MontageTask->OnCompleted.AddDynamic(this, &UGA_SwapInBase::OnMontageFinished);
+    MontageTask->OnBlendOut.AddDynamic(this, &UGA_SwapInBase::OnMontageFinished);
+    MontageTask->OnInterrupted.AddDynamic(this, &UGA_SwapInBase::OnMontageFinished);
+    MontageTask->OnCancelled.AddDynamic(this, &UGA_SwapInBase::OnMontageFinished);
 
     MontageTask->ReadyForActivation();
 }
 
-void UGA_SwapIn::ApplyInvincibleEffect()
+void UGA_SwapInBase::ApplyInvincibleEffect()
 {
     if (!CachedPlayer || !InvincibleEffectClass) return;
 
@@ -136,7 +161,7 @@ void UGA_SwapIn::ApplyInvincibleEffect()
     }
 }
 
-void UGA_SwapIn::OnMontageFinished()
+void UGA_SwapInBase::OnMontageFinished()
 {
     EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, false);
 }

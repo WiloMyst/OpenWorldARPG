@@ -43,8 +43,8 @@ void UWeaponManagerComponent::InitializeCharacterWeapon()
     TSubclassOf<AWeaponBase> WeaponClass = CachedCharacter->GetWeaponBlueprint();
     if (!WeaponClass)
     {
-        UE_LOG(LogTemp, Error, TEXT("[WeaponComp] InitializeCharacterWeapon: WeaponClass is NULL (DataSourceAsset is %s)"),
-            CachedCharacter->GetDataSourceAsset() ? TEXT("Valid") : TEXT("NULL"));
+        UE_LOG(LogTemp, Error, TEXT("[WeaponComp] InitializeCharacterWeapon: WeaponClass is NULL (VisualDataAsset is %s)"),
+            CachedCharacter->GetVisualDataAsset() ? TEXT("Valid") : TEXT("NULL"));
         return;
     }
     UE_LOG(LogTemp, Warning, TEXT("[WeaponComp] InitializeCharacterWeapon: WeaponClass=%s"), *WeaponClass->GetName());
