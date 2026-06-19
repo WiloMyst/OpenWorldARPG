@@ -38,7 +38,6 @@ void UGA_MeleeAttackBase::ActivateAbility(const FGameplayAbilitySpecHandle Handl
     CurrentNodeName = TalentConfig ? TalentConfig->EntryNodeName : NAME_None;
     CurrentNode = nullptr;
     bComboWindowOpen = false;
-    BufferedInput = FGameplayTag();
     ActiveAttackMontage = nullptr;
 
     ExecuteAttack(CurrentNodeName);
@@ -82,7 +81,7 @@ void UGA_MeleeAttackBase::ExecuteAttack(FName NodeName)
     }
     CurrentNodeName = NodeName;
 
-    // 3. 加载蒙太奇
+    // 3. 加载蒙太奇（直接从连招节点的软引用加载）
     UAnimMontage* MontageToPlay = CurrentNode->Montage.LoadSynchronous();
     if (!MontageToPlay)
     {
@@ -94,7 +93,6 @@ void UGA_MeleeAttackBase::ExecuteAttack(FName NodeName)
     ActiveAttackMontage = MontageToPlay;
     HitActors.Empty();
     bComboWindowOpen = false;
-    BufferedInput = FGameplayTag();
     ClearAllTasks();
 
     // 5. 索敌检测 + Motion Warping 目标设置（使用节点配置的 MaxWarpDistance）
@@ -302,28 +300,8 @@ void UGA_MeleeAttackBase::OnComboOpenEventReceived(FGameplayEventData Payload)
         return;
     }
 
-    // 连招窗口打开
+    // 连招窗口打开，等待玩家输入
     bComboWindowOpen = true;
-
-    // ==========================================
-    // 核心连招流转：窗口打开时立即消费输入缓存
-    //
-    // 为什么在 Open 时消费？
-    // - 响应速度最快：玩家输入在窗口打开的瞬间就被消费
-    // - 预输入支持：玩家可以在窗口打开前提前按键，窗口一开就流转
-    // - AnimNotifyState 的 NotifyEnd 保证窗口一定会被关闭，
-    //   即使动画被打断，ComboWindowClose 也必定触发，不会锁死
-    //
-    // 时序安全：
-    // - ComboWindowOpen 由 AnimNotifyState 的 NotifyBegin 触发
-    // - 此时当前动画仍在播放，不会被打断
-    // - TryConsumeBufferedInput 如果命中派生表，会调用 ExecuteAttack
-    // - ExecuteAttack 内部先 ClearAllTasks（杀死旧的监听器），
-    //   再创建新的 Task 并先激活 MontageTask（打断旧动画），
-    //   旧动画的 AnimNotifyState 触发 NotifyEnd 发出 Close 事件，
-    //   但此时旧 Task 已被杀死，不会干扰新状态
-    // ==========================================
-    TryConsumeBufferedInput();
 }
 
 void UGA_MeleeAttackBase::OnComboCloseEventReceived(FGameplayEventData Payload)
@@ -336,11 +314,6 @@ void UGA_MeleeAttackBase::OnComboCloseEventReceived(FGameplayEventData Payload)
 
     // 连招窗口关闭
     bComboWindowOpen = false;
-
-    // 清空过期输入缓存。
-    // 窗口关闭后，之前缓存的输入不再有效，防止过期输入导致角色"自动"攻击。
-    // 如果玩家在窗口关闭后再次按键，OnAttackInputEventReceived 会重新记录。
-    BufferedInput = FGameplayTag();
 }
 
 void UGA_MeleeAttackBase::OnAttackInputEventReceived(FGameplayEventData Payload)
@@ -352,41 +325,22 @@ void UGA_MeleeAttackBase::OnAttackInputEventReceived(FGameplayEventData Payload)
     }
 
     // ==========================================
-    // 输入缓存机制
+    // 直接响应输入（无缓存）
     //
-    // 无论窗口是否打开，都记录输入到缓存：
-    // - 窗口已打开：TryConsumeBufferedInput 会在下一次 Open 事件时消费
-    //   （实际上 Open 已经触发过了，这里记录后需要手动检查）
-    // - 窗口未打开：预输入，等待窗口打开时自动消费
+    // 只有连招窗口打开时才响应输入：
+    // - 窗口已打开：立即流转到下一个连招节点
+    // - 窗口未打开：忽略输入（不缓存）
     //
-    // 如果窗口已经打开，收到输入后立即尝试消费
+    // 玩家需要在正确的窗口内按键才能触发下一段连招。
     // ==========================================
-    if (Payload.EventTag.IsValid())
+    if (bComboWindowOpen && Payload.EventTag.IsValid() && CurrentNode)
     {
-        BufferedInput = Payload.EventTag;
-
-        // 如果窗口已经打开，立即尝试消费
-        if (bComboWindowOpen)
+        if (const FName* NextNodeName = CurrentNode->NextNodes.Find(Payload.EventTag))
         {
-            TryConsumeBufferedInput();
+            FName ResolvedNextName = *NextNodeName;
+            bComboWindowOpen = false;
+            ExecuteAttack(ResolvedNextName);
         }
-    }
-}
-
-void UGA_MeleeAttackBase::TryConsumeBufferedInput()
-{
-    if (!BufferedInput.IsValid() || !CurrentNode)
-    {
-        return;
-    }
-
-    // 在当前节点的派生表中查找缓存输入对应的下一个节点名称
-    if (const FName* NextNodeName = CurrentNode->NextNodes.Find(BufferedInput))
-    {
-        FName ResolvedNextName = *NextNodeName;
-        BufferedInput = FGameplayTag(); // 清空缓存
-        bComboWindowOpen = false;       // 重置窗口状态
-        ExecuteAttack(ResolvedNextName);
     }
 }
 
@@ -396,7 +350,6 @@ void UGA_MeleeAttackBase::OnMontageFinished()
 
     // 动画自然结束，重置状态
     bComboWindowOpen = false;
-    BufferedInput = FGameplayTag();
     CurrentNodeName = NAME_None;
     CurrentNode = nullptr;
     ActiveAttackMontage = nullptr;

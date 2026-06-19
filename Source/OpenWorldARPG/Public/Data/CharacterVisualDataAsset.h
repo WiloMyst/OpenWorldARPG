@@ -45,13 +45,13 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Visuals|Animation", meta = (DisplayName = "角色动画蓝图"))
     TSoftClassPtr<UAnimInstance> AnimationBlueprint;
 
-    /** 角色基础行为动画层蓝图（待机/移动/跳跃等） */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Visuals|Animation", meta = (DisplayName = "基础行为动画层"))
-    TSoftClassPtr<UAnimInstance> BaseBehaviorAnimLayers;
-
     /** 角色瞄准动画层蓝图（瞄准时叠加） */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Visuals|Animation", meta = (DisplayName = "瞄准动画层"))
     TSoftClassPtr<UAnimInstance> AimAnimLayers;
+
+    /** 角色上半身动画层蓝图 */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Visuals|Animation", meta = (DisplayName = "上半身动画层"))
+    TSoftClassPtr<UAnimInstance> UpperBodyLayers;
 
     /** 角色物理模拟动画层蓝图（布娃娃/受击等） */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Visuals|Animation", meta = (DisplayName = "物理模拟动画层"))
@@ -72,4 +72,10 @@ public:
     /** 攀爬翻越位移偏移（角色从攀爬边缘翻上后的目标位置偏移） */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Visuals|Climbing", meta = (DisplayName = "攀爬翻越位移偏移"))
     FVector ClimbUpOffset = FVector(80.0f, 0.0f, 70.0f);
+
+    // --- 钩索 ---
+
+    /** 钩索蒙太奇 */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Visuals|Grapple", meta = (DisplayName = "钩索蒙太奇"))
+    TSoftObjectPtr<UAnimMontage> GrappleMontage;
 };

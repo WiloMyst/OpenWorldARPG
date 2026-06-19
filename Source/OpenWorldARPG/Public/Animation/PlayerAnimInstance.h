@@ -11,6 +11,13 @@ class APlayerController;
 
 /**
  * 玩家专属动画实例。追加瞄准/锁定/冲刺等玩家专属状态。
+ *
+ * 【多线程安全】
+ * - 所有 CMC 状态读取（IsSprinting/IsWalking/IsAiming/IsClimbing 等）
+ *   已移至 NativeUpdateAnimation（主线程），存入 Snapshot... 变量。
+ * - NativeThreadSafeUpdateAnimation 只读取快照进行纯数学运算。
+ * - 基类已上提的通用快照（SnapshotActorRotation/Location/ForwardVector 等）直接复用，
+ *   不再在子类重复定义。
  */
 UCLASS()
 class OPENWORLDARPG_API UPlayerAnimInstance : public UOpenWorldARPGAnimInstance
@@ -72,7 +79,7 @@ public:
     UPROPERTY(BlueprintReadOnly, Category = "AnimData|Aim")
     FRotator SpineRotation = FRotator::ZeroRotator;
 
-    // --- Player States ---
+    // --- Player States（工作线程计算输出，蓝图只读）---
 
     /** 是否在冲刺 */
     UPROPERTY(BlueprintReadOnly, Category = "AnimData|PlayerState")
@@ -118,23 +125,41 @@ private:
     TWeakObjectPtr<APlayerCharacter> CachedPlayerCharacter;
     TWeakObjectPtr<APlayerController> CachedPlayerController;
 
-    // --- 主线程快照 ---
+    // ================================================================
+    // 主线程快照（GameThread 写入，Worker Thread 只读）
+    // ================================================================
+    // 以下快照在 NativeUpdateAnimation 中从 PlayerController / CMC / SkeletalMesh 读取。
+    // 通用物理快照（ActorRotation/Location/ForwardVector/RightVector/LastInputVector 等）
+    // 已上提至基类，此处不再重复定义。
 
-    // 瞄准数据快照 (GameThread 写入，Worker Thread 只读)
+    // --- 瞄准数据快照 ---
+
+    /** 主线程快照：控制器旋转（用于 AimOffset 计算） */
     FRotator SnapshotControlRotation = FRotator::ZeroRotator;
-    FRotator SnapshotActorRotation = FRotator::ZeroRotator;
-    FVector SnapshotActorLocation = FVector::ZeroVector;
-    FVector SnapshotActorForwardVector = FVector::ForwardVector;
-    FVector SnapshotActorRightVector = FVector::RightVector;
 
-    // 用于记录主线程的脚部世界坐标
+    // --- CMC 状态快照（非线程安全，必须主线程读取）---
+
+    bool bSnapshotIsSprinting = false;
+    bool bSnapshotIsWalking = false;
+    bool bSnapshotIsAiming = false;
+    bool bSnapshotIsClimbing = false;
+    bool bSnapshotIsGliding = false;
+    bool bSnapshotIsSwimming = false;
+    bool bSnapshotIsFastSwimming = false;
+
+    /** 主线程快照：CMC 最大速度（用于行走状态速度投影） */
+    float SnapshotMaxSpeed = 0.0f;
+
+    // --- 脚部骨骼位置快照 ---
+
     FVector SnapshotLeftFootLoc = FVector::ZeroVector;
     FVector SnapshotRightFootLoc = FVector::ZeroVector;
-    
-    // 暴露脚部骨骼名称，方便根据项目实际情况修改
-    UPROPERTY(EditDefaultsOnly, Category = "Movement|Stop")
-    FName LeftFootBoneName = TEXT("foot_l");
+
+    // --- 蓝图可配置骨骼名 ---
 
     UPROPERTY(EditDefaultsOnly, Category = "Movement|Stop")
-    FName RightFootBoneName = TEXT("foot_r");
+    FName LeftFootBoneName = TEXT("Left-toe");
+
+    UPROPERTY(EditDefaultsOnly, Category = "Movement|Stop")
+    FName RightFootBoneName = TEXT("Right-toe");
 };

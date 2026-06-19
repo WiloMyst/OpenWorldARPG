@@ -124,9 +124,24 @@ float UGameAssetManagerSubsystem::GetTotalLoadingProgress() const
     }
     case ELoadingPhase::LoadingTeamAssets:
     {
-        float AssetProgressSum = 0.0f;
+        // 两阶段加载：阶段 2a（数据资产）+ 阶段 2b（内部资源）
+        float AssetPhaseProgress = 0.0f;
+
+        // 阶段 2a：数据资产加载进度
+        if (DataAssetLoadHandle.IsValid())
+        {
+            AssetPhaseProgress += DataAssetLoadHandle->GetProgress() * DataAssetPhaseWeight;
+        }
+        else
+        {
+            // 2a 已完成，计入满进度
+            AssetPhaseProgress += DataAssetPhaseWeight;
+        }
+
+        // 阶段 2b：内部资源加载进度
         if (!TeamAssetLoadHandles.IsEmpty())
         {
+            float AssetProgressSum = 0.0f;
             for (const auto& Handle : TeamAssetLoadHandles)
             {
                 if (Handle.IsValid())
@@ -134,9 +149,10 @@ float UGameAssetManagerSubsystem::GetTotalLoadingProgress() const
                     AssetProgressSum += Handle->GetProgress();
                 }
             }
-            float AssetPhaseProgress = AssetProgressSum / TeamAssetLoadHandles.Num();
-            Progress = LevelLoadWeight + (AssetPhaseProgress * TeamAssetLoadWeight);
+            AssetPhaseProgress += (AssetProgressSum / TeamAssetLoadHandles.Num()) * InnerAssetPhaseWeight;
         }
+
+        Progress = LevelLoadWeight + (AssetPhaseProgress * TeamAssetLoadWeight);
         break;
     }
     case ELoadingPhase::Complete:
@@ -212,7 +228,19 @@ void UGameAssetManagerSubsystem::StartTeamAssetLoading(const TArray<FGameplayTag
 
     CurrentTeamToLoad = TeamCharacterTags;
 
-    TArray<FSoftObjectPath> AssetPathsToLoad;
+    // ==========================================
+    // 两阶段加载：阶段 2a — 异步加载 VisualDataAsset / CombatDataAsset 本身
+    // ==========================================
+    // FCharacterRegistryRow 中的 VisualData / CombatData 是 TSoftObjectPtr，
+    // 直接调用 Get() 会触发同步加载（阻塞主线程）。
+    // 必须先将它们异步加载完成，才能在阶段 2b 中安全访问内部字段（AbilityMontages 等）。
+    StartDataAssetLoading();
+}
+
+void UGameAssetManagerSubsystem::StartDataAssetLoading()
+{
+    TArray<FSoftObjectPath> DataAssetPaths;
+
     UDataTable* LoadedTable = GetCharacterInfoTable();
     UCharacterManagerSubsystem* CharManager = GetGameInstance()->GetSubsystem<UCharacterManagerSubsystem>();
     if (LoadedTable && CharManager)
@@ -222,7 +250,74 @@ void UGameAssetManagerSubsystem::StartTeamAssetLoading(const TArray<FGameplayTag
             FName RowName = CharManager->GetRowNameByTag(CharTag);
             if (RowName == NAME_None) continue;
 
-            FCharacterRegistryRow* Row = LoadedTable->FindRow<FCharacterRegistryRow>(RowName, TEXT(""));
+            const FCharacterRegistryRow* Row = LoadedTable->FindRow<FCharacterRegistryRow>(RowName, TEXT(""));
+            if (Row)
+            {
+                // 阶段 2a：收集 VisualDataAsset 和 CombatDataAsset 的路径
+                // 这些是 DataAsset 本身，加载后才能安全访问其内部的 TSoftObjectPtr 字段
+                DataAssetPaths.Add(Row->VisualData.ToSoftObjectPath());
+                DataAssetPaths.Add(Row->CombatData.ToSoftObjectPath());
+            }
+        }
+    }
+
+    if (DataAssetPaths.Num() == 0)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Phase 2a: No data assets to load, skipping to completion."));
+        OnAllTeamAssetsLoaded();
+        return;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("Phase 2a: Loading %d data assets (VisualDataAsset/CombatDataAsset)..."), DataAssetPaths.Num());
+
+    // 批量异步加载所有数据资产，加载完成后进入阶段 2b
+    DataAssetLoadHandle = StreamableManager->RequestAsyncLoad(
+        DataAssetPaths,
+        FStreamableDelegate::CreateUObject(this, &UGameAssetManagerSubsystem::OnDataAssetsLoaded)
+    );
+
+    if (!DataAssetLoadHandle.IsValid())
+    {
+        UE_LOG(LogTemp, Error, TEXT("Phase 2a: Failed to start data asset loading!"));
+        OnAllTeamAssetsLoaded();
+    }
+}
+
+void UGameAssetManagerSubsystem::OnDataAssetsLoaded()
+{
+    UE_LOG(LogTemp, Log, TEXT("Phase 2a Complete: Data assets loaded. Starting phase 2b (inner assets)..."));
+
+    // 数据资产已加载完成，释放 2a 句柄（资产已被 2b 的引用链持有）
+    // 注意：不能立即释放，因为 2b 还需要访问这些资产的字段
+    // 将 2a 句柄保留到 TeamAssetLoadHandles 中，随 2b 一起分帧释放
+    if (DataAssetLoadHandle.IsValid())
+    {
+        TeamAssetLoadHandles.Add(DataAssetLoadHandle);
+        DataAssetLoadHandle.Reset();
+    }
+
+    StartInnerAssetLoading();
+}
+
+void UGameAssetManagerSubsystem::StartInnerAssetLoading()
+{
+    // ==========================================
+    // 两阶段加载：阶段 2b — 异步加载所有具体资源
+    // ==========================================
+    // 此时 VisualDataAsset / CombatDataAsset 已在内存中，
+    // 可以安全遍历其内部字段收集所有 TSoftObjectPtr 路径。
+    TArray<FSoftObjectPath> AssetPathsToLoad;
+
+    UDataTable* LoadedTable = GetCharacterInfoTable();
+    UCharacterManagerSubsystem* CharManager = GetGameInstance()->GetSubsystem<UCharacterManagerSubsystem>();
+    if (LoadedTable && CharManager)
+    {
+        for (const FGameplayTag& CharTag : CurrentTeamToLoad)
+        {
+            FName RowName = CharManager->GetRowNameByTag(CharTag);
+            if (RowName == NAME_None) continue;
+
+            const FCharacterRegistryRow* Row = LoadedTable->FindRow<FCharacterRegistryRow>(RowName, TEXT(""));
             if (Row)
             {
                 // ==========================================
@@ -235,15 +330,33 @@ void UGameAssetManagerSubsystem::StartTeamAssetLoading(const TArray<FGameplayTag
                 // ==========================================
                 // 外观资产：从 UCharacterVisualDataAsset 加载
                 // 三层解耦：VisualData 通过 TSoftObjectPtr 桥梁引用
+                // 包含技能蒙太奇字典（AbilityMontages）的预加载
                 // ==========================================
                 if (UCharacterVisualDataAsset* VisualData = Row->VisualData.Get())
                 {
+                    // 骨骼网格体
                     AssetPathsToLoad.Add(VisualData->CharacterMesh.ToSoftObjectPath());
+
+                    // 动画蓝图（TSoftClassPtr 的路径也是 FSoftObjectPath）
+                    AssetPathsToLoad.Add(VisualData->AnimationBlueprint.ToSoftObjectPath());
+
+                    // 动画层
+                    AssetPathsToLoad.Add(VisualData->AimAnimLayers.ToSoftObjectPath());
+                    AssetPathsToLoad.Add(VisualData->UpperBodyLayers.ToSoftObjectPath());
+                    AssetPathsToLoad.Add(VisualData->PhysicsAnimLayers.ToSoftObjectPath());
+
+                    // 武器蓝图
+                    AssetPathsToLoad.Add(VisualData->WeaponBlueprint.ToSoftObjectPath());
+
+                    // 非战斗蒙太奇（攀爬、钩索等，直接在 VisualDataAsset 中配置）
+                    AssetPathsToLoad.Add(VisualData->ClimbUpMontage.ToSoftObjectPath());
+                    AssetPathsToLoad.Add(VisualData->GrappleMontage.ToSoftObjectPath());
                 }
 
                 // ==========================================
                 // 战斗资产：从 UCharacterCombatDataAsset 加载
                 // 三层解耦：CombatData 通过 TSoftObjectPtr 桥梁引用
+                // 连招蒙太奇直接在 ComboGraph 节点中配置
                 // ==========================================
                 if (UCharacterCombatDataAsset* CombatData = Row->CombatData.Get())
                 {
@@ -251,7 +364,8 @@ void UGameAssetManagerSubsystem::StartTeamAssetLoading(const TArray<FGameplayTag
                     {
                         const FTalentConfig& Talent = TalentPair.Value;
                         AssetPathsToLoad.Add(Talent.Icon.ToSoftObjectPath());
-                        // 连招图中的蒙太奇需要预加载
+
+                        // 预加载连招图中的蒙太奇
                         for (const auto& NodePair : Talent.ComboGraph)
                         {
                             AssetPathsToLoad.Add(NodePair.Value.Montage.ToSoftObjectPath());
@@ -265,9 +379,12 @@ void UGameAssetManagerSubsystem::StartTeamAssetLoading(const TArray<FGameplayTag
     TeamAssetLoadNum = AssetPathsToLoad.Num();
     if (TeamAssetLoadNum == 0)
     {
+        UE_LOG(LogTemp, Warning, TEXT("Phase 2b: No inner assets to load."));
         OnAllTeamAssetsLoaded();
         return;
     }
+
+    UE_LOG(LogTemp, Log, TEXT("Phase 2b: Loading %d inner assets (Mesh/Montage/Icon/AnimBP)..."), TeamAssetLoadNum);
 
     for (const FSoftObjectPath& Path : AssetPathsToLoad)
     {
@@ -283,6 +400,12 @@ void UGameAssetManagerSubsystem::StartTeamAssetLoading(const TArray<FGameplayTag
         {
             FailedAssetLoads++;
         }
+    }
+
+    // 如果有无效路径，检查是否已经满足完成条件
+    if (CompletedAssetLoads + FailedAssetLoads >= TeamAssetLoadNum)
+    {
+        OnAllTeamAssetsLoaded();
     }
 }
 

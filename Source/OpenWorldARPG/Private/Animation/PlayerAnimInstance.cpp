@@ -14,8 +14,7 @@ void UPlayerAnimInstance::NativeInitializeAnimation()
 {
     Super::NativeInitializeAnimation();
 
-        // 额外缓存玩家专属指针
-    
+    // 额外缓存玩家专属指针
     if (APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(TryGetPawnOwner()))
     {
         CachedPlayerCharacter = PlayerChar;
@@ -32,22 +31,35 @@ void UPlayerAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 {
     Super::NativeUpdateAnimation(DeltaSeconds);
 
+    // ================================================================
     // GameThread 快照：所有非线程安全的读取必须在此完成
-    const ACharacter* Character = CachedCharacter.Get();
-    if (Character)
-    {
-        SnapshotActorRotation = Character->GetActorRotation();
-        SnapshotActorLocation = Character->GetActorLocation();
-        SnapshotActorForwardVector = Character->GetActorForwardVector();
-        SnapshotActorRightVector = Character->GetActorRightVector();
-    }
+    // ================================================================
+    // 基类 NativeUpdateAnimation 已快照通用物理数据
+    // （Velocity/ActorRotation/ActorLocation/ForwardVector/RightVector/LastInputVector/IsGrounded/IsFalling）。
+    // 此处只补充玩家专属数据：Controller 旋转、CMC 运动状态、脚部骨骼位置。
 
+    // --- 瞄准数据快照 ---
     const APlayerController* PC = CachedPlayerController.Get();
     if (PC)
     {
         SnapshotControlRotation = PC->GetControlRotation();
     }
 
+    // --- CMC 状态快照（IsSprinting 等非线程安全，必须主线程读取）---
+    const UOpenWorldARPGCharacterMovementComponent* MoveComp = CachedMovementComp.Get();
+    if (MoveComp)
+    {
+        bSnapshotIsSprinting = MoveComp->IsSprinting();
+        bSnapshotIsWalking = MoveComp->IsWalking();
+        bSnapshotIsAiming = MoveComp->IsAiming();
+        bSnapshotIsClimbing = MoveComp->IsClimbing();
+        bSnapshotIsGliding = MoveComp->IsGliding();
+        bSnapshotIsSwimming = MoveComp->IsSwimming();
+        bSnapshotIsFastSwimming = MoveComp->IsFastSwimming();
+        SnapshotMaxSpeed = MoveComp->GetMaxSpeed();
+    }
+
+    // --- 脚部骨骼位置快照 ---
     if (USkeletalMeshComponent* MeshComp = GetSkelMeshComponent())
     {
         SnapshotLeftFootLoc = MeshComp->GetSocketLocation(LeftFootBoneName);
@@ -57,20 +69,22 @@ void UPlayerAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 
 void UPlayerAnimInstance::NativeThreadSafeUpdateAnimation(float DeltaSeconds)
 {
-    // 基类先更新通用数据
+    // 基类先更新通用数据（GroundSpeed/VelocityZ/bIsGrounded/bIsFalling 等）
     Super::NativeThreadSafeUpdateAnimation(DeltaSeconds);
 
-    const ACharacter* Character = CachedCharacter.Get();
-    const UOpenWorldARPGCharacterMovementComponent* MoveComp = CachedMovementComp.Get();
+    // bIsMoving：玩家需要速度超过阈值且有输入加速度
+    bIsMoving = (GroundSpeed > MoveSpeedThreshold) && !SnapshotLastInputVector.IsNearlyZero(0.01f);
 
-    if (!Character || !MoveComp)
-    {
-        return;
-    }
+    // ================================================================
+    // Worker Thread 纯数据计算
+    // ================================================================
+    // 严禁出现任何 Character->Get...() 或 MoveComp->...() 调用。
+    // 所有数据来源均为 NativeUpdateAnimation 中写入的 Snapshot... 变量
+    // 或基类已快照的通用物理数据。
 
-    // 1. 瞄准数据 (AimPitch / AimYaw)
-    // 使用 GameThread 快照，避免在工作线程访问非线程安全的 Controller/Actor 状态
-    
+    // --- 1. 瞄准数据 (AimPitch / AimYaw) ---
+    // 使用基类快照 SnapshotActorRotation 和本类快照 SnapshotControlRotation
+
     const FRotator ControlRotation = SnapshotControlRotation;
     const FRotator ActorRotation = SnapshotActorRotation;
 
@@ -96,25 +110,23 @@ void UPlayerAnimInstance::NativeThreadSafeUpdateAnimation(float DeltaSeconds)
         SpineRotation = FRotator::ZeroRotator;
     }
 
-    // 2. 玩家专属移动状态 (从 CMC 读取)
-    
-    bIsSprinting = MoveComp->IsSprinting();
-    bIsWalking = MoveComp->IsWalking();
-    bIsAiming = MoveComp->IsAiming();
-    bIsClimbing = MoveComp->IsClimbing();
-    bIsGliding = MoveComp->IsGliding();
-    bIsSwimming = MoveComp->IsSwimming();
-    bIsFastSwimming = MoveComp->IsFastSwimming();
+    // --- 2. 玩家专属移动状态（从主线程快照读取）---
 
-    // 3. 输入数据
-    // 从 CMC 的 GetLastInputVector 推算本地空间输入方向
-    // 使用 GameThread 快照的 ActorRotation，避免工作线程访问非线程安全数据
-    
-    const FVector LastInput = MoveComp->GetLastInputVector();
-    AccelerationVector = LastInput.GetSafeNormal(0.0001f);
-    if (!LastInput.IsNearlyZero(0.01f))
+    bIsSprinting = bSnapshotIsSprinting;
+    bIsWalking = bSnapshotIsWalking;
+    bIsAiming = bSnapshotIsAiming;
+    bIsClimbing = bSnapshotIsClimbing;
+    bIsGliding = bSnapshotIsGliding;
+    bIsSwimming = bSnapshotIsSwimming;
+    bIsFastSwimming = bSnapshotIsFastSwimming;
+
+    // --- 3. 输入数据 ---
+    // 使用基类快照 SnapshotLastInputVector 和 SnapshotActorRotation
+
+    AccelerationVector = SnapshotLastInputVector.GetSafeNormal(0.0001f);
+    if (!SnapshotLastInputVector.IsNearlyZero(0.01f))
     {
-        const FVector LocalInput = SnapshotActorRotation.UnrotateVector(LastInput);
+        const FVector LocalInput = SnapshotActorRotation.UnrotateVector(SnapshotLastInputVector);
         InputX = LocalInput.X;
         InputY = LocalInput.Y;
     }
@@ -124,8 +136,8 @@ void UPlayerAnimInstance::NativeThreadSafeUpdateAnimation(float DeltaSeconds)
         InputY = 0.0f;
     }
 
-    // 4. Update Velocity (插值计算 Speed X 和 Speed Y)
-    // 必须在急停判定前计算，因为插值依赖 DeltaSeconds
+    // --- 4. Update Velocity (插值计算 Speed X 和 Speed Y) ---
+
     if (bIsClimbing)
     {
         // 攀爬状态：取出归一化的输入方向，转换到本地空间
@@ -141,7 +153,6 @@ void UPlayerAnimInstance::NativeThreadSafeUpdateAnimation(float DeltaSeconds)
     else if (bIsSwimming)
     {
         // 游泳状态：使用本地空间输入方向驱动混合空间
-        // X 轴 = 左右横移，Y 轴 = 前后纵向
         const FVector LocalAcceleration = SnapshotActorRotation.UnrotateVector(AccelerationVector);
 
         float TargetX = LocalAcceleration.Y * 100.0f; // 左右
@@ -153,18 +164,18 @@ void UPlayerAnimInstance::NativeThreadSafeUpdateAnimation(float DeltaSeconds)
     else
     {
         // 行走状态：基于实际加速度和最大速度的方向投影
-        FVector TargetVelocity = AccelerationVector * MoveComp->GetMaxSpeed();
-        
+        FVector TargetVelocity = AccelerationVector * SnapshotMaxSpeed;
+
         DirectionCurrent = FMath::VInterpTo(DirectionCurrent, TargetVelocity, DeltaSeconds, 5.0f);
 
-        // 使用快照的方向向量，避免工作线程访问非线程安全数据
+        // 使用基类快照的方向向量
         SpeedX = FVector::DotProduct(DirectionCurrent, SnapshotActorRightVector);
         SpeedY = FVector::DotProduct(DirectionCurrent, SnapshotActorForwardVector);
     }
 
-    // Update Step Stop State
-    // 给 GroundSpeed 加一个极小的阈值（如 5.0f），防止物理浮点数漂移导致状态反复横跳
-    const bool bHasSpeed = (GroundSpeed > 5.0f); 
+    // --- 5. Update Step Stop State ---
+
+    const bool bHasSpeed = (GroundSpeed > 5.0f);
     const bool bNoInput = AccelerationVector.IsNearlyZero();
 
     // 1. 记录上一帧的状态（核心逻辑：边缘检测）
@@ -180,19 +191,16 @@ void UPlayerAnimInstance::NativeThreadSafeUpdateAnimation(float DeltaSeconds)
         SpeedOnStop = GroundSpeed;
 
         // 计算停步时是左脚还是右脚在前
-        if (Character)
-        {
-            const FVector RootLoc = SnapshotActorLocation;
-            const FVector ForwardDir = SnapshotActorForwardVector;
+        // 使用基类快照 SnapshotActorLocation / SnapshotActorForwardVector
+        const FVector RootLoc = SnapshotActorLocation;
+        const FVector ForwardDir = SnapshotActorForwardVector;
 
-            // 将脚部位置向量与角色面朝前向向量做点乘 (Dot Product)
-            // 结果越大，说明这只脚在角色面朝方向上越靠前
-            const float LeftForwardDist = FVector::DotProduct(SnapshotLeftFootLoc - RootLoc, ForwardDir);
-            const float RightForwardDist = FVector::DotProduct(SnapshotRightFootLoc - RootLoc, ForwardDir);
+        // 将脚部位置向量与角色面朝前向向量做点乘 (Dot Product)
+        const float LeftForwardDist = FVector::DotProduct(SnapshotLeftFootLoc - RootLoc, ForwardDir);
+        const float RightForwardDist = FVector::DotProduct(SnapshotRightFootLoc - RootLoc, ForwardDir);
 
-            // 如果左脚的投影距离大于右脚，说明左脚在前
-            bStopOnLeftFoot = (LeftForwardDist > RightForwardDist);
-        }
+        // 如果左脚的投影距离大于右脚，说明左脚在前
+        bStopOnLeftFoot = (LeftForwardDist > RightForwardDist);
     }
     else if (!bInStepStopping)
     {

@@ -49,9 +49,24 @@ void UGA_PlungeAttackBase::ExecuteAttack()
     }
 
     // 2. 滞空时清理速度 (可选：或者赋予一个向下的冲刺力)
-    if (UCharacterMovementComponent* MoveComp = CachedPlayer->GetCharacterMovement())
+    UCharacterMovementComponent* MoveComp = CachedPlayer->GetCharacterMovement();
+    if (MoveComp)
     {
         MoveComp->Velocity = FVector::ZeroVector;
+
+        // --- 超低空下落防卡死保护 ---
+        // 边界情况：玩家在离地极低的位置触发下落攻击（如台阶边缘），
+        // 此时角色可能已经处于 MOVE_Walking 状态。
+        // 如果仍走正常流程（播放 FallMontage + 启动 WaitMovementModeChange Task），
+        // 由于已经落地，WaitMovementModeChange 永远不会触发 → 技能死锁。
+        //
+        // 解决方案：检测到已在地面时，跳过空中阶段，直接手动调用
+        // OnMovementModeChanged(MOVE_Walking) 无缝衔接进入砸地阶段（Plunge_Land）。
+        if (MoveComp->IsMovingOnGround() || MoveComp->MovementMode == MOVE_Walking)
+        {
+            OnMovementModeChanged(MOVE_Walking);
+            return;
+        }
     }
 
     // 3. 从 CombatData 获取下落攻击天赋配置（通过 GA 蓝图中配置的 TalentTag 查询连招图）
@@ -62,14 +77,15 @@ void UGA_PlungeAttackBase::ExecuteAttack()
         return;
     }
 
-    // 从 ComboGraph 中查找入口节点的蒙太奇（空中下落循环动画）
+    // 从 ComboGraph 中查找入口节点（空中下落循环动画）
     const FComboActionNode* EntryNode = PlungeTalent->ComboGraph.Find(PlungeTalent->EntryNodeName);
-    if (!EntryNode || !EntryNode->Montage.IsValid())
+    if (!EntryNode || EntryNode->Montage.IsNull())
     {
         EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);
         return;
     }
 
+    // 直接从连招节点的软引用加载蒙太奇
     UAnimMontage* FallMontage = EntryNode->Montage.LoadSynchronous();
     if (!FallMontage)
     {
@@ -153,7 +169,8 @@ void UGA_PlungeAttackBase::OnMovementModeChanged(EMovementMode NewMovementMode)
             {
                 if (const FComboActionNode* LandNode = PlungeTalent->ComboGraph.Find(*LandingNodeName))
                 {
-                    if (LandNode->Montage.IsValid())
+                    // 直接从连招节点的软引用加载蒙太奇
+                    if (!LandNode->Montage.IsNull())
                     {
                         LandingMontage = LandNode->Montage.LoadSynchronous();
                     }

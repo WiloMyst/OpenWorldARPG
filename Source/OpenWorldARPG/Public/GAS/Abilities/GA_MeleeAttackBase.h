@@ -48,12 +48,6 @@ protected:
     /** 修正角色朝向（归零 Pitch/Roll） */
     void CorrectPawnOrient();
 
-    /**
-     * 尝试消费输入缓存并流转到下一个节点。
-     * 在 ComboWindowOpen 时调用，实现"窗口打开即消费"的快速响应。
-     */
-    void TryConsumeBufferedInput();
-
     // --- 回调 ---
 
     UFUNCTION()
@@ -118,7 +112,7 @@ protected:
     /**
      * 攻击输入事件 Tag（如 Input.Attack.Normal）。
      * 玩家按下攻击键时，PlayerCharacter 发送此事件。
-     * GA 收到后缓存输入，等待 ComboWindowOpen 时消费。
+     * GA 收到后，如果连招窗口已打开，立即流转到下一个连招节点。
      */
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
     FGameplayTag AttackInputTag;
@@ -161,23 +155,6 @@ private:
 
     /** 连招窗口是否打开 */
     bool bComboWindowOpen = false;
-
-    /**
-     * 输入缓存。
-     *
-     * 工作机制：
-     * - 玩家任何时候按下攻击键，输入 Tag 被记录到 BufferedInput
-     * - 当 ComboWindowOpen 事件触发时，立即检查缓存：
-     *   - 如果缓存命中当前节点的 NextNodes 派生表，立刻流转到下一个节点
-     *   - 如果没有缓存，窗口保持打开，等待后续输入
-     * - ComboWindowClose 事件触发时，清空缓存（过期输入作废）
-     *
-     * "窗口打开时消费缓存"的设计优势：
-     * - 响应速度最快：玩家输入在窗口打开的瞬间就被消费
-     * - 预输入支持：玩家可以在窗口打开前提前按键，窗口一开就流转
-     * - 配合 AnimNotifyState 的防打断保护，窗口状态不会锁死
-     */
-    FGameplayTag BufferedInput;
 
     UPROPERTY()
     TArray<AActor*> HitActors;

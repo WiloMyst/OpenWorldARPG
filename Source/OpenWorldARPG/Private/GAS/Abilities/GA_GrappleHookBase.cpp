@@ -8,7 +8,9 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/TargetingComponent.h"
+#include "Components/WeaponManagerComponent.h"
 #include "Characters/PlayerCharacter.h"
+#include "Data/CharacterVisualDataAsset.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraComponent.h"
@@ -36,6 +38,12 @@ void UGA_GrappleHookBase::ActivateAbility(const FGameplayAbilitySpecHandle Handl
         return;
     }
 
+    // 0. 武器立即回到背上（钩索不需要武器在手）
+    if (UWeaponManagerComponent* WeaponComp = CachedCharacter->FindComponentByClass<UWeaponManagerComponent>())
+    {
+        WeaponComp->WeaponToBack();
+    }
+
     // 1. 对应蓝图图1：获取最优钩索锚点
     UTargetingComponent* GrappleComp = nullptr;
     if (APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(CachedCharacter))
@@ -58,7 +66,18 @@ void UGA_GrappleHookBase::ActivateAbility(const FGameplayAbilitySpecHandle Handl
     // 3. 对应蓝图图5：修正朝向
     OrientToTarget();
 
-    // 4. 对应蓝图图2：播放蒙太奇
+    // 4. 对应蓝图图2：播放蒙太奇（从 VisualDataAsset->GrappleMontage 加载）
+    UAnimMontage* GrappleMontage = nullptr;
+    if (APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(CachedCharacter))
+    {
+        if (UCharacterVisualDataAsset* VisualData = PlayerChar->GetVisualDataAsset_Implementation())
+        {
+            if (!VisualData->GrappleMontage.IsNull())
+            {
+                GrappleMontage = VisualData->GrappleMontage.LoadSynchronous();
+            }
+        }
+    }
     if (GrappleMontage)
     {
         MontageTask = UAbilityTask_PlayMontageAndWait::CreatePlayMontageAndWaitProxy(
@@ -170,7 +189,7 @@ void UGA_GrappleHookBase::OnGrappleMoveFinished()
     }
 
     UAbilitySystemComponent* ASC = GetAbilitySystemComponentFromActorInfo();
-    if (ASC && GrappleMontage)
+    if (ASC)
     {
         ASC->CurrentMontageStop();
     }

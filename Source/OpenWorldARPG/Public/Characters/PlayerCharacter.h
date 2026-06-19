@@ -144,7 +144,7 @@ public:
 	// --- 动画与物理 ---
 
 	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|Animation")
-	void SetupBaseBehaviorAnimLayers();
+	void SetupUpperBodyLayers();
 
 	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|Animation")
 	void SetupAimAnimLayers();
@@ -418,4 +418,12 @@ protected:
 	/** 游泳 Tag 变化回调 */
 	UFUNCTION()
 	void OnSwimmingTagChanged(const FGameplayTag Tag, int32 NewCount);
+
+	/** CMC 请求播放翻越蒙太奇的回调（从 VisualDataAsset 获取 ClimbUpMontage） */
+	UFUNCTION()
+	void OnClimbUpMontageRequested(UAnimMontage* MontageToPlay);
+
+	/** ClimbUp 蒙太奇结束回调：调用 CMC::FinishClimbUp 恢复移动模式 */
+	UFUNCTION()
+	void OnClimbUpMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 };

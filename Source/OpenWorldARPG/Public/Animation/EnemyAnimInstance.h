@@ -40,6 +40,16 @@ public:
     UPROPERTY(BlueprintReadOnly, Category = "AnimData|TurnInPlace")
     float TurnInPlaceDirection = 0.0f;
 
+    // --- Locomotion (Speed X / Speed Y) ---
+
+    /** 混合空间 X 轴分量 (左右) */
+    UPROPERTY(BlueprintReadOnly, Category = "AnimData|Locomotion")
+    double SpeedX = 0.0f;
+
+    /** 混合空间 Y 轴分量 (前后) */
+    UPROPERTY(BlueprintReadOnly, Category = "AnimData|Locomotion")
+    double SpeedY = 0.0f;
+
 private:
     TWeakObjectPtr<AEnemyCharacter> CachedEnemyCharacter;
     TWeakObjectPtr<AAIController> CachedAIController;
@@ -50,6 +60,9 @@ private:
     bool bSnapshotIsAggroed = false;
     FVector SnapshotTargetLocation = FVector::ZeroVector;
     bool bSnapshotHasTarget = false;
+
+    /** 用于行走状态方向插值的当前向量 */
+    FVector DirectionCurrent = FVector::ZeroVector;
 
     FName TargetActorKeyName = FName("TargetActor");
     static constexpr float TurnThresholdDegrees = 5.0f;

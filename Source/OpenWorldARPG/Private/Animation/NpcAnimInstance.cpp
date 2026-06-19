@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Animation/NpcAnimInstance.h"
 #include "Characters/AI/NpcCharacter.h"
@@ -21,23 +21,21 @@ void UNPCAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 {
     Super::NativeUpdateAnimation(DeltaSeconds);
 
-        // GameThread 快照：玩家位置（用于 IK 盯防）
-    // UGameplayStatics::GetPlayerCharacter 不是线程安全的
-    
+    // ================================================================
+    // GameThread 快照：玩家位置（用于 IK 盯防）
+    // ================================================================
+    // UGameplayStatics::GetPlayerCharacter 不是线程安全的。
+    // 基类 NativeUpdateAnimation 已快照通用物理数据（ActorLocation 等），
+    // 此处直接复用基类快照计算距离。
+
     SnapshotLookAtTargetLocation = FVector::ZeroVector;
     bSnapshotHasLookAtTarget = false;
     SnapshotEmotionState = 0;
 
-    const ACharacter* Character = CachedCharacter.Get();
-    if (!Character)
+    // 使用基类快照 SnapshotActorLocation 计算距离
+    if (const ACharacter* PlayerChar = UGameplayStatics::GetPlayerCharacter(GetWorld(), 0))
     {
-        return;
-    }
-
-    // 查找玩家角色作为 LookAt 目标
-    if (const ACharacter* PlayerChar = UGameplayStatics::GetPlayerCharacter(Character, 0))
-    {
-        const float Distance = FVector::Dist(Character->GetActorLocation(), PlayerChar->GetActorLocation());
+        const float Distance = FVector::Dist(SnapshotActorLocation, PlayerChar->GetActorLocation());
 
         // 仅在玩家距离较近时启用 LookAt（避免远距离无意义的 IK 计算）
         if (Distance < 800.0f)
@@ -57,8 +55,14 @@ void UNPCAnimInstance::NativeThreadSafeUpdateAnimation(float DeltaSeconds)
     // 基类先更新通用数据
     Super::NativeThreadSafeUpdateAnimation(DeltaSeconds);
 
-        // 1. LookAt 目标位置（主线程快照）
-    
+    // ================================================================
+    // Worker Thread 纯数据计算
+    // ================================================================
+    // 严禁出现任何 Character->Get...() 调用。
+    // 使用基类快照 SnapshotActorLocation / SnapshotActorForwardVector。
+
+    // --- 1. LookAt 目标位置（主线程快照）---
+
     if (bSnapshotHasLookAtTarget)
     {
         LookAtTargetLocation = SnapshotLookAtTargetLocation;
@@ -66,14 +70,11 @@ void UNPCAnimInstance::NativeThreadSafeUpdateAnimation(float DeltaSeconds)
     else
     {
         // 无目标时，LookAt 位置设为角色正前方（自然朝向）
-        const ACharacter* Character = CachedCharacter.Get();
-        if (Character)
-        {
-            LookAtTargetLocation = Character->GetActorLocation() + Character->GetActorForwardVector() * 100.0f;
-        }
+        // 使用基类快照，避免工作线程访问非线程安全数据
+        LookAtTargetLocation = SnapshotActorLocation + SnapshotActorForwardVector * 100.0f;
     }
 
-        // 2. 情绪状态（主线程快照）
-    
+    // --- 2. 情绪状态（主线程快照）---
+
     CurrentEmotionState = SnapshotEmotionState;
 }

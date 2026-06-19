@@ -25,13 +25,17 @@ class UAnimMontage;
  * - 每个节点携带自己的伤害 GE，不同段攻击可以有不同的伤害倍率/效果
  * - 每个节点配置自己的 MotionWarpDistance，不同段攻击的滑步距离可以不同
  * - GA 不再硬编码任何伤害逻辑，完全由数据驱动
+ *
+ * 蒙太奇配置：
+ * - 战斗连招蒙太奇直接在节点中用 TSoftObjectPtr 配置（策划在连招图中设置）
+ * - 非战斗蒙太奇（攀爬、钩索等）在 VisualDataAsset 中配置
  */
 USTRUCT(BlueprintType)
 struct FComboActionNode
 {
     GENERATED_BODY()
 
-    /** 当前节点要播放的攻击蒙太奇 */
+    /** 本节点播放的蒙太奇（软引用，运行时异步加载） */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
     TSoftObjectPtr<UAnimMontage> Montage;
 

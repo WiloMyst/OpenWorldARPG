@@ -44,7 +44,7 @@ void UWeaponManagerComponent::InitializeCharacterWeapon()
     if (!WeaponClass)
     {
         UE_LOG(LogTemp, Error, TEXT("[WeaponComp] InitializeCharacterWeapon: WeaponClass is NULL (VisualDataAsset is %s)"),
-            CachedCharacter->GetVisualDataAsset() ? TEXT("Valid") : TEXT("NULL"));
+            CachedCharacter->GetVisualDataAsset_Implementation() ? TEXT("Valid") : TEXT("NULL"));
         return;
     }
     UE_LOG(LogTemp, Warning, TEXT("[WeaponComp] InitializeCharacterWeapon: WeaponClass=%s"), *WeaponClass->GetName());

@@ -43,9 +43,6 @@ protected:
 protected:
     // --- 配置 ---
 
-    UPROPERTY(EditDefaultsOnly, Category = "Config|Animation")
-    TObjectPtr<UAnimMontage> GrappleMontage;
-
     UPROPERTY(EditDefaultsOnly, Category = "Config|Movement")
     float HookDelay = 0.2f;
 

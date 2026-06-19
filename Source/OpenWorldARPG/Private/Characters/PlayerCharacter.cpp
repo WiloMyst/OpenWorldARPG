@@ -86,6 +86,8 @@ void APlayerCharacter::InitializeCharacter(const FCharacterSaveData& InSaveData,
 	if (UOpenWorldARPGCharacterMovementComponent* CustomMC = GetCustomMovementComp())
 	{
 		CustomMC->CacheOwnerReferences();
+		// 绑定 CMC 翻越蒙太奇请求委托：CMC 只管物理位移，动画播放由 Character 从 VisualDataAsset 获取
+		CustomMC->OnClimbUpMontageRequested.AddDynamic(this, &APlayerCharacter::OnClimbUpMontageRequested);
 	}
 
 	RuntimeData = InSaveData;
@@ -342,9 +344,9 @@ void APlayerCharacter::OnMeshLoaded(const UCharacterVisualDataAsset* VisualData)
 		}
 	}
 
-	SetupBaseBehaviorAnimLayers();
 	SetupAimAnimLayers();
 	SetupPhysicsAnimLayers();
+	SetupUpperBodyLayers();
 }
 
 UAbilitySystemComponent* APlayerCharacter::GetAbilitySystemComponent() const
@@ -549,9 +551,9 @@ void APlayerCharacter::HandleMovementInputCompleted()
 
 void APlayerCharacter::HandleInteractInput()
 {
-	if (UInteractionComponent* Backpack = FindComponentByClass<UInteractionComponent>())
+	if (InteractionComponent)
 	{
-		Backpack->PickUpItem();
+		InteractionComponent->PickUpItem();
 	}
 }
 
@@ -673,20 +675,6 @@ void APlayerCharacter::NotifySwapOutCompleted(const FTransform& SwapTransform)
 	OnSwapOutCompleted.Broadcast(this, SwapTransform);
 }
 
-void APlayerCharacter::SetupBaseBehaviorAnimLayers()
-{
-	if (!VisualDataAsset || !GetMesh()) return;
-
-	UClass* AnimLayerClass = VisualDataAsset->BaseBehaviorAnimLayers.IsValid()
-		? VisualDataAsset->BaseBehaviorAnimLayers.Get()
-		: VisualDataAsset->BaseBehaviorAnimLayers.LoadSynchronous();
-
-	if (AnimLayerClass && GetMesh()->GetAnimInstance())
-	{
-		GetMesh()->GetAnimInstance()->LinkAnimClassLayers(AnimLayerClass);
-	}
-}
-
 void APlayerCharacter::SetupAimAnimLayers()
 {
 	if (!VisualDataAsset || !GetMesh()) return;
@@ -694,6 +682,20 @@ void APlayerCharacter::SetupAimAnimLayers()
 	UClass* AnimLayerClass = VisualDataAsset->AimAnimLayers.IsValid()
 		? VisualDataAsset->AimAnimLayers.Get()
 		: VisualDataAsset->AimAnimLayers.LoadSynchronous();
+
+	if (AnimLayerClass && GetMesh()->GetAnimInstance())
+	{
+		GetMesh()->GetAnimInstance()->LinkAnimClassLayers(AnimLayerClass);
+	}
+}
+
+void APlayerCharacter::SetupUpperBodyLayers()
+{
+	if (!VisualDataAsset || !GetMesh()) return;
+
+	UClass* AnimLayerClass = VisualDataAsset->UpperBodyLayers.IsValid()
+		? VisualDataAsset->UpperBodyLayers.Get()
+		: VisualDataAsset->UpperBodyLayers.LoadSynchronous();
 
 	if (AnimLayerClass && GetMesh()->GetAnimInstance())
 	{
@@ -719,13 +721,13 @@ void APlayerCharacter::ClearPhysicsAnimLayers()
 {
 	if (!VisualDataAsset || !GetMesh()) return;
 
-	UClass* AnimLayerClass = VisualDataAsset->BaseBehaviorAnimLayers.IsValid()
-		? VisualDataAsset->BaseBehaviorAnimLayers.Get()
-		: VisualDataAsset->BaseBehaviorAnimLayers.LoadSynchronous();
+	UClass* AnimLayerClass = VisualDataAsset->PhysicsAnimLayers.IsValid()
+		? VisualDataAsset->PhysicsAnimLayers.Get()
+		: VisualDataAsset->PhysicsAnimLayers.LoadSynchronous();
 
 	if (AnimLayerClass && GetMesh()->GetAnimInstance())
 	{
-		GetMesh()->GetAnimInstance()->LinkAnimClassLayers(AnimLayerClass);
+		GetMesh()->GetAnimInstance()->UnlinkAnimClassLayers(AnimLayerClass);
 	}
 }
 
@@ -745,7 +747,19 @@ void APlayerCharacter::FellOutOfWorld(const class UDamageType& dmgType)
 	// 1. 传递逻辑必须只在服务器执行
 	if (!HasAuthority()) return;
 
-	// 2. 立即清除速度，防止传送后带有惯性
+	// 2. 结束所有已激活的 GA（攀爬、钩索等），清理状态 Tag 和 GE
+	if (AbilitySystemComponent)
+	{
+		AbilitySystemComponent->CancelAllAbilities();
+	}
+
+	// 3. 武器回到背上
+	if (WeaponManagerComponent)
+	{
+		WeaponManagerComponent->WeaponToBack();
+	}
+
+	// 4. 立即清除速度，防止传送后带有惯性
 	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
 	{
 		MoveComp->StopMovementImmediately();
@@ -753,7 +767,7 @@ void APlayerCharacter::FellOutOfWorld(const class UDamageType& dmgType)
 		MoveComp->SetMovementMode(MOVE_Falling);
 	}
 
-	// 3. 寻找出生点
+	// 5. 寻找出生点
 	AActor* StartSpot = nullptr;
 	if (AGameModeBase* GM = GetWorld()->GetAuthGameMode())
 	{
@@ -764,7 +778,7 @@ void APlayerCharacter::FellOutOfWorld(const class UDamageType& dmgType)
 	{
 		FRotator SpawnRotation = StartSpot->GetActorRotation();
 
-		// 4. 物理和位置传递（带上出生点的朝向）
+		// 6. 物理和位置传递（带上出生点的朝向）
 		SetActorLocationAndRotation(
 			StartSpot->GetActorLocation(),
 			SpawnRotation,
@@ -773,14 +787,14 @@ void APlayerCharacter::FellOutOfWorld(const class UDamageType& dmgType)
 			ETeleportType::TeleportPhysics
 		);
 
-		// 5. 【核心修改】在服务器重置控制器的 ControlRotation
+		// 7. 【核心修改】在服务器重置控制器的 ControlRotation
 		// 这样服务器上的 AI 视线、射线检测以及下一次网络同步的基准朝向都会变正确
 		if (APlayerController* PC = Cast<APlayerController>(GetController()))
 		{
 			PC->SetControlRotation(SpawnRotation);
 		}
 
-		// 6. 通知客户端执行视觉防拉影和本地视角的瞬间切断
+		// 8. 通知客户端执行视觉防拉影和本地视角的瞬间切断
 		Client_ResetCameraAndPhysics(SpawnRotation);
 	}
 	else
@@ -864,9 +878,18 @@ void APlayerCharacter::OnAimingTagChanged(const FGameplayTag Tag, int32 NewCount
 
 void APlayerCharacter::HandleDeath_Implementation()
 {
+	// 调用基类：设置 bIsDead=true、禁用碰撞、禁用移动
+	Super::HandleDeath_Implementation();
+
 	if (DeathAbilityTag.IsValid() && AbilitySystemComponent)
 	{
 		AbilitySystemComponent->AddLooseGameplayTag(DeathAbilityTag);
+	}
+
+	// 禁用玩家输入，防止死后继续移动
+	if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	{
+		DisableInput(PC);
 	}
 
 	SetActorTickEnabled(false);
@@ -908,5 +931,69 @@ void APlayerCharacter::OnSwimmingTagChanged(const FGameplayTag Tag, int32 NewCou
 	else if (Tag == FastSwimmingStateTag)
 	{
 		bIsFastSwimming = NewCount > 0;
+	}
+}
+
+// ============================================================================
+// 攀爬蒙太奇播放
+// ============================================================================
+
+void APlayerCharacter::OnClimbUpMontageRequested(UAnimMontage* MontageToPlay)
+{
+	// CMC 广播 nullptr 时，从 VisualDataAsset 获取 ClimbUpMontage
+	UAnimMontage* ClimbMontage = MontageToPlay;
+	if (!ClimbMontage && VisualDataAsset)
+	{
+		if (!VisualDataAsset->ClimbUpMontage.IsNull())
+		{
+			ClimbMontage = VisualDataAsset->ClimbUpMontage.LoadSynchronous();
+		}
+	}
+
+	if (!ClimbMontage)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[PlayerChar] OnClimbUpMontageRequested: ClimbUpMontage is null in VisualDataAsset"));
+		return;
+	}
+
+	// 播放翻越蒙太奇
+	if (USkeletalMeshComponent* MeshComp = GetMesh())
+	{
+		if (UAnimInstance* AnimInst = MeshComp->GetAnimInstance())
+		{
+			// 绑定蒙太奇结束回调：蒙太奇播放完毕后调用 FinishClimbUp 恢复移动模式
+			AnimInst->OnMontageEnded.AddDynamic(this, &APlayerCharacter::OnClimbUpMontageEnded);
+			AnimInst->Montage_Play(ClimbMontage, 1.0f);
+		}
+	}
+}
+
+void APlayerCharacter::OnClimbUpMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	if (!Montage) return;
+
+	// 只处理 ClimbUp 蒙太奇
+	if (VisualDataAsset && Montage == VisualDataAsset->ClimbUpMontage.Get())
+	{
+		// 解绑回调，避免影响其他蒙太奇
+		if (USkeletalMeshComponent* MeshComp = GetMesh())
+		{
+			if (UAnimInstance* AnimInst = MeshComp->GetAnimInstance())
+			{
+				AnimInst->OnMontageEnded.RemoveDynamic(this, &APlayerCharacter::OnClimbUpMontageEnded);
+			}
+		}
+
+		// 调用 CMC::FinishClimbUp 恢复移动模式
+		if (UOpenWorldARPGCharacterMovementComponent* CustomMC = GetCustomMovementComp())
+		{
+			CustomMC->FinishClimbUp();
+		}
+
+		// 发送停止攀爬事件，结束 GA_ClimbBase（清理攀爬 Tag 和体力 GE）
+		if (StopClimbEventTag.IsValid() && AbilitySystemComponent)
+		{
+			UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(this, StopClimbEventTag, FGameplayEventData());
+		}
 	}
 }
