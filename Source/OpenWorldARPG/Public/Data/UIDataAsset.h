@@ -7,7 +7,7 @@
 #include "GameplayTagContainer.h"
 #include "UIDataAsset.generated.h"
 
-class UBaseMenuWidget;
+class UWindowWidgetBase;
 
 /**
  * UI Tag → Widget 映射资产。
@@ -20,6 +20,6 @@ class OPENWORLDARPG_API UUIDataAsset : public UPrimaryDataAsset
 public:
 	/** UI Tag → Widget 蓝图类映射。 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI Mapping")
-	TMap<FGameplayTag, TSubclassOf<UBaseMenuWidget>> UIMap;
+	TMap<FGameplayTag, TSubclassOf<UWindowWidgetBase>> UIMap;
 
 };

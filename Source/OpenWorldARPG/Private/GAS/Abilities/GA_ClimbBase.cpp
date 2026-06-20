@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "GAS/Abilities/GA_ClimbBase.h"
 #include "AbilitySystemComponent.h"
@@ -67,13 +67,13 @@ void UGA_ClimbBase::ActivateAbility(const FGameplayAbilitySpecHandle Handle, con
     // ==========================================
     // 4. 立即监听停止攀爬事件
     //    统一事件源：
-    //    - CMC 检测到落地/离开墙壁时发送 StopClimbEventTag
-    //    - PlayerCharacter 攀爬中按跳跃时也发送 StopClimbEventTag
+    //    - CMC 检测到落地/离开墙壁时发送 ClimbStopEventTag
+    //    - PlayerCharacter 攀爬中按跳跃时也发送 ClimbStopEventTag
     //    两者走同一个事件，GA 收到后统一 EndAbility → ExitClimb
     // ==========================================
-    if (StopClimbEventTag.IsValid())
+    if (ClimbStopEventTag.IsValid())
     {
-        WaitStopEventTask = UAbilityTask_WaitGameplayEvent::WaitGameplayEvent(this, StopClimbEventTag, nullptr, false, true);
+        WaitStopEventTask = UAbilityTask_WaitGameplayEvent::WaitGameplayEvent(this, ClimbStopEventTag, nullptr, false, true);
         if (WaitStopEventTask)
         {
             WaitStopEventTask->EventReceived.AddDynamic(this, &UGA_ClimbBase::OnStopClimbEventReceived);

@@ -8,7 +8,7 @@
 #include "Data/CharacterRegistryRow.h"
 #include "Data/CharacterGeneralDataAsset.h"
 #include "Data/UIDataAsset.h"
-#include "UI/LoadingScreenWidget.h"
+#include "UI/Screens/LoadingScreenWidget.h"
 #include "GameplayTagContainer.h"
 #include "AbilitySystemGlobals.h"
 #include "Engine/StreamableManager.h"

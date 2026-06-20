@@ -179,14 +179,14 @@ void AMainGamePlayerController::Server_SwitchCharacter_Implementation(int32 Targ
 
     // 6. 激活 GA_SwapOutBase（退场技能）
     //    GA 内部会验证 AllowedSwapOutMovementModes，不满足则 Cancel
-    if (!OldCharacter->SwapOutAbilityClass || !OldCharacter->GetAbilitySystemComponent())
+    if (!OldCharacter->SwapOutEventTag.IsValid() || !OldCharacter->GetAbilitySystemComponent())
     {
-        UE_LOG(LogTemp, Error, TEXT("Server_SwitchCharacter: SwapOutAbilityClass 未配置或 ASC 无效，无法切换！"));
+        UE_LOG(LogTemp, Error, TEXT("Server_SwitchCharacter: SwapOutEventTag 未配置或 ASC 无效，无法切换！"));
         OldCharacter->OnSwapOutCompleted.RemoveDynamic(this, &AMainGamePlayerController::OnSwapOutCompleted);
         PendingSwapTargetIndex = -1;
         return;
     }
-    OldCharacter->GetAbilitySystemComponent()->TryActivateAbilityByClass(OldCharacter->SwapOutAbilityClass);
+    UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(OldCharacter, OldCharacter->SwapOutEventTag, FGameplayEventData());
 }
 
 void AMainGamePlayerController::OnSwapOutCompleted(APlayerCharacter* SwappedOutCharacter, FTransform SwapTransform)
@@ -226,13 +226,13 @@ void AMainGamePlayerController::OnSwapOutCompleted(APlayerCharacter* SwappedOutC
 
     // 5. 激活 GA_SwapInBase（出场技能）
     //    GA 内部会验证 PreventSwitchTags，不满足则 Cancel
-    if (!NewCharacter->SwapInAbilityClass || !NewCharacter->GetAbilitySystemComponent())
+    if (!NewCharacter->SwapInEventTag.IsValid() || !NewCharacter->GetAbilitySystemComponent())
     {
-        UE_LOG(LogTemp, Error, TEXT("OnSwapOutCompleted: SwapInAbilityClass 未配置或 ASC 无效！"));
+        UE_LOG(LogTemp, Error, TEXT("OnSwapOutCompleted: SwapInEventTag 未配置或 ASC 无效！"));
     }
     else
     {
-        NewCharacter->GetAbilitySystemComponent()->TryActivateAbilityByClass(NewCharacter->SwapInAbilityClass);
+        UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(NewCharacter, NewCharacter->SwapInEventTag, FGameplayEventData());
     }
 
     // 6. 更新 PlayerState 的激活索引（触发全网同步）

@@ -3,7 +3,7 @@
 #include "Components/TargetingComponent.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/PlayerController.h"
-#include "Characters/SelectableTargetActor.h"
+#include "World/Interactables/SelectableTargetActor.h"
 
 UTargetingComponent::UTargetingComponent()
 {

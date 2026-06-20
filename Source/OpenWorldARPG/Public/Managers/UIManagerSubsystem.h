@@ -7,7 +7,7 @@
 #include "GameplayTagContainer.h"
 #include "UIManagerSubsystem.generated.h"
 
-class UBaseMenuWidget;
+class UWindowWidgetBase;
 class UUIDataAsset;
 
 /**
@@ -21,10 +21,10 @@ class OPENWORLDARPG_API UUIManagerSubsystem : public UGameInstanceSubsystem
 public:
     /** 通过 Tag 显示 UI（从 UIDataAsset 查找对应 WidgetClass） */
     UFUNCTION(BlueprintCallable, Category = "UI Manager")
-    UBaseMenuWidget* ShowUIByTag(FGameplayTag UITag);
+    UWindowWidgetBase* ShowUIByTag(FGameplayTag UITag);
 
     /** 打开指定 WidgetClass 的 UI */
-    UBaseMenuWidget* OpenUI(TSubclassOf<UBaseMenuWidget> WidgetClass);
+    UWindowWidgetBase* OpenUI(TSubclassOf<UWindowWidgetBase> WidgetClass);
 
     /** 关闭栈顶 UI */
     UFUNCTION(BlueprintCallable, Category = "UI Manager")
@@ -40,5 +40,5 @@ public:
 protected:
     /** UI 栈，后进先出 */
     UPROPERTY()
-    TArray<TObjectPtr<UBaseMenuWidget>> UIStack;
+    TArray<TObjectPtr<UWindowWidgetBase>> UIStack;
 };

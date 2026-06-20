@@ -221,16 +221,15 @@ void AEnemyCharacter::OnHealthAttributeChanged(const FOnAttributeChangeData& Dat
     // 对应蓝图：血量变化时检查是否死亡
     if (Data.NewValue <= 0.0f && Data.OldValue > 0.0f)
     {
-        // 死亡GA（GA_DieBase）会调用 HandleDeath()，这里不再重复调用
-        // 只负责触发死亡GA
-        if (AbilitySystemComponent && DeathAbilityTag.IsValid())
+        // 事件驱动：通过 GAS 事件触发死亡能力(GA_DieBase)，由能力负责表现层(蒙太奇/布娃娃)
+        if (AbilitySystemComponent && DieEventTag.IsValid())
         {
-            FGameplayTagContainer TagContainer(DeathAbilityTag);
-            AbilitySystemComponent->TryActivateAbilitiesByTag(TagContainer, true);
+            FGameplayEventData EventData;
+            UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(this, DieEventTag, EventData);
         }
         else
         {
-            // 没有死亡GA时，直接执行死亡处理
+            // 兜底：没有死亡能力时直接执行死亡处理
             OnDead();
         }
     }

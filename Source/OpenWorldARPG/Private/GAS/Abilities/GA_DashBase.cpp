@@ -78,6 +78,9 @@ void UGA_DashBase::ApplyDashMovement()
         bIsBackDash = true;
     }
 
+    // 缓存冲刺方向，供 OnDashFinished 计算惯性速度
+    CachedDashDirection = DashDirection;
+
     // 计算目标位置
     const FVector StartLocation = CachedPlayer->GetActorLocation();
     const FVector TargetLocation = StartLocation + DashDirection * DashDistance;
@@ -103,9 +106,8 @@ void UGA_DashBase::ApplyDashMovement()
     RMS->TargetLocation = TargetLocation;
     RMS->Duration = DashDuration;
     RMS->bRestrictSpeedToExpected = true;
-    // 位移结束后速度归零，防止角色残留惯性
-    RMS->FinishVelocityParams.Mode = ERootMotionFinishVelocityMode::SetVelocity;
-    RMS->FinishVelocityParams.SetVelocity = FVector::ZeroVector;
+    // 位移结束后保持当前速度（不归零），由 OnDashFinished 设置惯性速度
+    RMS->FinishVelocityParams.Mode = ERootMotionFinishVelocityMode::MaintainLastRootMotionVelocity;
 
     DashRMS_ID = MoveComp->ApplyRootMotionSource(RMS);
     bHasActiveRMS = true;
@@ -168,12 +170,23 @@ void UGA_DashBase::OnDashFinished()
 {
     if (!CachedPlayer) return;
 
-    // 漏洞二修复：只清零水平速度（X, Y），保留垂直速度（Z）
-    // 防止角色在斜坡/悬崖边 Dash 冲出边缘后 Z 轴速度被清零导致悬停
+    // Dash 结束时保留惯性速度，避免速度归零导致的顿感
+    // 前冲 Dash：沿冲刺方向施加惯性速度，平滑过渡到 Sprint
+    // 后撤步：不施加惯性（防御动作应干净利落地停下）
     if (UCharacterMovementComponent* MoveComp = CachedPlayer->GetCharacterMovement())
     {
-        MoveComp->Velocity.X = 0.0f;
-        MoveComp->Velocity.Y = 0.0f;
+        if (!bIsBackDash && DashEndInertiaSpeed > 0.0f && !CachedDashDirection.IsNearlyZero())
+        {
+            // 仅设置水平速度，保留垂直速度（Z）防止斜坡/悬崖边异常
+            MoveComp->Velocity.X = CachedDashDirection.X * DashEndInertiaSpeed;
+            MoveComp->Velocity.Y = CachedDashDirection.Y * DashEndInertiaSpeed;
+        }
+        else
+        {
+            // 后撤步：清零水平速度
+            MoveComp->Velocity.X = 0.0f;
+            MoveComp->Velocity.Y = 0.0f;
+        }
     }
 
     bHasActiveRMS = false;

@@ -21,6 +21,7 @@ public:
 	AOpenWorldARPGCharacter(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
 
 	virtual void HandleDeath_Implementation() override;
+	virtual void HandleRevive_Implementation() override;
 
 	UFUNCTION(BlueprintCallable, Category = "Character|Movement")
 	void CorrectPawnOrient();

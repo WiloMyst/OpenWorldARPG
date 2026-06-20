@@ -51,6 +51,9 @@ public:
 	virtual void PhysCustom(float DeltaTime, int32 Iterations) override;
 	virtual void OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode) override;
 
+	/** 记录 GravityScale/AirControl 的默认值，供非对称重力逻辑恢复使用 */
+	virtual void BeginPlay() override;
+
 	// ==========================================
 	// 事件委托
 	// ==========================================
@@ -176,7 +179,7 @@ public:
 
 	/** 停止攀爬事件 Tag（检测到落地/离开墙壁时发送，GA_ClimbBase 监听此事件结束） */
 	UPROPERTY(EditDefaultsOnly, Category = "Climbing|Events")
-	FGameplayTag StopClimbEventTag;
+	FGameplayTag ClimbStopEventTag;
 
 	// ==========================================
 	// 攀爬配置 - 移动
@@ -273,6 +276,9 @@ public:
 	void ExitGlideMode();
 	bool IsGliding() const;
 
+	/** 向下射线检测，返回角色脚底到地面的距离(cm)。检测失败返回 -1.0f */
+	float GetDistanceToGround() const;
+
 	// ==========================================
 	// 滑翔配置
 	// ==========================================
@@ -297,6 +303,10 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, Category = "Gliding|Physics")
 	float GlideMaxDescentSpeed = -50.0f;
+
+	/** 启动滑翔所需的最小离地高度(cm)，低于此高度不允许开伞 */
+	UPROPERTY(EditDefaultsOnly, Category = "Gliding|StartCondition", meta = (ClampMin = "0.0"))
+	float MinGlideStartHeight = 300.0f;
 
 	// ==========================================
 	// 游泳接口 (供 GA_SwimBase 调用)
@@ -404,11 +414,34 @@ public:
 	FRotator GroundedRotationRate = FRotator(0.0f, 540.0f, 0.0f);
 
 	// ==========================================
-	// 下落配置
+	// 跳跃非对称重力配置
+	// 上升阶段：高重力（快速上升）+ 允许空中控制 + 较慢转身
+	// 下落阶段：高重力（快速下落）+ 剥夺空中控制 + 锁死朝向
 	// ==========================================
 
-	UPROPERTY(EditDefaultsOnly, Category = "Falling|Physics")
-	float FallingAirControl = 0.1f;
+	/** 上升阶段重力倍率（提高以加快上升速度） */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement|Jump|Rising")
+	float RisingGravityScale = 2.0f;
+
+	/** 上升阶段空中控制（允许摇杆调整水平方向） */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement|Jump|Rising")
+	float RisingAirControl = 0.8f;
+
+	/** 上升阶段转身速率（较低值避免空中转身过快） */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement|Jump|Rising")
+	float RisingRotationRate = 200.0f;
+
+	/** 下落阶段重力倍率（产生强烈坠落感） */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement|Jump|Falling")
+	float FallingGravityScale = 3.0f;
+
+	/** 下落阶段空中控制（完全剥夺水平移动控制权） */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement|Jump|Falling")
+	float FallingAirControl = 0.0f;
+
+	// ==========================================
+	// 下落配置
+	// ==========================================
 
 	UPROPERTY(EditDefaultsOnly, Category = "Falling|Physics")
 	FRotator FallingRotationRate = FRotator(0.0f, 300.0f, 0.0f);
@@ -592,4 +625,11 @@ private:
 	// ==========================================
 
 	float FallingRotationInterpSpeed = 3.0f;
+
+	// ==========================================
+	// 跳跃非对称重力 - 默认值缓存（不加 UPROPERTY）
+	// ==========================================
+
+	float DefaultGravityScale;
+	float DefaultAirControl;
 };

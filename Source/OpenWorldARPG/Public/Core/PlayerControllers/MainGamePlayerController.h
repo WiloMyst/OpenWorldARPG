@@ -106,6 +106,12 @@ protected:
     // --- 配置：输入资产 ---
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
+    TObjectPtr<UInputAction> IA_Look;
+    
+    UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
+    TObjectPtr<UInputAction> IA_CameraReset;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
     TObjectPtr<UInputAction> IA_Move;
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
@@ -155,12 +161,6 @@ protected:
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Input|Combat")
     TObjectPtr<UInputAction> IA_Aim;
-
-    UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
-    TObjectPtr<UInputAction> IA_CameraReset;
-
-    UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
-    TObjectPtr<UInputAction> IA_Look;
 
     // --- 配置：Tags ---
 

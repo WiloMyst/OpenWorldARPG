@@ -1,12 +1,12 @@
 // Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Managers/UIManagerSubsystem.h"
-#include "UI/BaseMenuWidget.h"
+#include "UI/Core/WindowWidgetBase.h"
 #include "Data/UIDataAsset.h"
 #include "Engine/LocalPlayer.h"
 #include "Managers/GameAssetManagerSubsystem.h"
 
-UBaseMenuWidget* UUIManagerSubsystem::ShowUIByTag(FGameplayTag UITag)
+UWindowWidgetBase* UUIManagerSubsystem::ShowUIByTag(FGameplayTag UITag)
 {
     if (!UITag.IsValid())
     {
@@ -23,7 +23,7 @@ UBaseMenuWidget* UUIManagerSubsystem::ShowUIByTag(FGameplayTag UITag)
         return nullptr;
     }
 
-    if (const TSubclassOf<UBaseMenuWidget>* WidgetClassPtr = LoadedUIData->UIMap.Find(UITag))
+    if (const TSubclassOf<UWindowWidgetBase>* WidgetClassPtr = LoadedUIData->UIMap.Find(UITag))
     {
         if (*WidgetClassPtr)
         {
@@ -38,12 +38,12 @@ UBaseMenuWidget* UUIManagerSubsystem::ShowUIByTag(FGameplayTag UITag)
     return nullptr;
 }
 
-UBaseMenuWidget* UUIManagerSubsystem::OpenUI(TSubclassOf<UBaseMenuWidget> WidgetClass)
+UWindowWidgetBase* UUIManagerSubsystem::OpenUI(TSubclassOf<UWindowWidgetBase> WidgetClass)
 {
     if (!WidgetClass) return nullptr;
 
     // 检查是否已经存在一个同类的UI在堆栈中，防止重复打开
-    for (UBaseMenuWidget* OpenWidget : UIStack)
+    for (UWindowWidgetBase* OpenWidget : UIStack)
     {
         if (OpenWidget && OpenWidget->GetClass() == WidgetClass)
         {
@@ -52,7 +52,7 @@ UBaseMenuWidget* UUIManagerSubsystem::OpenUI(TSubclassOf<UBaseMenuWidget> Widget
     }
 
     // 创建Widget实例
-    UBaseMenuWidget* NewWidget = CreateWidget<UBaseMenuWidget>(GetGameInstance(), WidgetClass);
+    UWindowWidgetBase* NewWidget = CreateWidget<UWindowWidgetBase>(GetGameInstance(), WidgetClass);
     if (!NewWidget) return nullptr;
 
     // 将新Widget推入堆栈顶部
@@ -71,7 +71,7 @@ void UUIManagerSubsystem::CloseTopUI()
     if (UIStack.IsEmpty()) return;
 
     // 弹出最顶层的Widget
-    UBaseMenuWidget* TopWidget = UIStack.Pop();
+    UWindowWidgetBase* TopWidget = UIStack.Pop();
     if (TopWidget)
     {
         TopWidget->OnClosed(); // 调用顶层Widget的蓝图事件
@@ -110,7 +110,7 @@ void UUIManagerSubsystem::UpdateInputMode()
     else
     {
         // 堆栈不为空，根据最顶层UI的设置来决定输入模式
-        UBaseMenuWidget* TopWidget = UIStack.Last();
+        UWindowWidgetBase* TopWidget = UIStack.Last();
         if (!TopWidget) return;
 
         switch (TopWidget->InputModeWhenOpen)

@@ -119,7 +119,7 @@ protected:
     TSubclassOf<class UGameplayAbility> DeathAbilityClass;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Config|State")
-    FGameplayTag DeathAbilityTag;
+    FGameplayTag DieEventTag;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Config|State")
     FGameplayTagContainer CancelTagsOnDeath;

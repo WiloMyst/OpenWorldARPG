@@ -236,16 +236,6 @@ void APlayerCharacter::InitializeCharacter(const FCharacterSaveData& InSaveData,
 			}
 		}
 
-		// 赋予角色切换 GA（SwapOut / SwapIn）
-		if (SwapOutAbilityClass)
-		{
-			AbilitySystemComponent->GiveAbility(FGameplayAbilitySpec(SwapOutAbilityClass, 1, INDEX_NONE, this));
-		}
-		if (SwapInAbilityClass)
-		{
-			AbilitySystemComponent->GiveAbility(FGameplayAbilitySpec(SwapInAbilityClass, 1, INDEX_NONE, this));
-		}
-
 		for (const TSubclassOf<UGameplayAbility>& AbilityClass : PermanentAbilitiesToActivate)
 		{
 			if (AbilityClass)
@@ -597,9 +587,9 @@ void APlayerCharacter::HandleJumpStartInput()
 	if (AbilitySystemComponent && ClimbingStateTag.IsValid()
 		&& AbilitySystemComponent->HasMatchingGameplayTag(ClimbingStateTag))
 	{
-		if (StopClimbEventTag.IsValid())
+		if (ClimbStopEventTag.IsValid())
 		{
-			UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(this, StopClimbEventTag, FGameplayEventData());
+			UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(this, ClimbStopEventTag, FGameplayEventData());
 		}
 		return;
 	}
@@ -634,20 +624,32 @@ void APlayerCharacter::ToggleGlide()
 {
 	if (!AbilitySystemComponent) return;
 
-	// 滑翔只能在空中下落时启动，地面按空格不应触发滑翔
-	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
-	{
-		bool bIsGliding = GlidingStateTag.IsValid() && AbilitySystemComponent->HasMatchingGameplayTag(GlidingStateTag);
+	UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+	if (!MoveComp) return;
 
-		// 如果当前不在滑翔状态，且不在空中（下落），则不允许启动滑翔
-		if (!bIsGliding && !MoveComp->IsFalling())
+	bool bIsGliding = GlidingStateTag.IsValid() && AbilitySystemComponent->HasMatchingGameplayTag(GlidingStateTag);
+
+	// 如果当前不在滑翔状态，需要满足条件才能启动滑翔
+	if (!bIsGliding)
+	{
+		// 条件1：必须在空中（下落状态）
+		if (!MoveComp->IsFalling())
 		{
 			return;
+		}
+
+		// 条件2：离地面高度必须大于最小开伞高度，太低不允许开伞
+		if (UOpenWorldARPGCharacterMovementComponent* CustomMoveComp = GetCustomMovementComp())
+		{
+			float DistanceToGround = CustomMoveComp->GetDistanceToGround();
+			if (DistanceToGround >= 0.0f && DistanceToGround < CustomMoveComp->MinGlideStartHeight)
+			{
+				return;
+			}
 		}
 	}
 
 	// 状态翻转：当前滑翔则停止，否则启动
-	bool bIsGliding = GlidingStateTag.IsValid() && AbilitySystemComponent->HasMatchingGameplayTag(GlidingStateTag);
 	FGameplayTag TagToSend = bIsGliding ? GlideStopEventTag : GlideStartEventTag;
 
 	if (TagToSend.IsValid())
@@ -837,7 +839,18 @@ void APlayerCharacter::OnHealthAttributeChanged(const FOnAttributeChangeData& Da
 	if (Data.NewValue <= 0.0f && Data.OldValue > 0.0f)
 	{
 		OnHealthUpdated.Broadcast();
-		HandleDeath_Implementation();
+
+		// 事件驱动：优先通过 GAS 事件触发死亡能力(GA_DieBase)，由能力负责表现层(蒙太奇/布娃娃)
+		if (AbilitySystemComponent && DieEventTag.IsValid())
+		{
+			FGameplayEventData EventData;
+			UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(this, DieEventTag, EventData);
+		}
+		else
+		{
+			// 兜底：没有死亡能力时直接执行底层清理
+			HandleDeath_Implementation();
+		}
 	}
 }
 
@@ -878,12 +891,13 @@ void APlayerCharacter::OnAimingTagChanged(const FGameplayTag Tag, int32 NewCount
 
 void APlayerCharacter::HandleDeath_Implementation()
 {
-	// 调用基类：设置 bIsDead=true、禁用碰撞、禁用移动
+	// 调用基类：设置 bIsDead=true、禁用碰撞(NoCollision+IgnoreAll)、停止移动(StopMovementImmediately+DisableMovement)
 	Super::HandleDeath_Implementation();
 
-	if (DeathAbilityTag.IsValid() && AbilitySystemComponent)
+	// 添加死亡状态 Tag
+	if (DieEventTag.IsValid() && AbilitySystemComponent)
 	{
-		AbilitySystemComponent->AddLooseGameplayTag(DeathAbilityTag);
+		AbilitySystemComponent->AddLooseGameplayTag(DieEventTag);
 	}
 
 	// 禁用玩家输入，防止死后继续移动
@@ -892,14 +906,25 @@ void APlayerCharacter::HandleDeath_Implementation()
 		DisableInput(PC);
 	}
 
-	SetActorTickEnabled(false);
+	// 注意：不再调用 SetActorTickEnabled(false) 和 StopAllMontages()，
+	// 表现层（死亡蒙太奇/布娃娃）由 GA_DieBase 全权负责。
+}
 
-	if (USkeletalMeshComponent* SKMesh = GetMesh())
+void APlayerCharacter::HandleRevive_Implementation()
+{
+	// 调用基类：重置 bIsDead=false、恢复胶囊体碰撞(Pawn)、恢复移动组件(Falling)
+	Super::HandleRevive_Implementation();
+
+	// 移除死亡状态 Tag
+	if (DieEventTag.IsValid() && AbilitySystemComponent)
 	{
-		if (UAnimInstance* AnimInst = SKMesh->GetAnimInstance())
-		{
-			AnimInst->StopAllMontages(0.1f);
-		}
+		AbilitySystemComponent->RemoveLooseGameplayTag(DieEventTag);
+	}
+
+	// 恢复玩家输入
+	if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	{
+		EnableInput(PC);
 	}
 }
 
@@ -991,9 +1016,9 @@ void APlayerCharacter::OnClimbUpMontageEnded(UAnimMontage* Montage, bool bInterr
 		}
 
 		// 发送停止攀爬事件，结束 GA_ClimbBase（清理攀爬 Tag 和体力 GE）
-		if (StopClimbEventTag.IsValid() && AbilitySystemComponent)
+		if (ClimbStopEventTag.IsValid() && AbilitySystemComponent)
 		{
-			UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(this, StopClimbEventTag, FGameplayEventData());
+			UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(this, ClimbStopEventTag, FGameplayEventData());
 		}
 	}
 }

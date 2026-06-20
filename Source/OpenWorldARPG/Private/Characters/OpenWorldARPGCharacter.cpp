@@ -41,11 +41,38 @@ void AOpenWorldARPGCharacter::HandleDeath_Implementation()
 	if (bIsDead) return;
 	bIsDead = true;
 
-	// 基类默认实现：禁用碰撞和移动
-	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	// 底层物理碰撞剥离：关闭胶囊体碰撞并忽略所有通道，避免死亡后形成隐形墙
+	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
+	{
+		Capsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Capsule->SetCollisionResponseToAllChannels(ECR_Ignore);
+	}
+
+	// 停止移动组件：先立即停止速度，再禁用移动模式
 	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
 	{
+		MoveComp->StopMovementImmediately();
 		MoveComp->DisableMovement();
+	}
+}
+
+void AOpenWorldARPGCharacter::HandleRevive_Implementation()
+{
+	// 复活：重置死亡标记
+	bIsDead = false;
+
+	// 恢复胶囊体碰撞为正常 Pawn 碰撞
+	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
+	{
+		Capsule->SetCollisionProfileName(TEXT("Pawn"));
+		Capsule->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	}
+
+	// 恢复移动组件：使用 Falling 模式让角色自然落地
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		MoveComp->SetMovementMode(MOVE_Falling);
+		MoveComp->UpdateComponentVelocity();
 	}
 }
 

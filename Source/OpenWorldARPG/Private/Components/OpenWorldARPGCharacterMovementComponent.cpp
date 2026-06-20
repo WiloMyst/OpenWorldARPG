@@ -27,6 +27,15 @@ void UOpenWorldARPGCharacterMovementComponent::CacheOwnerReferences()
 	}
 }
 
+void UOpenWorldARPGCharacterMovementComponent::BeginPlay()
+{
+	Super::BeginPlay();
+
+	// 缓存 GravityScale 和 AirControl 的默认值，供非对称重力逻辑恢复使用
+	DefaultGravityScale = GravityScale;
+	DefaultAirControl = AirControl;
+}
+
 // ============================================================================
 // 引擎重写 - 生命周期
 //
@@ -52,6 +61,27 @@ void UOpenWorldARPGCharacterMovementComponent::UpdateCharacterStateBeforeMovemen
 	// ==========================================
 	if (MovementMode == MOVE_Falling)
 	{
+		// ==========================================
+		// 非对称重力：基于 Velocity.Z 划分上升/下落阶段
+		// 上升阶段：正常重力 + 允许空中控制与转身
+		// 下落阶段：重力倍率增加 + 剥夺空中控制 + 锁死朝向
+		// ==========================================
+		if (Velocity.Z > 0.0f)
+		{
+			// 上升阶段
+			GravityScale = RisingGravityScale;
+			AirControl = RisingAirControl;
+			RotationRate = FRotator(0.0f, RisingRotationRate, 0.0f);
+			bOrientRotationToMovement = true;
+		}
+		else
+		{
+			// 下落阶段
+			GravityScale = FallingGravityScale;
+			AirControl = FallingAirControl;
+			bOrientRotationToMovement = false;
+		}
+
 		CheckFallingToClimb();
 	}
 
@@ -148,6 +178,17 @@ void UOpenWorldARPGCharacterMovementComponent::OnMovementModeChanged(EMovementMo
 		RotationRate = OriginalRotationRate;
 		bOrientRotationToMovement = true;
 		bIsFastSwimming = false;
+	}
+
+	// 非对称重力恢复：如果之前是下落状态，且现在不再是下落状态（比如落地、攀爬等），恢复默认参数
+	bool bWasFalling = (PreviousMovementMode == MOVE_Falling);
+	bool bIsStillFalling = (MovementMode == MOVE_Falling);
+	if (bWasFalling && !bIsStillFalling)
+	{
+		GravityScale = DefaultGravityScale;
+		AirControl = DefaultAirControl;
+		bOrientRotationToMovement = true;
+		// RotationRate 的恢复由下方 Walking 状态分支覆盖，此处无需重复处理
 	}
 
 	Super::OnMovementModeChanged(PreviousMovementMode, PreviousCustomMode);
@@ -382,9 +423,9 @@ void UOpenWorldARPGCharacterMovementComponent::CheckClimbToGround()
 		{
 			return;
 		}
-		if (StopClimbEventTag.IsValid())
+		if (ClimbStopEventTag.IsValid())
 		{
-			UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(Char, StopClimbEventTag, FGameplayEventData());
+			UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(Char, ClimbStopEventTag, FGameplayEventData());
 		}
 	}
 }
@@ -871,6 +912,31 @@ void UOpenWorldARPGCharacterMovementComponent::ExitGlideMode()
 bool UOpenWorldARPGCharacterMovementComponent::IsGliding() const
 {
 	return MovementMode == MOVE_Custom && static_cast<ECustomMovementMode>(CustomMovementMode) == ECustomMovementMode::Gliding;
+}
+
+float UOpenWorldARPGCharacterMovementComponent::GetDistanceToGround() const
+{
+	ACharacter* Char = CachedOwnerCharacter.Get();
+	if (!Char)
+	{
+		Char = Cast<ACharacter>(GetOwner());
+		if (!Char) return -1.0f;
+	}
+
+	// 从角色脚底向下射线检测地面距离
+	const FVector Start = Char->GetActorLocation();
+	const FVector End = Start - FVector::UpVector * 2000.0f;
+
+	FHitResult HitResult;
+	FCollisionQueryParams QueryParams;
+	QueryParams.AddIgnoredActor(Char);
+
+	if (Char->GetWorld()->LineTraceSingleByChannel(HitResult, Start, End, ECC_Visibility, QueryParams))
+	{
+		return HitResult.Distance;
+	}
+
+	return -1.0f;
 }
 
 void UOpenWorldARPGCharacterMovementComponent::PhysGliding(float DeltaTime, int32 Iterations)

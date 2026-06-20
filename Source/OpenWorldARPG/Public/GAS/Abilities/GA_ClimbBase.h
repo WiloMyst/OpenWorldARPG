@@ -77,7 +77,7 @@ protected:
 
     /** 停止攀爬事件 Tag（CMC 检测到落地时发送，或玩家按跳跃退出时发送，统一走此事件） */
     UPROPERTY(EditDefaultsOnly, Category = "Climb|Config")
-    FGameplayTag StopClimbEventTag;
+    FGameplayTag ClimbStopEventTag;
 
     /** 攀爬持续扣减体力的 GameplayEffect 类 */
     UPROPERTY(EditDefaultsOnly, Category = "Climb|Config")

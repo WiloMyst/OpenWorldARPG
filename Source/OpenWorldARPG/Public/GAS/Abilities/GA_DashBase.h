@@ -69,11 +69,15 @@ protected:
 
     /** 冲刺位移距离 */
     UPROPERTY(EditDefaultsOnly, Category = "Config|Movement")
-    float DashDistance = 600.0f;
+    float DashDistance = 500.0f;
 
     /** 冲刺位移持续时间 */
     UPROPERTY(EditDefaultsOnly, Category = "Config|Movement")
     float DashDuration = 0.3f;
+
+    /** Dash 结束时保留的惯性速度（cm/s），用于平滑过渡到 Sprint，避免速度归零的顿感 */
+    UPROPERTY(EditDefaultsOnly, Category = "Config|Movement", meta = (ClampMin = "0.0"))
+    float DashEndInertiaSpeed = 1200.0f;
 
     /** 判定"有移动输入"的阈值（输入向量长度平方） */
     UPROPERTY(EditDefaultsOnly, Category = "Config|Movement")
@@ -96,4 +100,7 @@ private:
 
     /** 在触发瞬间记录本次位移是否为后撤步，防止 BlendOut 时偷跑接续疾跑 */
     bool bIsBackDash = false;
+
+    /** 缓存本次冲刺方向，供 Dash 结束时计算惯性速度 */
+    FVector CachedDashDirection = FVector::ZeroVector;
 };

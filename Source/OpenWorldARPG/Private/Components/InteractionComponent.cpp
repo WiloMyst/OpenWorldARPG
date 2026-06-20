@@ -1,7 +1,7 @@
 // Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Components/InteractionComponent.h"
-#include "Items/ItemBase.h"
+#include "World/Interactables/PickableItemBase.h"
 #include "Managers/InventoryManagerSubsystem.h"
 #include "Characters/PlayerCharacter.h"
 #include "AbilitySystemComponent.h"
@@ -65,7 +65,7 @@ void UInteractionComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
         this, StartLoc, EndLoc, SphereRadius, ObjectTypes,
         false, ActorsToIgnore, EDrawDebugTrace::None, HitResult, true);
 
-    CurrentPickableItem = bHit && HitResult.GetActor() ? Cast<AItemBase>(HitResult.GetActor()) : nullptr;
+    CurrentPickableItem = bHit && HitResult.GetActor() ? Cast<APickableItemBase>(HitResult.GetActor()) : nullptr;
 }
 
 bool UInteractionComponent::IsCharacterInStandby() const
@@ -99,7 +99,7 @@ void UInteractionComponent::PickUpItem()
     // 客户端：只发送请求到服务器
     if (IsCharacterInStandby() || !CurrentPickableItem.IsValid()) return;
 
-    AItemBase* PickableItem = CurrentPickableItem.Get();
+    APickableItemBase* PickableItem = CurrentPickableItem.Get();
     Server_PickUpItem(PickableItem->ItemID, PickableItem->ItemAmount);
 }
 
@@ -137,7 +137,7 @@ void UInteractionComponent::Server_PickUpItem_Implementation(int32 ItemID, int32
 
     for (const FOverlapResult& Result : OverlapResults)
     {
-        if (AItemBase* Item = Cast<AItemBase>(Result.GetActor()))
+        if (APickableItemBase* Item = Cast<APickableItemBase>(Result.GetActor()))
         {
             if (Item->ItemID == ItemID)
             {
@@ -215,7 +215,7 @@ void UInteractionComponent::SpawnDroppedItem(int32 ItemID, int32 DroppedAmount)
     SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
     SpawnParams.Instigator = Cast<APawn>(OwnerActor);
 
-    AItemBase* DroppedItem = GetWorld()->SpawnActor<AItemBase>(AItemBase::StaticClass(), SpawnLocation, SpawnRotation, SpawnParams);
+    APickableItemBase* DroppedItem = GetWorld()->SpawnActor<APickableItemBase>(APickableItemBase::StaticClass(), SpawnLocation, SpawnRotation, SpawnParams);
     if (DroppedItem)
     {
         DroppedItem->InitializeItem(ItemID, DroppedAmount);

@@ -3,8 +3,8 @@
 #include "Core/PlayerControllers/MainMenuPlayerController.h"
 #include "Managers/UIManagerSubsystem.h"
 #include "Core/GameModes/MainMenuGameMode.h"
-#include "UI/LoginScreenWidget.h"
-#include "UI/StartGameScreenWidget.h"
+#include "UI/Screens/LoginScreenWidget.h"
+#include "UI/Screens/StartGameScreenWidget.h"
 #include "Kismet/GameplayStatics.h"
 
 void AMainMenuPlayerController::BeginPlay()
@@ -22,7 +22,7 @@ void AMainMenuPlayerController::BeginPlay()
     }
 
     // 2. 显示登录界面 (直接使用配置的 Tag)
-    UBaseMenuWidget* LoginWidgetBase = UIManager->ShowUIByTag(LoginUITag);
+    UWindowWidgetBase* LoginWidgetBase = UIManager->ShowUIByTag(LoginUITag);
 
     // 3. 类型转换为具体的登录UI类，并绑定事件
     if (ULoginScreenWidget* LoginWidget = Cast<ULoginScreenWidget>(LoginWidgetBase))
@@ -49,7 +49,7 @@ void AMainMenuPlayerController::HandleOnLoginButtonClicked()
     }
 
     // 3. 显示开始游戏界面 (直接使用配置的 Tag)
-    UBaseMenuWidget* StartWidgetBase = UIManager->ShowUIByTag(StartGameUITag);
+    UWindowWidgetBase* StartWidgetBase = UIManager->ShowUIByTag(StartGameUITag);
 
     // 4. 类型转换为具体的开始UI类，并绑定事件
     if (UStartGameScreenWidget* StartWidget = Cast<UStartGameScreenWidget>(StartWidgetBase))

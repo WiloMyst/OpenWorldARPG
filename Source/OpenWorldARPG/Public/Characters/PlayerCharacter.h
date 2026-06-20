@@ -133,13 +133,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|Swap")
 	void NotifySwapOutCompleted(const FTransform& SwapTransform);
 
-	/** GA_SwapOut 的能力类，Controller 通过此配置激活退场技能 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Swap")
-	TSubclassOf<UGameplayAbility> SwapOutAbilityClass;
+	/** 退场事件 Tag，Controller 通过发送此事件激活 GA_SwapOutBase */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
+	FGameplayTag SwapOutEventTag;
 
-	/** GA_SwapIn 的能力类，Controller 通过此配置激活出场技能 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Swap")
-	TSubclassOf<UGameplayAbility> SwapInAbilityClass;
+	/** 出场事件 Tag，Controller 通过发送此事件激活 GA_SwapInBase */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
+	FGameplayTag SwapInEventTag;
 
 	// --- 动画与物理 ---
 
@@ -237,6 +237,9 @@ protected:
 	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|State")
 	virtual void HandleDeath_Implementation() override;
 
+	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|State")
+	virtual void HandleRevive_Implementation() override;
+
 public:
 	UPROPERTY(BlueprintAssignable, Category = "PlayerCharacter|Events")
 	FOnPlayerMovementInput OnPlayerMovementInput;
@@ -315,10 +318,6 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
 	FGameplayTag StandbyStateTag;
 
-	/** 死亡能力标签 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
-	FGameplayTag DeathAbilityTag;
-
 	/** 不可控制状态标签 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
 	FGameplayTag UncontrollableStateTag;
@@ -327,13 +326,21 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
 	FGameplayTag ClimbingStateTag;
 
-	/** 停止攀爬事件标签（攀爬中按跳跃时发送，与 CMC 检测到落地时发送的同一 Tag） */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
-	FGameplayTag StopClimbEventTag;
-
 	/** 滑翔状态标签 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
 	FGameplayTag GlidingStateTag;
+
+	/** 瞄准状态标签 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
+	FGameplayTag AimingStateTag;
+
+	/** 死亡结束事件标签 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
+	FGameplayTag DieEventTag;
+
+	/** 停止攀爬事件标签（攀爬中按跳跃时发送，与 CMC 检测到落地时发送的同一 Tag） */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
+	FGameplayTag ClimbStopEventTag;
 
 	/** 跳跃开始事件标签 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
@@ -358,10 +365,6 @@ protected:
 	/** 瞄准结束事件标签 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
 	FGameplayTag AimStopEventTag;
-
-	/** 瞄准状态标签 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
-	FGameplayTag AimingStateTag;
 
 	/** 跳跃后多久允许开伞 */
     UPROPERTY(EditDefaultsOnly, Category = "PlayerCharacter|Movement|Glide")

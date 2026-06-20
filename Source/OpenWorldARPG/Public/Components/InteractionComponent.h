@@ -7,7 +7,7 @@
 #include "GameplayTagContainer.h"
 #include "InteractionComponent.generated.h"
 
-class AItemBase;
+class APickableItemBase;
 class UInventoryManagerSubsystem;
 
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
@@ -51,7 +51,7 @@ public:
     bool UnequipItemByGUID(FGuid ItemGUID);
 
     UFUNCTION(BlueprintPure, Category = "Inventory|State")
-    AItemBase* GetCurrentPickableItem() const { return CurrentPickableItem.Get(); }
+    APickableItemBase* GetCurrentPickableItem() const { return CurrentPickableItem.Get(); }
 
 protected:
     UFUNCTION()
@@ -64,7 +64,7 @@ protected:
     int32 GetOwnerCharacterID() const;
 
 private:
-    TWeakObjectPtr<AItemBase> CurrentPickableItem;
+    TWeakObjectPtr<APickableItemBase> CurrentPickableItem;
 
     UPROPERTY()
     UInventoryManagerSubsystem* InventorySubsystem;
