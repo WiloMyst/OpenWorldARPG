@@ -40,6 +40,24 @@ public:
     UPROPERTY(BlueprintReadOnly, Category = "AnimData|TurnInPlace")
     float TurnInPlaceDirection = 0.0f;
 
+    // --- Transition ---
+
+    /** 是否从空中过渡到地面移动 */
+    UPROPERTY(BlueprintReadOnly, Category = "AnimData|Transitions")
+    bool bShouldAirborne2GroundMove = false;
+
+    /** 是否从地面移动过渡到跳跃开始 */
+    UPROPERTY(BlueprintReadOnly, Category = "AnimData|Transitions")
+    bool bShouldGroundMove2JumpStart = false;
+    
+    /** 是否从地面移动过渡到下落循环 */
+    UPROPERTY(BlueprintReadOnly, Category = "AnimData|Transitions")
+    bool bShouldGroundMove2FallLoop = false;
+    
+    /** 是否从跳跃开始过渡到下落循环 */
+    UPROPERTY(BlueprintReadOnly, Category = "AnimData|Transitions")
+    bool bShouldJumpStart2FallLoop = false;
+
     // --- Locomotion (Speed X / Speed Y) ---
 
     /** 混合空间 X 轴分量 (左右) */

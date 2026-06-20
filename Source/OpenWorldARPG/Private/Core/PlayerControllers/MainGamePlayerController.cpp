@@ -44,6 +44,12 @@ void AMainGamePlayerController::SetupInputComponent()
 
     if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(InputComponent))
     {
+        // 视角转动
+        if (IA_Look) EnhancedInputComponent->BindAction(IA_Look, ETriggerEvent::Triggered, this, &AMainGamePlayerController::Input_Look);
+        
+        // 镜头回正
+        if (IA_CameraReset) EnhancedInputComponent->BindAction(IA_CameraReset, ETriggerEvent::Started, this, &AMainGamePlayerController::Input_CameraReset);
+
         // 移动
         if (IA_Move)
         {
@@ -88,6 +94,45 @@ void AMainGamePlayerController::SetupInputComponent()
         if (IA_AimAttack)    EnhancedInputComponent->BindAction(IA_AimAttack, ETriggerEvent::Triggered, this, &AMainGamePlayerController::Input_AimAttack);
         if (IA_Aim)          EnhancedInputComponent->BindAction(IA_Aim, ETriggerEvent::Started, this, &AMainGamePlayerController::Input_Aim);
         if (IA_PlungeAttack) EnhancedInputComponent->BindAction(IA_PlungeAttack, ETriggerEvent::Started, this, &AMainGamePlayerController::Input_PlungeAttack);
+
+        
+    }
+}
+
+void AMainGamePlayerController::PlayerTick(float DeltaTime)
+{
+    Super::PlayerTick(DeltaTime);
+
+    if (!bIsResettingCamera) return;
+
+    APawn* ControlledPawn = GetPawn();
+    if (!ControlledPawn)
+    {
+        bIsResettingCamera = false;
+        return;
+    }
+
+    // 构造目标旋转：Yaw 对齐角色正前方，Pitch 使用黄金俯角，Roll 归零
+    FRotator CurrentRotation = GetControlRotation();
+    FRotator TargetRotation(
+        TargetResetPitch,
+        ControlledPawn->GetActorRotation().Yaw,
+        0.0f
+    );
+
+    // Normalize 确保取最短旋转路径（防止 170° → -170° 反转 340°）
+    CurrentRotation.Normalize();
+    TargetRotation.Normalize();
+
+    // 插值逼近目标
+    const FRotator NewRotation = FMath::RInterpTo(CurrentRotation, TargetRotation, DeltaTime, CameraResetInterpSpeed);
+    SetControlRotation(NewRotation);
+
+    // 到达容差范围内则精确对齐并结束回正
+    if (NewRotation.Equals(TargetRotation, CameraResetTolerance))
+    {
+        SetControlRotation(TargetRotation);
+        bIsResettingCamera = false;
     }
 }
 
@@ -216,6 +261,36 @@ void AMainGamePlayerController::Client_OnCharacterSwitched_Implementation(int32 
 // 需要改为 Server RPC 调用 TryActivateAbility。
 // 请确保所有战斗技能的 NetExecutionPolicy 设置正确。
 
+void AMainGamePlayerController::Input_Look(const FInputActionValue& Value)
+{
+    const FVector2D LookAxisVector = Value.Get<FVector2D>();
+
+    // 输入打断检测：回正过程中玩家转动鼠标/摇杆则立即中止回正
+    if (bIsResettingCamera)
+    {
+        if (FMath::Abs(LookAxisVector.X) > CameraResetInterruptThreshold ||
+            FMath::Abs(LookAxisVector.Y) > CameraResetInterruptThreshold)
+        {
+            bIsResettingCamera = false;
+        }
+    }
+
+    // 应用视角输入到控制器
+    if (APawn* ControlledPawn = GetPawn())
+    {
+        ControlledPawn->AddControllerYawInput(LookAxisVector.X);
+        ControlledPawn->AddControllerPitchInput(LookAxisVector.Y);
+    }
+}
+
+void AMainGamePlayerController::Input_CameraReset()
+{
+    if (GetPawn())
+    {
+        bIsResettingCamera = true;
+    }
+}
+
 void AMainGamePlayerController::Input_Move(const FInputActionValue& Value)
 {
     APlayerCharacter* PC = Cast<APlayerCharacter>(GetPawn());
@@ -257,8 +332,11 @@ void AMainGamePlayerController::Input_JumpStop()
 
 void AMainGamePlayerController::Input_ShiftAction()
 {
-    // 按下 Shift → 无脑触发 GA_Dash
-    // GA_Dash 结束时会检测 Shift 是否仍按住 + 移动输入 + 体力，决定是否过渡到 GA_Sprint
+    // 按下 Dash/Sprint 动作键 → 记录状态 + 触发 GA_Dash
+    // GA_Dash 结束时会读取 IsSprintActionHeld() 判断点按/长按，决定接续短疾跑还是长疾跑
+    bIsSprintActionHeld = true;
+    Server_SetSprintActionHeld(true);
+
     if (APlayerCharacter* PC = Cast<APlayerCharacter>(GetPawn()))
     {
         if (DashEventTag.IsValid())
@@ -268,12 +346,20 @@ void AMainGamePlayerController::Input_ShiftAction()
 
 void AMainGamePlayerController::Input_ShiftReleased()
 {
-    // 释放 Shift → 发送 SprintStop 事件，GA_Sprint 内部监听此事件后结束
-    if (APlayerCharacter* PC = Cast<APlayerCharacter>(GetPawn()))
-    {
-        if (SprintStopEventTag.IsValid())
-            UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(PC, SprintStopEventTag, FGameplayEventData());
-    }
+    // 释放 Dash/Sprint 动作键 → 仅更新状态，不再发送 SprintStop 事件
+    // 鸣潮规则：进入疾跑后松开冲刺键不会打断疾跑，疾跑仅由方向键松开或体力耗尽终止
+    bIsSprintActionHeld = false;
+    Server_SetSprintActionHeld(false);
+}
+
+void AMainGamePlayerController::Server_SetSprintActionHeld_Implementation(bool bHeld)
+{
+    bIsSprintActionHeld = bHeld;
+}
+
+bool AMainGamePlayerController::Server_SetSprintActionHeld_Validate(bool bHeld)
+{
+    return true;
 }
 
 void AMainGamePlayerController::Input_Walk()

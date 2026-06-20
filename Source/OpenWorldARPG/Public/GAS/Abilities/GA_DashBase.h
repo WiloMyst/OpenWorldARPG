@@ -16,12 +16,14 @@ class APlayerCharacter;
  *
  * 位移通过 FRootMotionSource_MoveToForce 实现，兼容 CMC 网络预测与回滚。
  *
+ * 鸣潮体力规则：Dash 一次性扣除体力（由 GAS 原生 Cost GE 机制处理），Sprint 全程不消耗体力。
+ *
  * 状态机流转：
- * 1. 按下 Shift → 无脑激活 GA_Dash（扣除瞬间体力、赋予无敌帧 Tag、播放蒙太奇）
- * 2. GA_Dash 蒙太奇即将结束时检测：Shift 仍按住 + 有移动输入 + 体力足够
- *    → 成立：发送 SprintStart 事件，由 GA_Sprint 接管
+ * 1. 按下 Dash 键 → 激活 GA_Dash（GAS Cost GE 自动扣体力、赋予无敌帧 Tag、播放蒙太奇）
+ * 2. GA_Dash 蒙太奇即将结束时检测：有移动输入 且 非后撤步
+ *    → 成立：读取 IsSprintActionHeld() 判断长短按，发送 SprintStart 事件（携带 Magnitude）
  *    → 不成立：GA_Dash 正常结束，角色回到普通行走
- * 3. GA_Sprint 持续扣减体力，移动输入归零或体力耗尽时自动结束
+ * 3. GA_Sprint 不消耗体力，仅靠方向键维持（短疾跑另有 AbilityTask_WaitDelay）
  */
 UCLASS(Abstract)
 class OPENWORLDARPG_API UGA_DashBase : public UGameplayAbility
@@ -77,10 +79,6 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Config|Movement")
     float MovementInputThreshold = 0.1f;
 
-    /** 进入 Sprint 所需的最低体力 */
-    UPROPERTY(EditDefaultsOnly, Category = "Config|Stamina")
-    float SprintTransitionStaminaThreshold = 10.0f;
-
     /** 触发 GA_Sprint 的事件 Tag */
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
     FGameplayTag SprintStartEventTag;
@@ -95,4 +93,7 @@ private:
     uint16 DashRMS_ID = 0;
     bool bHasActiveRMS = false;
     bool bTransitioningToSprint = false;
+
+    /** 在触发瞬间记录本次位移是否为后撤步，防止 BlendOut 时偷跑接续疾跑 */
+    bool bIsBackDash = false;
 };

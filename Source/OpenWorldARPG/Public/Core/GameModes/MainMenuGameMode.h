@@ -3,13 +3,13 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/GameModeBase.h"
+#include "Core/OpenWorldARPGGameModeBase.h"
 #include "MainMenuGameMode.generated.h"
 
 class UStartingRosterConfig;
 
 UCLASS()
-class OPENWORLDARPG_API AMainMenuGameMode : public AGameModeBase
+class OPENWORLDARPG_API AMainMenuGameMode : public AOpenWorldARPGGameModeBase
 {
     GENERATED_BODY()
 

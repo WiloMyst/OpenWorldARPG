@@ -111,11 +111,16 @@ void UEnemyAnimInstance::NativeThreadSafeUpdateAnimation(float DeltaSeconds)
     }
 
     // --- 3. Update Velocity (插值计算 Speed X 和 Speed Y) ---
-    // 基于敌人实际移动速度计算，不依赖玩家输入
+    // 基于敌人实际移动速度计算
 
     DirectionCurrent = FMath::VInterpTo(DirectionCurrent, SnapshotVelocity, DeltaSeconds, 5.0f);
 
     // 使用基类快照的方向向量投影到本地坐标系
     SpeedX = FVector::DotProduct(DirectionCurrent, SnapshotActorRightVector);
     SpeedY = FVector::DotProduct(DirectionCurrent, SnapshotActorForwardVector);
+
+    bShouldAirborne2GroundMove = (bIsGrounded && bIsMoving);
+    bShouldGroundMove2JumpStart = (VelocityZ > 30.0f);
+    bShouldGroundMove2FallLoop = (VelocityZ <= 30.0f);
+    bShouldJumpStart2FallLoop = (VelocityZ <= 200.0f);
 }

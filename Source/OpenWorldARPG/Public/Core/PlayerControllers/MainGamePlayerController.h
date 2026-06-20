@@ -34,6 +34,19 @@ public:
     void Server_SwitchCharacter_Implementation(int32 TargetIndex);
     bool Server_SwitchCharacter_Validate(int32 TargetIndex);
 
+    // --- Dash/Sprint 动作键状态 ---
+
+    /** 返回玩家是否正在按住 Dash/Sprint 动作键（不关心具体绑定的物理按键） */
+    UFUNCTION(BlueprintCallable, Category = "Input")
+    bool IsSprintActionHeld() const { return bIsSprintActionHeld; }
+
+    /** Server RPC：客户端同步 bIsSprintActionHeld 到服务器，确保多端一致 */
+    UFUNCTION(Server, Reliable, WithValidation)
+    void Server_SetSprintActionHeld(bool bHeld);
+
+    void Server_SetSprintActionHeld_Implementation(bool bHeld);
+    bool Server_SetSprintActionHeld_Validate(bool bHeld);
+
     UFUNCTION(Client, Unreliable)
     void Client_OnCharacterSwitched(int32 NewActiveIndex);
 
@@ -48,6 +61,16 @@ protected:
     virtual void BeginPlay() override;
 
     virtual void SetupInputComponent() override;
+
+    virtual void PlayerTick(float DeltaTime) override;
+
+    // --- 镜头平滑回正 ---
+
+    /** 按下镜头回正键时触发 */
+    void Input_CameraReset();
+
+    /** 视角输入处理：含回正打断检测 */
+    void Input_Look(const FInputActionValue& Value);
 
 protected:
     // --- 输入绑定回调 ---
@@ -133,6 +156,12 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Config|Input|Combat")
     TObjectPtr<UInputAction> IA_Aim;
 
+    UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
+    TObjectPtr<UInputAction> IA_CameraReset;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
+    TObjectPtr<UInputAction> IA_Look;
+
     // --- 配置：Tags ---
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
@@ -168,6 +197,24 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags|Combat")
     FGameplayTag AimEventTag;
 
+    // --- 配置：镜头回正 ---
+
+    /** 镜头回正插值速度 */
+    UPROPERTY(EditDefaultsOnly, Category = "Camera|Reset")
+    float CameraResetInterpSpeed = 10.0f;
+
+    /** 回正时的目标俯角（黄金俯角，避免上下坡时看天/看地） */
+    UPROPERTY(EditDefaultsOnly, Category = "Camera|Reset")
+    float TargetResetPitch = -15.0f;
+
+    /** 用于打断回正的输入死区阈值 */
+    UPROPERTY(EditDefaultsOnly, Category = "Camera|Reset")
+    float CameraResetInterruptThreshold = 0.05f;
+
+    /** 到达目标角度的容差阈值（度） */
+    UPROPERTY(EditDefaultsOnly, Category = "Camera|Reset")
+    float CameraResetTolerance = 1.0f;
+
     // --- 配置：UI ---
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|UI")
@@ -179,6 +226,12 @@ private:
 
     bool bIsWalking = false;
     bool bIsPhysicsAnimDisabled = false;
+
+    /** 精准记录玩家是否正在按住 Dash/Sprint 动作键（Enhanced Input 无关物理按键） */
+    bool bIsSprintActionHeld = false;
+
+    /** 镜头是否正在自动回正 */
+    bool bIsResettingCamera = false;
 
     /** 缓存的目标切换角色索引，GA_SwapOutBase 完成后使用 */
     int32 PendingSwapTargetIndex = -1;

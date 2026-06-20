@@ -109,6 +109,28 @@ public:
     UPROPERTY(BlueprintReadOnly, Category = "AnimData|MovementState")
     bool bIsFastSwimming = false;
 
+    // --- Transition ---
+
+    /** 是否从急停过渡到地面移动 */
+    UPROPERTY(BlueprintReadOnly, Category = "AnimData|Transitions")
+    bool bShouldStopStep2GroundMove = false;
+
+    /** 是否从空中过渡到地面移动 */
+    UPROPERTY(BlueprintReadOnly, Category = "AnimData|Transitions")
+    bool bShouldAirborne2GroundMove = false;
+
+    /** 是否从地面移动过渡到跳跃开始 */
+    UPROPERTY(BlueprintReadOnly, Category = "AnimData|Transitions")
+    bool bShouldGroundMove2JumpStart = false;
+    
+    /** 是否从地面移动过渡到下落循环 */
+    UPROPERTY(BlueprintReadOnly, Category = "AnimData|Transitions")
+    bool bShouldGroundMove2FallLoop = false;
+    
+    /** 是否从跳跃开始过渡到下落循环 */
+    UPROPERTY(BlueprintReadOnly, Category = "AnimData|Transitions")
+    bool bShouldJumpStart2FallLoop = false;
+
     // --- Input ---
 
     /** 当前 X 轴输入值 (前后) */

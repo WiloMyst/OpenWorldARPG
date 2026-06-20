@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/GameModeBase.h"
+#include "Core/OpenWorldARPGGameModeBase.h"
 #include "GameplayTagContainer.h"
 #include "MainGameGameMode.generated.h"
 
@@ -15,7 +15,7 @@ class AMainGamePlayerState;
  * 角色实体引用存入 PlayerState（Replicated），GameMode 不保留角色 TMap。
  */
 UCLASS()
-class OPENWORLDARPG_API AMainGameGameMode : public AGameModeBase
+class OPENWORLDARPG_API AMainGameGameMode : public AOpenWorldARPGGameModeBase
 {
     GENERATED_BODY()
 

@@ -33,4 +33,12 @@ public:
 	FGameplayAttributeData MaxStamina;
 	ATTRIBUTE_ACCESSORS(UAS_Player, MaxStamina)
 
+	UPROPERTY(BlueprintReadOnly, Category = "Attributes | FlyStamina")
+	FGameplayAttributeData FlyStamina;
+	ATTRIBUTE_ACCESSORS(UAS_Player, FlyStamina)
+
+	UPROPERTY(BlueprintReadOnly, Category = "Attributes | FlyStamina")
+	FGameplayAttributeData MaxFlyStamina;
+	ATTRIBUTE_ACCESSORS(UAS_Player, MaxFlyStamina)
+
 };

@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/PlayerState.h"
+#include "Core/OpenWorldARPGPlayerState.h"
 #include "GameplayTagContainer.h"
 #include "MainGamePlayerState.generated.h"
 
@@ -22,7 +22,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnTeamCharacterActorsChanged);
  * 服务器是数据真理，客户端通过 Replicated 属性接收同步。
  */
 UCLASS()
-class OPENWORLDARPG_API AMainGamePlayerState : public APlayerState
+class OPENWORLDARPG_API AMainGamePlayerState : public AOpenWorldARPGPlayerState
 {
 	GENERATED_BODY()
 

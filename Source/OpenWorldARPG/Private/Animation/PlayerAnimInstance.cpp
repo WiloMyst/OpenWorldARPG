@@ -210,4 +210,10 @@ void UPlayerAnimInstance::NativeThreadSafeUpdateAnimation(float DeltaSeconds)
             SpeedOnStop = 0.0f;
         }
     }
+
+    bShouldStopStep2GroundMove = (bIsGrounded && bIsMoving);
+    bShouldAirborne2GroundMove = (bIsGrounded && bIsMoving);
+    bShouldGroundMove2JumpStart = (VelocityZ > 30.0f);
+    bShouldGroundMove2FallLoop = (VelocityZ <= 30.0f);
+    bShouldJumpStart2FallLoop = (VelocityZ <= 200.0f);
 }

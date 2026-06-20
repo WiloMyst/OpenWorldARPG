@@ -3,12 +3,12 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/PlayerController.h"
+#include "Core/OpenWorldARPGPlayerController.h"
 #include "GameplayTagContainer.h"
 #include "MainMenuPlayerController.generated.h"
 
 UCLASS()
-class OPENWORLDARPG_API AMainMenuPlayerController : public APlayerController
+class OPENWORLDARPG_API AMainMenuPlayerController : public AOpenWorldARPGPlayerController
 {
     GENERATED_BODY()
 

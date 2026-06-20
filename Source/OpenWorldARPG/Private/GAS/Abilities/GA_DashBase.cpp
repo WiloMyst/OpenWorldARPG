@@ -7,7 +7,6 @@
 #include "Characters/PlayerCharacter.h"
 #include "Components/OpenWorldARPGCharacterMovementComponent.h"
 #include "Core/PlayerControllers/MainGamePlayerController.h"
-#include "GAS/AttributeSets/AS_Player.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/RootMotionSource.h"
 #include "Kismet/KismetMathLibrary.h"
@@ -20,6 +19,12 @@ UGA_DashBase::UGA_DashBase()
 
 void UGA_DashBase::ActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, const FGameplayEventData* TriggerEventData)
 {
+    // 重置上一轮残留的状态标志位，防止第二次激活时被拦截
+    bTransitioningToSprint = false;
+
+    // 鸣潮规则：Dash 一次性扣除体力，完全由 GAS 原生 Cost GE 机制处理
+    // 策划只需在蓝图默认属性的 Cost Gameplay Effect Class 中配置体力消耗 GE
+    // CommitAbility 会自动检查 Cost 并应用，无需手动 GetNumericAttribute 或 ApplyGameplayEffectSpecToSelf
     if (!CommitAbility(Handle, ActorInfo, ActivationInfo))
     {
         EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
@@ -59,17 +64,19 @@ void UGA_DashBase::ApplyDashMovement()
         // 有移动输入：向移动方向冲刺
         DashDirection = InputVector.GetSafeNormal();
         MontageToPlay = DashMontage;
+        bIsBackDash = false;
+
+        // 旋转角色朝向冲刺方向
+        const FRotator TargetRotation = UKismetMathLibrary::MakeRotFromX(DashDirection);
+        CachedPlayer->SetActorRotation(TargetRotation);
     }
     else
     {
-        // 无移动输入：向角色后方闪避
+        // 无移动输入：向角色后方闪避，不旋转胶囊体，保持原朝向
         DashDirection = -CachedPlayer->GetActorForwardVector();
         MontageToPlay = BackDashMontage;
+        bIsBackDash = true;
     }
-
-    // 旋转角色朝向冲刺方向
-    const FRotator TargetRotation = UKismetMathLibrary::MakeRotFromX(DashDirection);
-    CachedPlayer->SetActorRotation(TargetRotation);
 
     // 计算目标位置
     const FVector StartLocation = CachedPlayer->GetActorLocation();
@@ -124,35 +131,36 @@ void UGA_DashBase::TryTransitionToSprint()
 {
     if (!CachedPlayer || bTransitioningToSprint) return;
 
-    // 条件1：玩家是否仍然按住左 Shift？
-    APlayerController* PC = CachedPlayer->GetController<APlayerController>();
-    if (!PC || !PC->IsInputKeyDown(EKeys::LeftShift))
+    // 漏洞一修复：后撤步是绝对的防御动作，绝不能接续疾跑
+    // 在触发瞬间（ApplyDashMovement）记录性质，而非 BlendOut 时的摇杆状态
+    if (bIsBackDash)
     {
         return;
     }
 
-    // 条件2：玩家是否有非零的移动输入？
+    // 鸣潮规则：无方向输入 → 不接续疾跑
     UCharacterMovementComponent* MoveComp = CachedPlayer->GetCharacterMovement();
     if (!MoveComp || MoveComp->GetLastInputVector().SquaredLength() <= MovementInputThreshold)
     {
         return;
     }
 
-    // 条件3：当前体力是否足够？
-    UAbilitySystemComponent* ASC = CachedPlayer->GetAbilitySystemComponent();
-    if (!ASC) return;
-    const float CurrentStamina = ASC->GetNumericAttribute(UAS_Player::GetStaminaAttribute());
-    if (CurrentStamina < SprintTransitionStaminaThreshold)
-    {
-        return;
-    }
+    // 鸣潮规则：Sprint 全程不消耗体力，体力已在 Dash 激活时一次性扣除
+    // 只要 Dash 成功激活（CommitAbility 通过），即可过渡到 Sprint，无需额外体力检查
 
-    // 所有条件满足，标记过渡中，发送 SprintStart 事件
+    // 所有条件满足，标记过渡中
     bTransitioningToSprint = true;
+
+    // 通过 Controller 的 bIsSprintActionHeld 判断点按/长按
+    // EventMagnitude: 1.0 = 长按（持久疾跑），0.0 = 点按（短时疾跑）
+    AMainGamePlayerController* PC = CachedPlayer->GetController<AMainGamePlayerController>();
+    const bool bIsLongPress = PC ? PC->IsSprintActionHeld() : false;
 
     if (SprintStartEventTag.IsValid())
     {
-        UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(CachedPlayer, SprintStartEventTag, FGameplayEventData());
+        FGameplayEventData EventData;
+        EventData.EventMagnitude = bIsLongPress ? 1.0f : 0.0f;
+        UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(CachedPlayer, SprintStartEventTag, EventData);
     }
 }
 
@@ -160,10 +168,12 @@ void UGA_DashBase::OnDashFinished()
 {
     if (!CachedPlayer) return;
 
-    // 位移完成：清空速度
+    // 漏洞二修复：只清零水平速度（X, Y），保留垂直速度（Z）
+    // 防止角色在斜坡/悬崖边 Dash 冲出边缘后 Z 轴速度被清零导致悬停
     if (UCharacterMovementComponent* MoveComp = CachedPlayer->GetCharacterMovement())
     {
-        MoveComp->Velocity = FVector::ZeroVector;
+        MoveComp->Velocity.X = 0.0f;
+        MoveComp->Velocity.Y = 0.0f;
     }
 
     bHasActiveRMS = false;

@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 
 #include "GAS/AttributeSets/AS_Player.h"
@@ -9,6 +9,8 @@ UAS_Player::UAS_Player()
     InitMaxHealth(100.0f);
     InitStamina(100.0f);
     InitMaxStamina(100.0f);
+    InitFlyStamina(100.0f);
+    InitMaxFlyStamina(100.0f);
 }
 
 void UAS_Player::PreAttributeChange(const FGameplayAttribute& Attribute, float& NewValue)
@@ -24,5 +26,10 @@ void UAS_Player::PreAttributeChange(const FGameplayAttribute& Attribute, float& 
     if (Attribute == GetStaminaAttribute())
     {
         NewValue = FMath::Clamp(NewValue, 0.f, GetMaxStamina());
+    }
+    // 如果修改的是FlyStamina，确保它在 [0, MaxFlyStamina] 之间
+    if (Attribute == GetFlyStaminaAttribute())
+    {
+        NewValue = FMath::Clamp(NewValue, 0.f, GetMaxFlyStamina());
     }
 }

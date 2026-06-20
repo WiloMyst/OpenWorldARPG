@@ -5,7 +5,6 @@
 #include "Managers/UIManagerSubsystem.h"
 #include "EnhancedInputSubsystems.h"
 #include "EnhancedInputComponent.h"
-#include "GameFramework/Character.h"
 
 
 void AOpenWorldARPGPlayerController::BeginPlay()
@@ -34,29 +33,13 @@ void AOpenWorldARPGPlayerController::SetupInputComponent()
     {
         // --- 绑定动作与回调函数 ---
 
-		//Looking
-        EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &AOpenWorldARPGPlayerController::Look);
-
         // 绑定Alt键按下事件
-        EnhancedInputComponent->BindAction(ShowCursorAction, ETriggerEvent::Started, this, &AOpenWorldARPGPlayerController::ShowCursorTemporarily);
+        EnhancedInputComponent->BindAction(IA_ShowCursor, ETriggerEvent::Started, this, &AOpenWorldARPGPlayerController::ShowCursorTemporarily);
 
         // 绑定Alt键松开事件
-        EnhancedInputComponent->BindAction(ShowCursorAction, ETriggerEvent::Completed, this, &AOpenWorldARPGPlayerController::HideCursorTemporarily);
+        EnhancedInputComponent->BindAction(IA_ShowCursor, ETriggerEvent::Completed, this, &AOpenWorldARPGPlayerController::HideCursorTemporarily);
 
 
-    }
-}
-
-void AOpenWorldARPGPlayerController::Look(const FInputActionValue& Value)
-{
-    // input is a Vector2D
-    FVector2D LookAxisVector = Value.Get<FVector2D>();
-
-    if (APawn* ControlledPawn = GetPawn())
-    {
-        // add yaw and pitch input to controller
-        ControlledPawn->AddControllerYawInput(LookAxisVector.X);
-        ControlledPawn->AddControllerPitchInput(LookAxisVector.Y);
     }
 }
 

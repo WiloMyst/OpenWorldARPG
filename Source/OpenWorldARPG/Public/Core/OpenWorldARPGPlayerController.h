@@ -23,17 +23,13 @@ public:
 	class UInputMappingContext* DefaultMappingContext;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = Input, meta = (AllowPrivateAccess = "true"))
-	class UInputAction* LookAction;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = Input, meta = (AllowPrivateAccess = "true"))
-	class UInputAction* ShowCursorAction;
+	class UInputAction* IA_ShowCursor;
 
 protected:
     virtual void BeginPlay() override;
     virtual void SetupInputComponent() override;
 
 protected:
-	void Look(const FInputActionValue& Value);
 	void ShowCursorTemporarily(const FInputActionValue& Value);
 	void HideCursorTemporarily(const FInputActionValue& Value);
 
