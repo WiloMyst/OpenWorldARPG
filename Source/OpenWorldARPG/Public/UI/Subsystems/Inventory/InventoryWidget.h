@@ -12,36 +12,34 @@
 class UItemSlotPanelWidget;
 class UItemDetailPanelWidget;
 class UItemCategoryTabWidget;
+class UInventoryViewModel;
 class UVerticalBox;
 class UButton;
 class UDataTable;
 struct FItemInstance;
 struct FItemData;
 
+/** 背包主 UI */
 UCLASS()
 class OPENWORLDARPG_API UInventoryWidget : public UWindowWidgetBase
 {
     GENERATED_BODY()
 
 protected:
+    virtual void NativeOnInitialized() override;
     virtual void NativeConstruct() override;
+    virtual void NativeDestruct() override;
 
-    // --- 核心流转逻辑 ---
+    // --- Tab 生成 (纯表现层) ---
 
     void RefreshCategoryTabBox();
 
     void HandleSelectFirstCategoryTab();
 
     UFUNCTION()
-    void HandleSelectCategoryTab(UItemCategoryTabWidget* NewCategoryTab);
-
-    UFUNCTION()
     void HandleOnTabClicked(UItemCategoryTabWidget* NewCategoryTab, EItemCategory NewTabCategory);
 
-    UFUNCTION()
-    void HandleOnItemSelectedInGrid(FGuid SelectedItemGUID, int32 SelectedItemID, const FItemInstance& SelectedItemInstance);
-
-    // --- 按钮响应 ---
+    // --- 按钮响应 (仅调用 VM) ---
 
     UFUNCTION()
     void OnCloseButtonClicked();
@@ -76,8 +74,10 @@ protected:
     TSubclassOf<UItemCategoryTabWidget> CategoryTabClass;
 
 private:
+    /** 视图模型 (MVVM 核心中介层) */
+    UPROPERTY()
+    TObjectPtr<UInventoryViewModel> ViewModel;
+
     UPROPERTY()
     TObjectPtr<UItemCategoryTabWidget> SelectedCategoryTab;
-
-    FGuid CachedSelectedItemGUID;
 };

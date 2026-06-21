@@ -33,38 +33,44 @@ void UEnemyAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
     Super::NativeUpdateAnimation(DeltaSeconds);
 
     // ================================================================
+    // 物理快照数据
+    // ================================================================
+    const ACharacter* Character = CachedEnemyCharacter.Get();
+    if (Character)
+    {
+        SnapshotActorLocation = Character->GetActorLocation();
+        SnapshotActorRotation = Character->GetActorRotation();
+        SnapshotActorForwardVector = Character->GetActorForwardVector();
+        SnapshotActorRightVector = Character->GetActorRightVector();
+        SnapshotVelocity = Character->GetVelocity();
+    }
+    else
+    {
+        return; // 如果没有角色，直接跳过后续逻辑
+    }
+
+    // ================================================================
     // GameThread 快照：从 Blackboard 拉取仇恨数据
     // ================================================================
-    // Blackboard 不是线程安全的，必须在主线程读取。
-    // 基类 NativeUpdateAnimation 已快照通用物理数据（ActorLocation 等），
-    // 此处直接复用基类快照计算距离。
-
     SnapshotDistanceToTarget = 0.0f;
     bSnapshotIsAggroed = false;
     bSnapshotHasTarget = false;
     SnapshotTargetLocation = FVector::ZeroVector;
 
     const AAIController* AIController = CachedAIController.Get();
-    if (!AIController)
+    if (AIController)
     {
-        return;
-    }
-
-    const UBlackboardComponent* Blackboard = AIController->GetBlackboardComponent();
-    if (!Blackboard)
-    {
-        return;
-    }
-
-    // 读取目标 Actor
-    if (AActor* TargetActor = Cast<AActor>(Blackboard->GetValueAsObject(TargetActorKeyName)))
-    {
-        bSnapshotHasTarget = true;
-        bSnapshotIsAggroed = true;
-        SnapshotTargetLocation = TargetActor->GetActorLocation();
-
-        // 计算与目标的距离（使用基类快照 SnapshotActorLocation）
-        SnapshotDistanceToTarget = FVector::Dist(SnapshotActorLocation, SnapshotTargetLocation);
+        if (const UBlackboardComponent* Blackboard = AIController->GetBlackboardComponent())
+        {
+            // 读取目标 Actor
+            if (AActor* TargetActor = Cast<AActor>(Blackboard->GetValueAsObject(TargetActorKeyName)))
+            {
+                bSnapshotHasTarget = true;
+                bSnapshotIsAggroed = true;
+                SnapshotTargetLocation = TargetActor->GetActorLocation();
+                SnapshotDistanceToTarget = FVector::Dist(SnapshotActorLocation, SnapshotTargetLocation);
+            }
+        }
     }
 }
 

@@ -1,9 +1,9 @@
 // Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Managers/InventoryManagerSubsystem.h"
+#include "Managers/GameAssetManagerSubsystem.h"
 #include "Engine/DataTable.h"
 #include "Engine/Engine.h"
-#include "Managers/GameAssetManagerSubsystem.h"
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemInterface.h"
 
@@ -24,11 +24,11 @@ void UInventoryManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection
     }
 
     // 初始化分类容量上限
-    CategoryCapacityLimits.Add(EItemCategory::Weapon,   1000);
+    CategoryCapacityLimits.Add(EItemCategory::Weapon, 1000);
     CategoryCapacityLimits.Add(EItemCategory::Artifact, 1500);
     CategoryCapacityLimits.Add(EItemCategory::Material, 9999);
-    CategoryCapacityLimits.Add(EItemCategory::Food,     2000);
-    CategoryCapacityLimits.Add(EItemCategory::Quest,    100);
+    CategoryCapacityLimits.Add(EItemCategory::Food, 2000);
+    CategoryCapacityLimits.Add(EItemCategory::Quest, 100);
 }
 
 const FItemData* UInventoryManagerSubsystem::GetItemData(int32 ItemID) const
@@ -65,7 +65,9 @@ int32 UInventoryManagerSubsystem::GetCategoryItemCount(EItemCategory Category) c
     int32 Count = 0;
     for (const FItemInstance& Item : InventoryItems)
     {
-        if (Item.ItemCategory == Category)
+        // 通过 ItemID 查询静态数据获取分类 (ItemCategory 已从 FItemInstance 移除)
+        const FItemData* StaticData = GetItemData(Item.ItemID);
+        if (StaticData && StaticData->ItemCategory == Category)
         {
             Count++;
         }
@@ -77,57 +79,6 @@ int32 UInventoryManagerSubsystem::GetCategoryCapacity(EItemCategory Category) co
 {
     const int32* Capacity = CategoryCapacityLimits.Find(Category);
     return Capacity ? *Capacity : 9999;
-}
-
-// --- 排序 ---
-
-void UInventoryManagerSubsystem::SortItems(TArray<FItemInstance>& Items, EItemSortMode SortMode) const
-{
-    switch (SortMode)
-    {
-    case EItemSortMode::ByRarity:
-        Items.Sort([this](const FItemInstance& A, const FItemInstance& B)
-        {
-            const FItemData* DataA = GetItemData(A.ItemID);
-            const FItemData* DataB = GetItemData(B.ItemID);
-            if (!DataA || !DataB) return false;
-            return static_cast<uint8>(DataA->ItemRarity) > static_cast<uint8>(DataB->ItemRarity);
-        });
-        break;
-
-    case EItemSortMode::ByLevel:
-        Items.Sort([](const FItemInstance& A, const FItemInstance& B)
-        {
-            // 武器按等级，圣遗物按主词条数值，其他按获取时间
-            if (A.ItemCategory == EItemCategory::Weapon && B.ItemCategory == EItemCategory::Weapon)
-            {
-                return A.WeaponData.Level > B.WeaponData.Level;
-            }
-            if (A.ItemCategory == EItemCategory::Artifact && B.ItemCategory == EItemCategory::Artifact)
-            {
-                return A.ArtifactData.MainStatValue > B.ArtifactData.MainStatValue;
-            }
-            return A.AcquiredTime > B.AcquiredTime;
-        });
-        break;
-
-    case EItemSortMode::ByTime:
-        Items.Sort([](const FItemInstance& A, const FItemInstance& B)
-        {
-            return A.AcquiredTime > B.AcquiredTime;
-        });
-        break;
-
-    case EItemSortMode::ByName:
-        Items.Sort([this](const FItemInstance& A, const FItemInstance& B)
-        {
-            const FItemData* DataA = GetItemData(A.ItemID);
-            const FItemData* DataB = GetItemData(B.ItemID);
-            if (!DataA || !DataB) return false;
-            return DataA->ItemName.ToString() < DataB->ItemName.ToString();
-        });
-        break;
-    }
 }
 
 // --- 添加物品 ---
@@ -157,11 +108,11 @@ void UInventoryManagerSubsystem::AddStackableItem(int32 ItemID, int32 Amount)
 
     const int32 MaxStack = ItemConfig->MaxStackSize > 0 ? ItemConfig->MaxStackSize : 9999;
 
-    // 查找已有格子
+    // 查找已有格子 (bIsStackable 已从 FItemInstance 移除，通过静态数据判断)
     FItemInstance* ExistingSlot = nullptr;
     for (FItemInstance& Item : InventoryItems)
     {
-        if (Item.ItemID == ItemID && Item.bIsStackable)
+        if (Item.ItemID == ItemID)
         {
             ExistingSlot = &Item;
             break;
@@ -185,9 +136,7 @@ void UInventoryManagerSubsystem::AddStackableItem(int32 ItemID, int32 Amount)
         FItemInstance NewItem;
         NewItem.ItemGUID = FGuid::NewGuid();
         NewItem.ItemID = ItemID;
-        NewItem.ItemCategory = ItemConfig->ItemCategory;
         NewItem.Count = ActualAdded;
-        NewItem.bIsStackable = true;
         NewItem.AcquiredTime = FDateTime::UtcNow();
         InventoryItems.Add(NewItem);
     }
@@ -233,12 +182,12 @@ void UInventoryManagerSubsystem::AddUniqueItem(int32 ItemID, const FWeaponInstan
     FItemInstance NewItem;
     NewItem.ItemGUID = FGuid::NewGuid();
     NewItem.ItemID = ItemID;
-    NewItem.ItemCategory = ItemConfig->ItemCategory;
     NewItem.Count = 1;
-    NewItem.bIsStackable = false;
-    NewItem.WeaponData = WeaponData;
     NewItem.AcquiredTime = FDateTime::UtcNow();
     InventoryItems.Add(NewItem);
+
+    // 武器实例数据通过外键映射存储 (避免 FItemInstance 内存膨胀)
+    WeaponInstanceMap.Add(NewItem.ItemGUID, WeaponData);
 
     OnItemAdded.Broadcast(ItemID, 1);
     OnInventoryUpdated.Broadcast();
@@ -262,12 +211,12 @@ void UInventoryManagerSubsystem::AddArtifactItem(int32 ItemID, const FArtifactIn
     FItemInstance NewItem;
     NewItem.ItemGUID = FGuid::NewGuid();
     NewItem.ItemID = ItemID;
-    NewItem.ItemCategory = EItemCategory::Artifact;
     NewItem.Count = 1;
-    NewItem.bIsStackable = false;
-    NewItem.ArtifactData = ArtifactData;
     NewItem.AcquiredTime = FDateTime::UtcNow();
     InventoryItems.Add(NewItem);
+
+    // 圣遗物实例数据通过外键映射存储 (避免 FItemInstance 内存膨胀)
+    ArtifactInstanceMap.Add(NewItem.ItemGUID, ArtifactData);
 
     OnItemAdded.Broadcast(ItemID, 1);
     OnInventoryUpdated.Broadcast();
@@ -342,6 +291,7 @@ bool UInventoryManagerSubsystem::RemoveItemByIndex(int32 DropIndex, int32 DropAm
 
     FItemInstance& TargetItem = InventoryItems[DropIndex];
     const int32 ItemIDToDrop = TargetItem.ItemID;
+    const FGuid ItemGUIDToDrop = TargetItem.ItemGUID;
 
     // 装备中的物品不允许丢弃
     if (TargetItem.EquippedCharacterID >= 0)
@@ -350,8 +300,16 @@ bool UInventoryManagerSubsystem::RemoveItemByIndex(int32 DropIndex, int32 DropAm
         return false;
     }
 
-    if (!TargetItem.bIsStackable)
+    // 通过静态数据判断是否可堆叠 (bIsStackable 已从 FItemInstance 移除)
+    const FItemData* ItemConfig = GetItemData(ItemIDToDrop);
+    const bool bIsStackable = ItemConfig ? ItemConfig->bIsStackable : false;
+
+    if (!bIsStackable)
     {
+        // 不可堆叠物品：整件移除，同时清理外键映射
+        WeaponInstanceMap.Remove(ItemGUIDToDrop);
+        ArtifactInstanceMap.Remove(ItemGUIDToDrop);
+
         OnItemDropped.Broadcast(ItemIDToDrop, 1);
         InventoryItems.RemoveAt(DropIndex);
         OnInventoryUpdated.Broadcast();
@@ -390,8 +348,13 @@ bool UInventoryManagerSubsystem::EquipItem(FGuid ItemGUID, int32 CharacterID)
         return false;
     }
 
+    // 通过 ItemID 查询静态数据获取分类 (ItemCategory 已从 FItemInstance 移除)
+    const FItemData* ItemConfig = GetItemData(Item.ItemID);
+    if (!ItemConfig) return false;
+    const EItemCategory ItemCategory = ItemConfig->ItemCategory;
+
     // 武器：同角色只能装备一把，先卸下旧武器
-    if (Item.ItemCategory == EItemCategory::Weapon)
+    if (ItemCategory == EItemCategory::Weapon)
     {
         FItemInstance OldWeapon = GetEquippedWeapon(CharacterID);
         if (OldWeapon.ItemGUID.IsValid())
@@ -401,12 +364,18 @@ bool UInventoryManagerSubsystem::EquipItem(FGuid ItemGUID, int32 CharacterID)
     }
 
     // 圣遗物：同角色同部位只能装备一件，先卸下旧圣遗物
-    if (Item.ItemCategory == EItemCategory::Artifact)
+    if (ItemCategory == EItemCategory::Artifact)
     {
+        // 从外键映射查询当前圣遗物部位
+        const FArtifactInstanceData* TargetArtifactData = ArtifactInstanceMap.Find(Item.ItemGUID);
+        if (!TargetArtifactData) return false;
+
         TArray<FItemInstance> CurrentArtifacts = GetEquippedArtifacts(CharacterID);
         for (const FItemInstance& Artifact : CurrentArtifacts)
         {
-            if (Artifact.ArtifactData.Slot == Item.ArtifactData.Slot)
+            // 从外键映射查询已装备圣遗物部位
+            const FArtifactInstanceData* EquippedArtifactData = ArtifactInstanceMap.Find(Artifact.ItemGUID);
+            if (EquippedArtifactData && EquippedArtifactData->Slot == TargetArtifactData->Slot)
             {
                 UnequipItem(Artifact.ItemGUID);
                 break;
@@ -452,7 +421,9 @@ FItemInstance UInventoryManagerSubsystem::GetEquippedWeapon(int32 CharacterID) c
 {
     for (const FItemInstance& Item : InventoryItems)
     {
-        if (Item.ItemCategory == EItemCategory::Weapon && Item.EquippedCharacterID == CharacterID)
+        // 通过 ItemID 查询静态数据获取分类 (ItemCategory 已从 FItemInstance 移除)
+        const FItemData* StaticData = GetItemData(Item.ItemID);
+        if (StaticData && StaticData->ItemCategory == EItemCategory::Weapon && Item.EquippedCharacterID == CharacterID)
         {
             return Item;
         }
@@ -465,7 +436,9 @@ TArray<FItemInstance> UInventoryManagerSubsystem::GetEquippedArtifacts(int32 Cha
     TArray<FItemInstance> Result;
     for (const FItemInstance& Item : InventoryItems)
     {
-        if (Item.ItemCategory == EItemCategory::Artifact && Item.EquippedCharacterID == CharacterID)
+        // 通过 ItemID 查询静态数据获取分类 (ItemCategory 已从 FItemInstance 移除)
+        const FItemData* StaticData = GetItemData(Item.ItemID);
+        if (StaticData && StaticData->ItemCategory == EItemCategory::Artifact && Item.EquippedCharacterID == CharacterID)
         {
             Result.Add(Item);
         }
@@ -498,8 +471,8 @@ bool UInventoryManagerSubsystem::UseItem(FGuid ItemGUID, int32 TargetCharacterID
         return false;
     }
 
-    // 校验：数量不足
-    if (Item.bIsStackable && Item.Count < UseAmount)
+    // 校验：数量不足 (bIsStackable 已从 FItemInstance 移除，通过静态数据判断)
+    if (ItemConfig->bIsStackable && Item.Count < UseAmount)
     {
         UE_LOG(LogTemp, Warning, TEXT("UseItem: 物品数量不足。"));
         return false;
@@ -515,7 +488,7 @@ bool UInventoryManagerSubsystem::UseItem(FGuid ItemGUID, int32 TargetCharacterID
     }
 
     // 扣减数量
-    if (Item.bIsStackable)
+    if (ItemConfig->bIsStackable)
     {
         Item.Count -= UseAmount;
         if (Item.Count <= 0)
@@ -526,6 +499,9 @@ bool UInventoryManagerSubsystem::UseItem(FGuid ItemGUID, int32 TargetCharacterID
     else
     {
         // 不可堆叠物品使用后整件移除 (如经验书)
+        // 同时清理外键映射
+        WeaponInstanceMap.Remove(Item.ItemGUID);
+        ArtifactInstanceMap.Remove(Item.ItemGUID);
         InventoryItems.RemoveAt(Index);
     }
 
@@ -541,36 +517,34 @@ void UInventoryManagerSubsystem::GetItemsByCategory(EItemCategory Category, TArr
     OutItems.Empty();
     for (const FItemInstance& Item : InventoryItems)
     {
-        if (Item.ItemCategory == Category)
+        // 通过 ItemID 查询静态数据获取分类 (ItemCategory 已从 FItemInstance 移除)
+        const FItemData* StaticData = GetItemData(Item.ItemID);
+        if (StaticData && StaticData->ItemCategory == Category)
         {
             OutItems.Add(Item);
         }
     }
 }
 
-void UInventoryManagerSubsystem::GetItemsByFilter(EItemCategory Category, EItemSortMode SortMode, EItemRarity RarityFilter, TArray<FItemInstance>& OutItems) const
+// 【架构优化】：移除了对 SortItems() 的调用和 SortMode 参数，纯粹返回过滤后的数据
+void UInventoryManagerSubsystem::GetItemsByFilter(EItemCategory Category, EItemRarity RarityFilter, TArray<FItemInstance>& OutItems) const
 {
     OutItems.Empty();
 
     for (const FItemInstance& Item : InventoryItems)
     {
-        if (Item.ItemCategory != Category) continue;
+        // 通过 ItemID 查询静态数据获取分类 (ItemCategory 已从 FItemInstance 移除)
+        const FItemData* StaticData = GetItemData(Item.ItemID);
+        if (!StaticData || StaticData->ItemCategory != Category) continue;
 
         // 稀有度筛选 (Star1 作为 "全部" 的标记)
         if (RarityFilter != EItemRarity::Star1)
         {
-            FItemData StaticData;
-            if (GetItemStaticData(Item.ItemID, StaticData))
-            {
-                if (StaticData.ItemRarity != RarityFilter) continue;
-            }
+            if (StaticData->ItemRarity != RarityFilter) continue;
         }
 
         OutItems.Add(Item);
     }
-
-    // 排序
-    const_cast<UInventoryManagerSubsystem*>(this)->SortItems(OutItems, SortMode);
 }
 
 int32 UInventoryManagerSubsystem::GetItemCountByID(int32 ItemID) const
@@ -613,6 +587,28 @@ bool UInventoryManagerSubsystem::GetItemStaticData(int32 ItemID, FItemData& OutI
     if (FoundRow)
     {
         OutItemData = *FoundRow;
+        return true;
+    }
+    return false;
+}
+
+bool UInventoryManagerSubsystem::GetWeaponInstanceData(FGuid ItemGUID, FWeaponInstanceData& OutData) const
+{
+    const FWeaponInstanceData* Found = WeaponInstanceMap.Find(ItemGUID);
+    if (Found)
+    {
+        OutData = *Found;
+        return true;
+    }
+    return false;
+}
+
+bool UInventoryManagerSubsystem::GetArtifactInstanceData(FGuid ItemGUID, FArtifactInstanceData& OutData) const
+{
+    const FArtifactInstanceData* Found = ArtifactInstanceMap.Find(ItemGUID);
+    if (Found)
+    {
+        OutData = *Found;
         return true;
     }
     return false;

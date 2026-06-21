@@ -2,12 +2,13 @@
 
 
 #include "World/Interactables/PickableItemBase.h"
+#include "Core/OpenWorldARPGSettings.h"
+#include "Managers/GameAssetManagerSubsystem.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/DataTable.h"
 #include "Engine/GameInstance.h"
 #include "Engine/StreamableManager.h"
 #include "Engine/AssetManager.h"
-#include "Managers/GameAssetManagerSubsystem.h"
 
 APickableItemBase::APickableItemBase()
 {
@@ -17,7 +18,24 @@ APickableItemBase::APickableItemBase()
     RootComponent = ItemMesh;
 
     ItemMesh->SetSimulatePhysics(true);
-    ItemMesh->SetCollisionProfileName(TEXT("PhysicsActor"));
+    
+    // 理由：PhysicsActor 会 Block Pawn（导致玩家绊倒/卡走位）和 Block Camera（导致镜头抽搐拉近）
+    ItemMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    ItemMesh->SetCollisionObjectType(ECC_PhysicsBody);
+    
+    // 1. 默认先忽略所有通道，做到最干净的基础状态
+    ItemMesh->SetCollisionResponseToAllChannels(ECR_Ignore);
+    
+    // 2. 阻挡静态地形和动态物体，确保能正常受到重力掉落在地上，不穿模
+    ItemMesh->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
+    ItemMesh->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
+    
+    // 3. 开启 Visibility 阻挡，以便玩家准星或交互射线 (Line Trace) 能够打到它进行拾取
+    ItemMesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+    
+    // 4. 明确忽略 Pawn（绝对不绊脚）和 Camera（绝对不卡镜头）
+    ItemMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+    ItemMesh->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
 }
 
 void APickableItemBase::OnConstruction(const FTransform& Transform)
@@ -39,6 +57,17 @@ void APickableItemBase::RefreshMeshFromID()
 
     UGameAssetManagerSubsystem* AssetManager = GetGameInstance() ? GetGameInstance()->GetSubsystem<UGameAssetManagerSubsystem>() : nullptr;
     UDataTable* ItemTable = AssetManager ? AssetManager->GetItemDatabaseTable() : nullptr;
+
+    // 如果没拿到（说明可能在编辑器中拖拽，没有 GameInstance），从全局设置读取
+	if (!ItemTable)
+	{
+		const UOpenWorldARPGSettings& Settings = UOpenWorldARPGSettings::Get();
+		if (!Settings.ItemDatabaseTable.IsNull())
+		{
+			// 同步加载数据表以供查询。不用担心开销，数据表很小，且编辑器下同步加载是正常的。
+			ItemTable = Settings.ItemDatabaseTable.LoadSynchronous();
+		}
+	}
 
     if (!ItemTable) return;
 

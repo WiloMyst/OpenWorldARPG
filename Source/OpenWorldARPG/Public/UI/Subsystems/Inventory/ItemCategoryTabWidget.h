@@ -16,21 +16,20 @@ class UItemCategoryTabWidget;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnCategoryTabClicked, UItemCategoryTabWidget*, NewCategoryTab, EItemCategory, NewTabCategory);
 
+/**
+ * 物品分类标签页 UI
+ */
 UCLASS()
 class OPENWORLDARPG_API UItemCategoryTabWidget : public UUserWidget
 {
     GENERATED_BODY()
 
 public:
-    virtual void NativeConstruct() override;
+    virtual void NativeOnInitialized() override;
+    virtual void NativeDestruct() override;
 
     UFUNCTION(BlueprintCallable, Category = "Inventory|CategoryTab")
     void UpdateTabInfo();
-
-    void SetTabSelectedState(bool bIsSelected);
-
-    UFUNCTION()
-    void OnCategoryIconLoaded(FSoftObjectPath LoadedPath);
 
     UPROPERTY(BlueprintAssignable, Category = "Inventory|Events")
     FOnCategoryTabClicked OnTabClicked;
@@ -43,13 +42,6 @@ protected:
     UFUNCTION()
     void OnTabButtonClicked();
 
-    UFUNCTION()
-    void OnTabButtonHovered();
-
-    UFUNCTION()
-    void OnTabButtonUnhovered();
-
-protected:
     // --- UI 组件绑定 ---
 
     UPROPERTY(meta = (BindWidget))
@@ -61,9 +53,10 @@ protected:
     UPROPERTY(meta = (BindWidget))
     TObjectPtr<UImage> CategoryIcon;
 
-    UPROPERTY(meta = (BindWidget))
-    TObjectPtr<UImage> ImageMouseHovered;
+private:
+    /** 异步加载句柄，用于取消未完成的加载 */
+    TSharedPtr<struct FStreamableHandle> IconLoadHandle;
 
-    UPROPERTY(meta = (BindWidget))
-    TObjectPtr<UImage> ImageMouseClicked;
+    /** 图标加载完成回调（强类型绑定） */
+    void OnCategoryIconLoaded(TSoftObjectPtr<UTexture2D> SoftIcon);
 };

@@ -12,10 +12,10 @@
 #include "Components/WeaponManagerComponent.h"
 #include "Components/InteractionComponent.h"
 #include "Components/TargetingComponent.h"
+#include "Components/HeroUIExtensionComponent.h"
 
 #include "Camera/CameraComponent.h"
 #include "GameFramework/SpringArmComponent.h"
-#include "GameFramework/CharacterMovementComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/StreamableManager.h"
@@ -71,6 +71,9 @@ APlayerCharacter::APlayerCharacter(const FObjectInitializer& ObjectInitializer)
 	TargetingComponent = CreateDefaultSubobject<UTargetingComponent>(TEXT("TargetingComponent"));
 
 	MotionWarpingComp = CreateDefaultSubobject<UMotionWarpingComponent>(TEXT("MotionWarpingComp"));
+
+	// UI 扩展组件：作为 Gameplay 与 UI 之间的桥梁
+	HeroUIExtensionComp = CreateDefaultSubobject<UHeroUIExtensionComponent>(TEXT("HeroUIExtensionComp"));
 
 	AbilitySystemComponent = CreateDefaultSubobject<UAbilitySystemComponent>(TEXT("AbilitySystemComponent"));
 	AbilitySystemComponent->SetIsReplicated(true);
@@ -894,12 +897,6 @@ void APlayerCharacter::HandleDeath_Implementation()
 	// 调用基类：设置 bIsDead=true、禁用碰撞(NoCollision+IgnoreAll)、停止移动(StopMovementImmediately+DisableMovement)
 	Super::HandleDeath_Implementation();
 
-	// 添加死亡状态 Tag
-	if (DieEventTag.IsValid() && AbilitySystemComponent)
-	{
-		AbilitySystemComponent->AddLooseGameplayTag(DieEventTag);
-	}
-
 	// 禁用玩家输入，防止死后继续移动
 	if (APlayerController* PC = Cast<APlayerController>(GetController()))
 	{
@@ -908,6 +905,8 @@ void APlayerCharacter::HandleDeath_Implementation()
 
 	// 注意：不再调用 SetActorTickEnabled(false) 和 StopAllMontages()，
 	// 表现层（死亡蒙太奇/布娃娃）由 GA_DieBase 全权负责。
+	// 注意：死亡状态 Tag (Character.State.Dead) 由 GA_DieBase 的 ActivationOwnedTags 自动管理，
+	// 不在此处手动 AddLooseGameplayTag，避免与 GA 生命周期冲突。
 }
 
 void APlayerCharacter::HandleRevive_Implementation()
@@ -915,17 +914,14 @@ void APlayerCharacter::HandleRevive_Implementation()
 	// 调用基类：重置 bIsDead=false、恢复胶囊体碰撞(Pawn)、恢复移动组件(Falling)
 	Super::HandleRevive_Implementation();
 
-	// 移除死亡状态 Tag
-	if (DieEventTag.IsValid() && AbilitySystemComponent)
-	{
-		AbilitySystemComponent->RemoveLooseGameplayTag(DieEventTag);
-	}
-
 	// 恢复玩家输入
 	if (APlayerController* PC = Cast<APlayerController>(GetController()))
 	{
 		EnableInput(PC);
 	}
+
+	// 注意：死亡 Tag 的剥离由 GA_ReviveBase 通过 CancelAbilities(Ability.Death) 自动完成，
+	// 不在此处手动 RemoveLooseGameplayTag。
 }
 
 void APlayerCharacter::NormalMovement(float InputX, float InputY)

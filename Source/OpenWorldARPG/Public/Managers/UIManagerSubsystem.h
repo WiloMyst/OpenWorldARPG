@@ -10,6 +10,8 @@
 class UWindowWidgetBase;
 class UUIDataAsset;
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnUIStackChangedSignature);
+
 /**
  * UI 管理子系统。基于栈的 UI 打开/关闭管理，自动处理输入模式切换。
  */
@@ -34,8 +36,13 @@ public:
     UFUNCTION(BlueprintPure, Category = "UI Manager")
     bool IsAnyUIOpen() const;
 
-    /** 根据 UI 设置更新 PlayerController 的输入模式 */
-    void UpdateInputMode();
+    /** 获取栈顶 UI，供 PlayerController 仲裁输入状态使用 */
+	UFUNCTION(BlueprintPure, Category = "UI Manager")
+	UWindowWidgetBase* GetTopWindowWidget() const;
+
+    /** 当 UI 栈发生变化时（打开或关闭了全屏面板），发出广播 */
+    UPROPERTY(BlueprintAssignable, Category = "UI Manager")
+    FOnUIStackChangedSignature OnUIStackChanged;
 
 protected:
     /** UI 栈，后进先出 */

@@ -1,30 +1,89 @@
 // Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "UI/Subsystems/Inventory/ItemDetailPanelWidget.h"
+#include "UI/Subsystems/Inventory/InventoryViewModel.h"
+#include "UI/Subsystems/Inventory/ItemObject.h"
 #include "Components/TextBlock.h"
 #include "Components/Image.h"
 #include "Engine/Texture2D.h"
 #include "Engine/AssetManager.h"
+#include "Engine/StreamableManager.h"
 #include "Managers/InventoryManagerSubsystem.h"
 
-void UItemDetailPanelWidget::UpdateDetails(const FItemInstance& ItemInstance)
+void UItemDetailPanelWidget::NativeDestruct()
 {
-    UInventoryManagerSubsystem* InventoryManager = GetGameInstance()->GetSubsystem<UInventoryManagerSubsystem>();
-    if (!InventoryManager) return;
-
-    FItemData StaticData;
-    if (!InventoryManager->GetItemStaticData(ItemInstance.ItemID, StaticData))
+    // 取消未完成的异步加载，防止界面销毁后回调野指针崩溃
+    if (IconLoadHandle.IsValid() && IconLoadHandle->IsActive())
     {
-        // 查询失败，清空面板
-        if (NameText) NameText->SetText(FText::GetEmpty());
-        if (AvatarImage) AvatarImage->SetRenderOpacity(0.0f);
-        if (CategoryText) CategoryText->SetText(FText::GetEmpty());
-        if (AmountText) AmountText->SetText(FText::GetEmpty());
-        if (FunctionText) FunctionText->SetText(FText::GetEmpty());
-        if (DetailText) DetailText->SetText(FText::GetEmpty());
-        if (SourceText) SourceText->SetText(FText::GetEmpty());
+        IconLoadHandle->CancelHandle();
+        IconLoadHandle.Reset();
+    }
+
+    // 生命周期安全：解绑 ViewModel 委托，防止野指针崩溃
+    if (ViewModel)
+    {
+        ViewModel->OnSelectedItemChanged.RemoveDynamic(this, &UItemDetailPanelWidget::OnSelectedItemChanged);
+    }
+
+    Super::NativeDestruct();
+}
+
+void UItemDetailPanelWidget::SetViewModel(UInventoryViewModel* InViewModel)
+{
+    // 如果已有旧 ViewModel，先解绑
+    if (ViewModel)
+    {
+        ViewModel->OnSelectedItemChanged.RemoveDynamic(this, &UItemDetailPanelWidget::OnSelectedItemChanged);
+    }
+
+    ViewModel = InViewModel;
+
+    if (ViewModel)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[InventoryDebug] DetailPanel 成功接收到 ViewModel 并绑定委托！"));
+        
+        // 监听 VM 的选中物品变化广播
+        ViewModel->OnSelectedItemChanged.AddDynamic(this, &UItemDetailPanelWidget::OnSelectedItemChanged);
+
+        // 立即应用当前选中状态
+        OnSelectedItemChanged(ViewModel->GetSelectedItemObject());
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("[InventoryDebug] DetailPanel 接收到的 ViewModel 为 NULL！"));
+    }
+}
+
+void UItemDetailPanelWidget::OnSelectedItemChanged(UItemObject* SelectedItemObject)
+{
+    UE_LOG(LogTemp, Warning, TEXT("[InventoryDebug] DetailPanel 接收到了选中变化广播！"));
+
+    // 如果没有选中物品，清空并隐藏面板
+    if (!SelectedItemObject)
+    {
+        UE_LOG(LogTemp, Log, TEXT("[InventoryDebug] 传入的 SelectedItemObject 为空，即将隐藏详情面板。"));
+        ClearDetails();
+        SetVisibility(ESlateVisibility::Hidden);
         return;
     }
+
+    UE_LOG(LogTemp, Log, TEXT("[InventoryDebug] 传入对象有效，准备更新详情面板 UI (ItemID: %d)。"), SelectedItemObject->ItemInstance.ItemID);
+    // 有选中物品，显示面板并更新详情
+    SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+    UpdateDetails(SelectedItemObject);
+}
+
+void UItemDetailPanelWidget::UpdateDetails(UItemObject* ItemObject)
+{
+    if (!ItemObject) 
+    {
+        ClearDetails();
+        return;
+    }
+
+    // 直接从 ViewModel 的数据载体中提取安全拷贝
+    const FItemInstance& ItemInstance = ItemObject->ItemInstance;
+    FItemData StaticData = ItemObject->GetItemStaticData();
 
     // --- 赋值：物品名称 ---
     if (NameText)
@@ -41,19 +100,28 @@ void UItemDetailPanelWidget::UpdateDetails(const FItemInstance& ItemInstance)
             {
                 // 已加载：直接使用
                 AvatarImage->SetBrushFromTexture(LoadedIcon);
-                AvatarImage->SetRenderOpacity(1.0f);
+                AvatarImage->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
             }
             else
             {
-                // 未加载：异步请求，加载完成后由 StreamableManager 回调
-                FStreamableDelegate Delegate;
-                Delegate.BindUFunction(this, FName("OnDetailIconLoaded"), StaticData.ItemIcon.ToSoftObjectPath());
-                UAssetManager::GetStreamableManager().RequestAsyncLoad(StaticData.ItemIcon.ToSoftObjectPath(), Delegate);
+                // 未加载：异步请求，使用强类型绑定并缓存 Handle
+                // 如果有旧的加载任务，先取消
+                if (IconLoadHandle.IsValid() && IconLoadHandle->IsActive())
+                {
+                    IconLoadHandle->CancelHandle();
+                }
+
+                TSoftObjectPtr<UTexture2D> SoftIcon = StaticData.ItemIcon;
+                FStreamableDelegate Delegate = FStreamableDelegate::CreateUObject(this, &UItemDetailPanelWidget::OnDetailIconLoaded, SoftIcon);
+                IconLoadHandle = UAssetManager::GetStreamableManager().RequestAsyncLoad(SoftIcon.ToSoftObjectPath(), Delegate);
+
+                // 加载期间先隐藏图标
+                AvatarImage->SetVisibility(ESlateVisibility::Collapsed);
             }
         }
         else
         {
-            AvatarImage->SetRenderOpacity(0.0f);
+            AvatarImage->SetVisibility(ESlateVisibility::Collapsed);
         }
     }
 
@@ -94,13 +162,24 @@ void UItemDetailPanelWidget::UpdateDetails(const FItemInstance& ItemInstance)
     }
 }
 
-void UItemDetailPanelWidget::OnDetailIconLoaded(FSoftObjectPath LoadedPath)
+void UItemDetailPanelWidget::ClearDetails()
+{
+    if (NameText) NameText->SetText(FText::GetEmpty());
+    if (AvatarImage) AvatarImage->SetVisibility(ESlateVisibility::Collapsed);
+    if (CategoryText) CategoryText->SetText(FText::GetEmpty());
+    if (AmountText) AmountText->SetText(FText::GetEmpty());
+    if (FunctionText) FunctionText->SetText(FText::GetEmpty());
+    if (DetailText) DetailText->SetText(FText::GetEmpty());
+    if (SourceText) SourceText->SetText(FText::GetEmpty());
+}
+
+void UItemDetailPanelWidget::OnDetailIconLoaded(TSoftObjectPtr<UTexture2D> SoftIcon)
 {
     if (!AvatarImage) return;
 
-    if (UTexture2D* LoadedIcon = Cast<UTexture2D>(LoadedPath.ResolveObject()))
+    if (SoftIcon.IsValid())
     {
-        AvatarImage->SetBrushFromTexture(LoadedIcon);
-        AvatarImage->SetRenderOpacity(1.0f);
+        AvatarImage->SetBrushFromTexture(SoftIcon.Get());
+        AvatarImage->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
     }
 }

@@ -22,6 +22,9 @@ void UGA_ReviveBase::ActivateAbility(const FGameplayAbilitySpecHandle Handle, co
         return;
     }
 
+    // 死亡 GA 的 Cancel 由蓝图配置 CancelAbilitiesWithTag = Ability.Death 自动完成，
+    // 无需在此手动调用 CancelAbilities。
+
     // ==========================================
     // 步骤1：关闭布娃娃物理，恢复动画蓝图控制
     // ==========================================

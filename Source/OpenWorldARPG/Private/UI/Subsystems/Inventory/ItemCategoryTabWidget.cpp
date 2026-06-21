@@ -6,29 +6,29 @@
 #include "Components/TextBlock.h"
 #include "Engine/Texture2D.h"
 #include "Engine/AssetManager.h"
+#include "Engine/StreamableManager.h"
 
-void UItemCategoryTabWidget::NativeConstruct()
+void UItemCategoryTabWidget::NativeOnInitialized()
 {
-    Super::NativeConstruct();
+    Super::NativeOnInitialized();
 
+    // 按钮事件绑定（仅一次，避免重复绑定）
     if (TabButton)
     {
-        TabButton->OnClicked.RemoveDynamic(this, &UItemCategoryTabWidget::OnTabButtonClicked);
         TabButton->OnClicked.AddDynamic(this, &UItemCategoryTabWidget::OnTabButtonClicked);
-
-        TabButton->OnHovered.RemoveDynamic(this, &UItemCategoryTabWidget::OnTabButtonHovered);
-        TabButton->OnHovered.AddDynamic(this, &UItemCategoryTabWidget::OnTabButtonHovered);
-
-        TabButton->OnUnhovered.RemoveDynamic(this, &UItemCategoryTabWidget::OnTabButtonUnhovered);
-        TabButton->OnUnhovered.AddDynamic(this, &UItemCategoryTabWidget::OnTabButtonUnhovered);
     }
+}
 
-    if (ImageMouseHovered)
+void UItemCategoryTabWidget::NativeDestruct()
+{
+    // 取消未完成的异步加载，防止界面销毁后回调野指针崩溃
+    if (IconLoadHandle.IsValid() && IconLoadHandle->IsActive())
     {
-        ImageMouseHovered->SetRenderOpacity(0.0f);
+        IconLoadHandle->CancelHandle();
+        IconLoadHandle.Reset();
     }
 
-    UpdateTabInfo();
+    Super::NativeDestruct();
 }
 
 void UItemCategoryTabWidget::UpdateTabInfo()
@@ -46,26 +46,28 @@ void UItemCategoryTabWidget::UpdateTabInfo()
         }
         else
         {
-            FStreamableDelegate Delegate;
-            Delegate.BindUFunction(this, FName("OnCategoryIconLoaded"), CategoryTabData.CategoryIcon.ToSoftObjectPath());
-            UAssetManager::GetStreamableManager().RequestAsyncLoad(CategoryTabData.CategoryIcon.ToSoftObjectPath(), Delegate);
+            // 如果有旧的加载任务，先取消
+            if (IconLoadHandle.IsValid() && IconLoadHandle->IsActive())
+            {
+                IconLoadHandle->CancelHandle();
+            }
+
+            // 强类型绑定并缓存 Handle
+            TSoftObjectPtr<UTexture2D> SoftIcon = CategoryTabData.CategoryIcon;
+            FStreamableDelegate Delegate = FStreamableDelegate::CreateUObject(this, &UItemCategoryTabWidget::OnCategoryIconLoaded, SoftIcon);
+            IconLoadHandle = UAssetManager::GetStreamableManager().RequestAsyncLoad(SoftIcon.ToSoftObjectPath(), Delegate);
         }
     }
 }
 
-void UItemCategoryTabWidget::OnCategoryIconLoaded(FSoftObjectPath LoadedPath)
+void UItemCategoryTabWidget::OnCategoryIconLoaded(TSoftObjectPtr<UTexture2D> SoftIcon)
 {
     if (!CategoryIcon) return;
 
-    if (UTexture2D* LoadedIcon = Cast<UTexture2D>(LoadedPath.ResolveObject()))
+    if (SoftIcon.IsValid())
     {
-        CategoryIcon->SetBrushFromTexture(LoadedIcon);
+        CategoryIcon->SetBrushFromTexture(SoftIcon.Get());
     }
-}
-
-void UItemCategoryTabWidget::SetTabSelectedState(bool bIsSelected)
-{
-    if (ImageMouseClicked) ImageMouseClicked->SetRenderOpacity(bIsSelected ? 1.0f : 0.0f);
 }
 
 void UItemCategoryTabWidget::OnTabButtonClicked()
@@ -73,21 +75,5 @@ void UItemCategoryTabWidget::OnTabButtonClicked()
     if (OnTabClicked.IsBound())
     {
         OnTabClicked.Broadcast(this, CategoryTabData.TabCategory);
-    }
-}
-
-void UItemCategoryTabWidget::OnTabButtonHovered()
-{
-    if (ImageMouseHovered)
-    {
-        ImageMouseHovered->SetRenderOpacity(1.0f);
-    }
-}
-
-void UItemCategoryTabWidget::OnTabButtonUnhovered()
-{
-    if (ImageMouseHovered)
-    {
-        ImageMouseHovered->SetRenderOpacity(0.0f);
     }
 }

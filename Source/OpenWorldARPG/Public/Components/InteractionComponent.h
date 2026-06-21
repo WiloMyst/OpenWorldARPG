@@ -10,6 +10,9 @@
 class APickableItemBase;
 class UInventoryManagerSubsystem;
 
+/** 当附近可交互物品的状态发生改变时广播 (例如从无到有，或从有到无) */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPickableListChangedSignature, const TArray<AActor*>&, InteractableActors);
+
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class OPENWORLDARPG_API UInteractionComponent : public UActorComponent
 {
@@ -25,6 +28,10 @@ protected:
 
 public:
     // --- 核心交互接口 ---
+
+    /** 当附近可交互物品列表发生改变时广播 */
+    UPROPERTY(BlueprintAssignable, Category = "Interaction|Events")
+    FOnPickableListChangedSignature OnPickableListChangedDelegate;
 
     UFUNCTION(BlueprintCallable, Category = "Inventory|Action")
     void PickUpItem();
@@ -51,7 +58,7 @@ public:
     bool UnequipItemByGUID(FGuid ItemGUID);
 
     UFUNCTION(BlueprintPure, Category = "Inventory|State")
-    APickableItemBase* GetCurrentPickableItem() const { return CurrentPickableItem.Get(); }
+    TArray<AActor*> GetCurrentPickableItems() const;
 
 protected:
     UFUNCTION()
@@ -64,7 +71,8 @@ protected:
     int32 GetOwnerCharacterID() const;
 
 private:
-    TWeakObjectPtr<APickableItemBase> CurrentPickableItem;
+    /** 缓存的附近所有可拾取物品的弱引用列表 */
+    TArray<TWeakObjectPtr<AActor>> CurrentPickableItems;
 
     UPROPERTY()
     UInventoryManagerSubsystem* InventorySubsystem;

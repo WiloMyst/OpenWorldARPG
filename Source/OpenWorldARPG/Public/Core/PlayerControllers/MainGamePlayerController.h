@@ -215,15 +215,7 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Camera|Reset")
     float CameraResetTolerance = 1.0f;
 
-    // --- 配置：UI ---
-
-    UPROPERTY(EditDefaultsOnly, Category = "Config|UI")
-    TSubclassOf<UUserWidget> MainHUDClass;
-
 private:
-    UPROPERTY()
-    TObjectPtr<UUserWidget> MainHUDInstance;
-
     bool bIsWalking = false;
     bool bIsPhysicsAnimDisabled = false;
 

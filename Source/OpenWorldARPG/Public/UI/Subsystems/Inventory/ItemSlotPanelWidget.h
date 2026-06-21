@@ -9,69 +9,49 @@
 #include "Types/ItemInstance.h"
 #include "ItemSlotPanelWidget.generated.h"
 
-class UWrapBox;
-class UListView;
+class UTileView;
 class UItemSlotWidget;
-class UInventoryManagerSubsystem;
+class UItemObject;
+class UInventoryViewModel;
 
-// 选中物品时广播，传递 GUID 用于丢弃/装备/使用
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnItemSelectedInGrid, FGuid, SelectedItemGUID, int32, SelectedItemID, const FItemInstance&, SelectedItemInstance);
-
+/** 物品槽位面板 UI */
 UCLASS()
 class OPENWORLDARPG_API UItemSlotPanelWidget : public UUserWidget
 {
     GENERATED_BODY()
 
 public:
-    virtual void NativeConstruct() override;
     virtual void NativeDestruct() override;
 
-    UPROPERTY(BlueprintAssignable, Category = "Inventory|Events")
-    FOnItemSelectedInGrid OnItemSelectedInGrid;
+    /** 接收父级传入的 ViewModel 并绑定委托 */
+    void SetViewModel(UInventoryViewModel* InViewModel);
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory|Config")
-    EItemCategory ItemCategory;
+    /** 获取 ViewModel (供子 Widget 调用 VM 命令) */
+    UFUNCTION(BlueprintPure, Category = "Inventory|ViewModel")
+    UInventoryViewModel* GetViewModel() const { return ViewModel; }
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory|Config")
-    EItemSortMode SortMode = EItemSortMode::ByRarity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory|Config")
-    EItemRarity RarityFilter = EItemRarity::Star1;
-
-    UFUNCTION()
-    void RefreshInventoryGrid();
-
-    /** 切换排序模式 */
+    /** 切换排序模式 (转发给 VM) */
     UFUNCTION(BlueprintCallable, Category = "Inventory|Sort")
     void SetSortMode(EItemSortMode NewSortMode);
 
-    /** 切换稀有度筛选 */
+    /** 切换稀有度筛选 (转发给 VM) */
     UFUNCTION(BlueprintCallable, Category = "Inventory|Filter")
     void SetRarityFilter(EItemRarity NewFilter);
 
 protected:
     UFUNCTION()
-    void HandleSelectFirstSlot();
-
-    UFUNCTION()
-    void HandleSelectedSlot(int32 Index, const FItemInstance& Instance, const FItemData& Data, UItemSlotWidget* SlotWidget);
+    void HandleInventoryListUpdated();
 
 protected:
-    /** 列表容器 (UE 5.2 使用 WrapBox，后续可升级为 TileView 虚拟化) */
+    /** 虚拟化列表容器 (支持 Widget 复用，消除 GC 峰值) */
     UPROPERTY(meta = (BindWidget))
-    TObjectPtr<UWrapBox> ItemWrapBox;
+    TObjectPtr<UTileView> ItemTileView;
 
     UPROPERTY(EditDefaultsOnly, Category = "Inventory|Config")
     TSubclassOf<UItemSlotWidget> ItemSlotClass;
 
 private:
-    FGuid SelectedItemGUID;
-    FItemInstance SelectedItemInstance;
-
+    /** ViewModel 引用 (由父级 InventoryWidget 传入) */
     UPROPERTY()
-    TObjectPtr<UItemSlotWidget> SelectedItemSlot;
-
-    /** 缓存当前筛选后的物品列表 (供 TileView 回调使用) */
-    UPROPERTY()
-    TArray<FItemInstance> CachedFilteredItems;
+    TObjectPtr<UInventoryViewModel> ViewModel;
 };

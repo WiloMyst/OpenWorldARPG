@@ -5,6 +5,7 @@
 #include "Data/UIDataAsset.h"
 #include "Engine/LocalPlayer.h"
 #include "Managers/GameAssetManagerSubsystem.h"
+#include "Core/OpenWorldARPGPlayerController.h"
 
 UWindowWidgetBase* UUIManagerSubsystem::ShowUIByTag(FGameplayTag UITag)
 {
@@ -14,7 +15,7 @@ UWindowWidgetBase* UUIManagerSubsystem::ShowUIByTag(FGameplayTag UITag)
         return nullptr;
     }
 
-    // 从 GameAssetManagerSubsystem 获取 UI 映射数据资产（统一配置，不再硬编码路径）
+    // 从 GameAssetManagerSubsystem 获取 UI 映射数据资产
     UGameAssetManagerSubsystem* AssetManager = GetGameInstance()->GetSubsystem<UGameAssetManagerSubsystem>();
     UUIDataAsset* LoadedUIData = AssetManager ? AssetManager->GetUIMapDataAsset() : nullptr;
     if (!LoadedUIData)
@@ -60,8 +61,8 @@ UWindowWidgetBase* UUIManagerSubsystem::OpenUI(TSubclassOf<UWindowWidgetBase> Wi
     NewWidget->AddToViewport(UIStack.Num() - 1); // Z-Order根据堆栈深度设置
     NewWidget->OnOpened(); // 调用新Widget的蓝图事件
 
-    // 根据新的顶层UI，更新输入模式
-    UpdateInputMode();
+    // 触发 UI 栈改变的全局广播，不再直接调用 PC
+    OnUIStackChanged.Broadcast();
 
     return NewWidget;
 }
@@ -78,8 +79,8 @@ void UUIManagerSubsystem::CloseTopUI()
         TopWidget->RemoveFromParent();
     }
 
-    // 根据新的顶层UI（或空堆栈），更新输入模式
-    UpdateInputMode();
+    // 触发 UI 栈改变的全局广播
+    OnUIStackChanged.Broadcast();
 }
 
 bool UUIManagerSubsystem::IsAnyUIOpen() const
@@ -87,68 +88,7 @@ bool UUIManagerSubsystem::IsAnyUIOpen() const
     return !UIStack.IsEmpty();
 }
 
-void UUIManagerSubsystem::UpdateInputMode()
+UWindowWidgetBase* UUIManagerSubsystem::GetTopWindowWidget() const
 {
-    // 使用 LocalPlayer 而非硬编码 Player 0，联机时每个客户端只控制自己的 UI
-    APlayerController* PC = nullptr;
-    if (UWorld* World = GetWorld())
-    {
-        if (ULocalPlayer* LocalPlayer = World->GetFirstLocalPlayerFromController())
-        {
-            PC = LocalPlayer->GetPlayerController(World);
-        }
-    }
-    if (!PC) return;
-
-    if (UIStack.IsEmpty())
-    {
-        // 堆栈为空，恢复到纯游戏模式
-        PC->bShowMouseCursor = false;
-        FInputModeGameOnly InputMode;
-        PC->SetInputMode(InputMode);
-    }
-    else
-    {
-        // 堆栈不为空，根据最顶层UI的设置来决定输入模式
-        UWindowWidgetBase* TopWidget = UIStack.Last();
-        if (!TopWidget) return;
-
-        switch (TopWidget->InputModeWhenOpen)
-        {
-        case EWidgetInputMode::UIOnly:
-        {
-            PC->bShowMouseCursor = true;
-            FInputModeUIOnly InputMode;
-            InputMode.SetWidgetToFocus(TopWidget->TakeWidget()); // 将焦点设置给顶层UI
-            InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-            PC->SetInputMode(InputMode);
-            break;
-        }
-        case EWidgetInputMode::GameAndUI:
-        {
-            PC->bShowMouseCursor = true;
-            FInputModeGameAndUI InputMode;
-            InputMode.SetWidgetToFocus(TopWidget->TakeWidget());
-            InputMode.SetHideCursorDuringCapture(false);
-            PC->SetInputMode(InputMode);
-            break;
-        }
-        case EWidgetInputMode::GameOnly:
-        {
-            PC->bShowMouseCursor = false;
-            FInputModeGameOnly InputMode;
-            PC->SetInputMode(InputMode);
-            break;
-        }
-        case EWidgetInputMode::UIOnlyNoCursor:
-        {
-            PC->bShowMouseCursor = false;
-            FInputModeUIOnly InputMode;
-            InputMode.SetWidgetToFocus(TopWidget->TakeWidget());
-            InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-            PC->SetInputMode(InputMode);
-            break;
-        }
-        }
-    }
+    return UIStack.IsEmpty() ? nullptr : UIStack.Last();
 }

@@ -4,7 +4,9 @@
 #include "Interfaces/CombatInterface.h"
 #include "Abilities/Tasks/AbilityTask_PlayMontageAndWait.h"
 #include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/CapsuleComponent.h"
 #include "AbilitySystemComponent.h"
 
 UGA_DieBase::UGA_DieBase()
@@ -70,8 +72,8 @@ void UGA_DieBase::OnDeathMontageFinished()
         StartRagdoll();
     }
 
-    // 步骤5：结束死亡能力
-    EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, false);
+    // 只要不 EndAbility，蓝图中配置的 ActivationOwnedTags (如 Character.State.Dead) 就会一直存在，
+    // 死亡 GA 将在 GA_ReviveBase 激活时通过 CancelAbilities 被显式打断，从而自动剥离死亡 Tag。
 }
 
 void UGA_DieBase::StartRagdoll()
@@ -82,6 +84,35 @@ void UGA_DieBase::StartRagdoll()
     USkeletalMeshComponent* MeshComp = AvatarChar->GetMesh();
     if (!MeshComp) return;
 
+    // ==========================================
+    // 关键1：彻底停止 CharacterMovementComponent
+    // CMC 每帧会覆盖 Mesh 位置，导致物理模拟失效、重力丢失
+    // ==========================================
+    if (UCharacterMovementComponent* MoveComp = AvatarChar->GetCharacterMovement())
+    {
+        MoveComp->StopMovementImmediately();
+        MoveComp->DisableMovement();
+        MoveComp->SetComponentTickEnabled(false);
+    }
+
+    // ==========================================
+    // 关键2：将 Mesh 从 Capsule 分离（保持世界位置）
+    // 否则 Capsule 的移动会拖拽 Mesh，物理模拟被覆盖
+    // ==========================================
+    MeshComp->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
+
+    // ==========================================
+    // 关键3：关闭 Capsule 碰撞，避免与 Ragdoll 物理体冲突
+    // ==========================================
+    if (UCapsuleComponent* Capsule = AvatarChar->GetCapsuleComponent())
+    {
+        Capsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        Capsule->SetCollisionResponseToAllChannels(ECR_Ignore);
+    }
+
+    // ==========================================
+    // 步骤4：配置 Ragdoll 物理模拟
+    // ==========================================
     // 设置碰撞为 QueryAndPhysics，使用 Ragdoll 碰撞配置
     MeshComp->SetCollisionProfileName(TEXT("Ragdoll"));
     MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
@@ -89,9 +120,17 @@ void UGA_DieBase::StartRagdoll()
     // 开启全身物理模拟
     MeshComp->SetAllBodiesSimulatePhysics(true);
 
+    // 确保物理重力开启（防止飘浮）
+    MeshComp->SetEnableGravity(true);
+
     // 唤醒所有刚体，避免静止不动
     MeshComp->WakeAllRigidBodies();
 
     // 开启物理融合，使动画与物理平滑过渡
     MeshComp->bBlendPhysics = true;
+
+    // ==========================================
+    // 关键5：将 Actor 根组件移至 Mesh 位置，避免 Actor 原点与 Ragdoll 脱节
+    // ==========================================
+    AvatarChar->SetActorLocation(MeshComp->GetComponentLocation(), false);
 }

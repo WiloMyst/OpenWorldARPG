@@ -12,11 +12,11 @@ class APlayerCharacter;
 
 // --- 委托 ---
 
-/** 当前激活角色变化时广播（参数：旧角色 Tag, 新角色 Tag） */
+/** 当前激活角色变化时广播（参数：旧角色 TAG, 新角色 TAG） */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnActiveCharacterChanged, const FGameplayTag&, OldCharacterTag, const FGameplayTag&, NewCharacterTag);
 
 /** 队伍成员变化时广播 */
-DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnTeamMembersChanged);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnTeamListUpdatedSignature);
 
 
 /**
@@ -69,7 +69,7 @@ public:
     FOnActiveCharacterChanged OnActiveCharacterChanged;
 
     UPROPERTY(BlueprintAssignable, Category = "Team Management|Events")
-    FOnTeamMembersChanged OnTeamMembersChanged;
+    FOnTeamListUpdatedSignature OnTeamListUpdatedDelegate;
 
     // --- 查询 ---
 

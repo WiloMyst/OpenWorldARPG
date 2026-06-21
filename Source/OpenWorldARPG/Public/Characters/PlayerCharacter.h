@@ -22,6 +22,7 @@ class UAS_Player;
 class UOpenWorldARPGCharacterMovementComponent;
 class UInteractionComponent;
 class UTargetingComponent;
+class UHeroUIExtensionComponent;
 class UGameplayAbility;
 class AWeaponBase;
 
@@ -186,6 +187,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|MotionWarping")
 	UMotionWarpingComponent* GetMotionWarpingComp() const { return MotionWarpingComp; }
 
+	/** 获取 UI 扩展组件（HUD 唯一数据来源） */
+	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|UI")
+	UHeroUIExtensionComponent* GetHeroUIExtensionComp() const { return HeroUIExtensionComp; }
+
 	/** 获取外观表现数据资产（IARPGCharacterInterface 实现） */
 	virtual UCharacterVisualDataAsset* GetVisualDataAsset_Implementation() const override { return VisualDataAsset; }
 
@@ -273,6 +278,10 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlayerCharacter|MotionWarping")
 	TObjectPtr<UMotionWarpingComponent> MotionWarpingComp;
+
+	/** UI 扩展组件：Gameplay 与 UI 的桥梁 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlayerCharacter|UI")
+	TObjectPtr<UHeroUIExtensionComponent> HeroUIExtensionComp;
 
 	// --- 输入缓存 ---
 

@@ -4,13 +4,45 @@
 #include "UI/Subsystems/Inventory/ItemSlotPanelWidget.h"
 #include "UI/Subsystems/Inventory/ItemDetailPanelWidget.h"
 #include "UI/Subsystems/Inventory/ItemCategoryTabWidget.h"
-#include "Components/VerticalBox.h"
-#include "Components/Button.h"
-#include "Characters/PlayerCharacter.h"
-#include "Components/InteractionComponent.h"
+#include "UI/Subsystems/Inventory/InventoryViewModel.h"
+#include "Managers/GameAssetManagerSubsystem.h"
 #include "Managers/InventoryManagerSubsystem.h"
 #include "Managers/UIManagerSubsystem.h"
-#include "Managers/GameAssetManagerSubsystem.h"
+#include "Components/VerticalBox.h"
+#include "Components/Button.h"
+
+void UInventoryWidget::NativeOnInitialized()
+{
+    Super::NativeOnInitialized();
+
+    // 1. 实例化核心 ViewModel
+    ViewModel = NewObject<UInventoryViewModel>(this);
+
+    // 2. 初始化 VM 数据
+    if (UInventoryManagerSubsystem* InventorySubsystem = GetGameInstance()->GetSubsystem<UInventoryManagerSubsystem>())
+    {
+        ViewModel->InitializeViewModel(InventorySubsystem);
+    }
+
+    // 3. 将 ViewModel 下发给所有子面板，接通数据流
+    if (WBP_ItemSlotPanel)
+    {
+        WBP_ItemSlotPanel->SetViewModel(ViewModel);
+    }
+    if (WBP_ItemDetailPanel)
+    {
+        WBP_ItemDetailPanel->SetViewModel(ViewModel);
+    }
+
+    if (CloseButton)
+    {
+        CloseButton->OnClicked.AddDynamic(this, &UInventoryWidget::OnCloseButtonClicked);
+    }
+    if (DiscardButton)
+    {
+        DiscardButton->OnClicked.AddDynamic(this, &UInventoryWidget::OnDiscardButtonClicked);
+    }
+}
 
 void UInventoryWidget::NativeConstruct()
 {
@@ -25,25 +57,14 @@ void UInventoryWidget::NativeConstruct()
         }
     }
 
-    // 1. 绑定按钮事件
-    if (CloseButton)
-    {
-        CloseButton->OnClicked.AddDynamic(this, &UInventoryWidget::OnCloseButtonClicked);
-    }
-    if (DiscardButton)
-    {
-        DiscardButton->OnClicked.AddDynamic(this, &UInventoryWidget::OnDiscardButtonClicked);
-    }
-
-    // 2. 绑定格子容器的点击委托 (GUID 驱动)
-    if (WBP_ItemSlotPanel)
-    {
-        WBP_ItemSlotPanel->OnItemSelectedInGrid.AddDynamic(this, &UInventoryWidget::HandleOnItemSelectedInGrid);
-    }
-
-    // 3. 对应图1右侧：初始化并选中首个 Tab
+    // 生成 Tab 并选中首个（触发 VM 的 SelectCategory）
     RefreshCategoryTabBox();
     HandleSelectFirstCategoryTab();
+}
+
+void UInventoryWidget::NativeDestruct()
+{
+    Super::NativeDestruct();
 }
 
 void UInventoryWidget::RefreshCategoryTabBox()
@@ -54,7 +75,7 @@ void UInventoryWidget::RefreshCategoryTabBox()
     CategoryBox->ClearChildren();
     SelectedCategoryTab = nullptr;
 
-    // 对应图3、4：遍历 DataTable 生成 Tab
+    // 遍历 DataTable 生成 Tab
     for (auto& Pair : CategoryDataTable->GetRowMap())
     {
         FInventoryCategoryTabData* RowData = (FInventoryCategoryTabData*)Pair.Value;
@@ -64,6 +85,7 @@ void UInventoryWidget::RefreshCategoryTabBox()
             if (NewTab)
             {
                 NewTab->CategoryTabData = *RowData;
+                NewTab->UpdateTabInfo();
                 NewTab->OnTabClicked.AddDynamic(this, &UInventoryWidget::HandleOnTabClicked);
                 CategoryBox->AddChild(NewTab);
             }
@@ -78,53 +100,17 @@ void UInventoryWidget::HandleSelectFirstCategoryTab()
         UItemCategoryTabWidget* FirstTab = Cast<UItemCategoryTabWidget>(CategoryBox->GetChildAt(0));
         if (FirstTab)
         {
-            HandleSelectCategoryTab(FirstTab);
+            HandleOnTabClicked(FirstTab, FirstTab->CategoryTabData.TabCategory);
         }
     }
 }
 
 void UInventoryWidget::HandleOnTabClicked(UItemCategoryTabWidget* NewCategoryTab, EItemCategory NewTabCategory)
 {
-    if (WBP_ItemSlotPanel)
+    // 委托给 ViewModel 处理分类切换 (VM 负责过滤数据并广播)
+    if (ViewModel)
     {
-        WBP_ItemSlotPanel->ItemCategory = NewTabCategory;
-    }
-    HandleSelectCategoryTab(NewCategoryTab);
-}
-
-void UInventoryWidget::HandleSelectCategoryTab(UItemCategoryTabWidget* NewCategoryTab)
-{
-    if (SelectedCategoryTab)
-    {
-        SelectedCategoryTab->SetTabSelectedState(false);
-    }
-
-    SelectedCategoryTab = NewCategoryTab;
-
-    if (SelectedCategoryTab)
-    {
-        SelectedCategoryTab->SetTabSelectedState(true);
-    }
-
-    if (WBP_ItemDetailPanel)
-    {
-        WBP_ItemDetailPanel->SetRenderOpacity(0.0f);
-    }
-
-    if (WBP_ItemSlotPanel)
-    {
-        WBP_ItemSlotPanel->RefreshInventoryGrid();
-    }
-}
-
-void UInventoryWidget::HandleOnItemSelectedInGrid(FGuid SelectedItemGUID, int32 SelectedItemID, const FItemInstance& SelectedItemInstance)
-{
-    CachedSelectedItemGUID = SelectedItemGUID;
-
-    if (WBP_ItemDetailPanel)
-    {
-        WBP_ItemDetailPanel->UpdateDetails(SelectedItemInstance);
-        WBP_ItemDetailPanel->SetRenderOpacity(1.0f);
+        ViewModel->SelectCategory(NewTabCategory);
     }
 }
 
@@ -138,14 +124,8 @@ void UInventoryWidget::OnCloseButtonClicked()
 
 void UInventoryWidget::OnDiscardButtonClicked()
 {
-    if (!CachedSelectedItemGUID.IsValid()) return;
-
-    if (APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(GetOwningPlayerPawn()))
+    if (ViewModel)
     {
-        if (UInteractionComponent* Backpack = PlayerChar->GetComponentByClass<UInteractionComponent>())
-        {
-            // 使用 GUID 驱动的丢弃，不再依赖数组索引
-            Backpack->DropItemByGUID(CachedSelectedItemGUID, 1);
-        }
+        ViewModel->RequestDiscardSelectedItem();
     }
 }

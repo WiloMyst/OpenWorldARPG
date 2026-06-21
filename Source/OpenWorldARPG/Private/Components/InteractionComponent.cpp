@@ -60,12 +60,51 @@ void UInteractionComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
     TArray<AActor*> ActorsToIgnore;
     ActorsToIgnore.Add(OwnerActor);
 
-    FHitResult HitResult;
-    bool bHit = UKismetSystemLibrary::SphereTraceSingleForObjects(
+    // 改为多体检测，支持多个物品重叠
+    TArray<FHitResult> HitResults;
+    UKismetSystemLibrary::SphereTraceMultiForObjects(
         this, StartLoc, EndLoc, SphereRadius, ObjectTypes,
-        false, ActorsToIgnore, EDrawDebugTrace::None, HitResult, true);
+        false, ActorsToIgnore, EDrawDebugTrace::None, HitResults, true);
 
-    CurrentPickableItem = bHit && HitResult.GetActor() ? Cast<APickableItemBase>(HitResult.GetActor()) : nullptr;
+    TArray<AActor*> NewPickableItems;
+    for (const FHitResult& Hit : HitResults)
+    {
+        if (APickableItemBase* Item = Cast<APickableItemBase>(Hit.GetActor()))
+        {
+            NewPickableItems.Add(Item);
+        }
+    }
+
+    // 比对新旧列表是否发生变化
+    bool bChanged = false;
+    if (NewPickableItems.Num() != CurrentPickableItems.Num())
+    {
+        bChanged = true;
+    }
+    else
+    {
+        for (int32 i = 0; i < NewPickableItems.Num(); ++i)
+        {
+            // 注意：由于旧列表存的是 TWeakObjectPtr，如果物品被销毁，Get() 会返回 nullptr，
+            // 此时比较必为 false（由于新扫描到的数组不可能包含 nullptr），精准修复了销毁导致 UI 残留的 Bug。
+            if (NewPickableItems[i] != CurrentPickableItems[i].Get())
+            {
+                bChanged = true;
+                break;
+            }
+        }
+    }
+
+    // 仅当可交互对象列表发生改变时才广播
+    if (bChanged)
+    {
+        CurrentPickableItems.Empty();
+        for (AActor* Item : NewPickableItems)
+        {
+            CurrentPickableItems.Add(Item);
+        }
+        OnPickableListChangedDelegate.Broadcast(NewPickableItems);
+    }
 }
 
 bool UInteractionComponent::IsCharacterInStandby() const
@@ -97,10 +136,17 @@ int32 UInteractionComponent::GetOwnerCharacterID() const
 void UInteractionComponent::PickUpItem()
 {
     // 客户端：只发送请求到服务器
-    if (IsCharacterInStandby() || !CurrentPickableItem.IsValid()) return;
+    if (IsCharacterInStandby() || CurrentPickableItems.IsEmpty()) return;
 
-    APickableItemBase* PickableItem = CurrentPickableItem.Get();
-    Server_PickUpItem(PickableItem->ItemID, PickableItem->ItemAmount);
+    // 默认拾取列表里第一个有效的物品 (若要做《鸣潮》的一键拾取全部，可去掉这里的 break 循环发送)
+    for (TWeakObjectPtr<AActor> WeakItem : CurrentPickableItems)
+    {
+        if (APickableItemBase* PickableItem = Cast<APickableItemBase>(WeakItem.Get()))
+        {
+            Server_PickUpItem(PickableItem->ItemID, PickableItem->ItemAmount);
+            break; 
+        }
+    }
 }
 
 bool UInteractionComponent::Server_PickUpItem_Validate(int32 ItemID, int32 Amount)
@@ -190,6 +236,19 @@ bool UInteractionComponent::UnequipItemByGUID(FGuid ItemGUID)
 {
     if (!InventorySubsystem) return false;
     return InventorySubsystem->UnequipItem(ItemGUID);
+}
+
+TArray<AActor*> UInteractionComponent::GetCurrentPickableItems() const
+{
+    TArray<AActor*> Result;
+    for (TWeakObjectPtr<AActor> WeakItem : CurrentPickableItems)
+    {
+        if (WeakItem.IsValid())
+        {
+            Result.Add(WeakItem.Get());
+        }
+    }
+    return Result;
 }
 
 void UInteractionComponent::HandleOnItemDropped(int32 ItemID, int32 DroppedAmount)

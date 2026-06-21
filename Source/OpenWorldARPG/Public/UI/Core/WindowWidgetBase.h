@@ -22,6 +22,9 @@ class OPENWORLDARPG_API UWindowWidgetBase : public UUserWidget
     GENERATED_BODY()
 
 public:
+    UWindowWidgetBase(const FObjectInitializer& ObjectInitializer);
+
+public:
     UPROPERTY(EditDefaultsOnly, DisplayName = "打开时的输入模式")
     EWidgetInputMode InputModeWhenOpen = EWidgetInputMode::UIOnly;
 

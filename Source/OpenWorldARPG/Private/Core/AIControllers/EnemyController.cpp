@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Core/AIControllers/EnemyController.h"
 #include "BehaviorTree/BlackboardComponent.h"
@@ -60,20 +60,30 @@ void AEnemyController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stim
         {
             bool bShouldIgnore = false;
 
-            // 对应蓝图：检查是否拥有 InStandby 标签
-            if (IgnoreStandbyTag.IsValid())
+            // 检查目标是否拥有任意忽略 Tag（死亡、待机等）
+            if (IgnoreTargetTags.Num() > 0)
             {
                 UAbilitySystemComponent* TargetASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(PlayerChar);
-                if (TargetASC && TargetASC->HasMatchingGameplayTag(IgnoreStandbyTag))
+                if (TargetASC)
                 {
-                    bShouldIgnore = true;
+                    FGameplayTagContainer OwnedTags;
+                    TargetASC->GetOwnedGameplayTags(OwnedTags);
+                    if (OwnedTags.HasAny(IgnoreTargetTags))
+                    {
+                        bShouldIgnore = true;
+                    }
                 }
             }
 
-            // 如果玩家不在待机模式，正式将其设为目标
+            // 如果玩家未被忽略，正式将其设为目标
             if (!bShouldIgnore)
             {
                 BB->SetValueAsObject(TargetActorKeyName, PlayerChar);
+            }
+            else
+            {
+                // 目标无效（死亡/待机），清除黑板目标
+                BB->ClearValue(TargetActorKeyName);
             }
         }
     }

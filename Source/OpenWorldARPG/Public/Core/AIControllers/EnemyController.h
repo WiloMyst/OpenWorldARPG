@@ -37,6 +37,7 @@ protected:
     FName TargetActorKeyName = FName("TargetActor");
 
     // --- 配置：状态过滤 ---
+    // 目标只要拥有此容器中任意一个 Tag，敌人就忽略该目标（死亡、待机等）
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "AI|Tags")
-    FGameplayTag IgnoreStandbyTag;
+    FGameplayTagContainer IgnoreTargetTags;
 };

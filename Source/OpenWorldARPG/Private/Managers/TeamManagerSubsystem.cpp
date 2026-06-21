@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Managers/TeamManagerSubsystem.h"
 #include "Managers/CharacterManagerSubsystem.h"
@@ -57,7 +57,7 @@ bool UTeamManagerSubsystem::SetCurrentTeam(const TArray<FGameplayTag>& NewTeamCh
     SetActiveCharacterIndex(SafeIndex);
 
     UE_LOG(LogTemp, Log, TEXT("Team set with %d members. Active Index: %d"), CurrentTeamCharacters.Num(), SafeIndex);
-    OnTeamMembersChanged.Broadcast();
+    OnTeamListUpdatedDelegate.Broadcast();
     return true;
 }
 
@@ -152,7 +152,7 @@ void UTeamManagerSubsystem::OnRep_TeamCharacterActorsFromServer(const TArray<APl
     if (UpdatedTags != CurrentTeamCharacters)
     {
         CurrentTeamCharacters = MoveTemp(UpdatedTags);
-        OnTeamMembersChanged.Broadcast();
+        OnTeamListUpdatedDelegate.Broadcast();
 
         UE_LOG(LogTemp, Log, TEXT("TeamManager: OnRep_TeamCharacterActors - 队伍成员已更新，共 %d 个"), CurrentTeamCharacters.Num());
     }

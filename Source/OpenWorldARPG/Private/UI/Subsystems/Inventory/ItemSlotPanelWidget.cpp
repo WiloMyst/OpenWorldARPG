@@ -2,112 +2,63 @@
 
 #include "UI/Subsystems/Inventory/ItemSlotPanelWidget.h"
 #include "UI/Subsystems/Inventory/ItemSlotWidget.h"
-#include "Components/WrapBox.h"
-#include "Managers/InventoryManagerSubsystem.h"
-
-void UItemSlotPanelWidget::NativeConstruct()
-{
-    Super::NativeConstruct();
-
-    UInventoryManagerSubsystem* InventoryManager = GetGameInstance()->GetSubsystem<UInventoryManagerSubsystem>();
-    if (InventoryManager)
-    {
-        InventoryManager->OnInventoryUpdated.AddDynamic(this, &UItemSlotPanelWidget::RefreshInventoryGrid);
-    }
-
-    // 不在 NativeConstruct 中主动刷新！
-    // 初始刷新由 InventoryWidget::HandleSelectCategoryTab → RefreshInventoryGrid 触发
-    // 避免在 ItemCategory 未设置时创建空白格子
-}
+#include "UI/Subsystems/Inventory/ItemObject.h"
+#include "UI/Subsystems/Inventory/InventoryViewModel.h"
+#include "Components/TileView.h"
 
 void UItemSlotPanelWidget::NativeDestruct()
 {
-    UInventoryManagerSubsystem* InventoryManager = GetGameInstance()->GetSubsystem<UInventoryManagerSubsystem>();
-    if (InventoryManager)
+    // 生命周期安全：解绑 ViewModel 委托，防止野指针崩溃
+    if (ViewModel)
     {
-        InventoryManager->OnInventoryUpdated.RemoveDynamic(this, &UItemSlotPanelWidget::RefreshInventoryGrid);
+        ViewModel->OnInventoryListUpdated.RemoveDynamic(this, &UItemSlotPanelWidget::HandleInventoryListUpdated);
     }
     Super::NativeDestruct();
 }
 
-void UItemSlotPanelWidget::RefreshInventoryGrid()
+void UItemSlotPanelWidget::SetViewModel(UInventoryViewModel* InViewModel)
 {
-    if (!ItemWrapBox || !ItemSlotClass) return;
-
-    UInventoryManagerSubsystem* InventoryManager = GetGameInstance()->GetSubsystem<UInventoryManagerSubsystem>();
-    if (!InventoryManager) return;
-
-    SelectedItemSlot = nullptr;
-    SelectedItemGUID = FGuid();
-
-    // 使用 Subsystem 的筛选+排序接口
-    CachedFilteredItems.Empty();
-    InventoryManager->GetItemsByFilter(ItemCategory, SortMode, RarityFilter, CachedFilteredItems);
-
-    // 清空旧条目并重建
-    ItemWrapBox->ClearChildren();
-    for (int32 i = 0; i < CachedFilteredItems.Num(); ++i)
+    // 如果已有旧 ViewModel，先解绑
+    if (ViewModel)
     {
-        UItemSlotWidget* NewSlot = CreateWidget<UItemSlotWidget>(this, ItemSlotClass);
-        if (NewSlot)
-        {
-            NewSlot->ItemInstance = CachedFilteredItems[i];
-            NewSlot->ItemArrayIndex = i;
-            NewSlot->OnSlotClicked.AddDynamic(this, &UItemSlotPanelWidget::HandleSelectedSlot);
-            ItemWrapBox->AddChildToWrapBox(NewSlot);
-        }
+        ViewModel->OnInventoryListUpdated.RemoveDynamic(this, &UItemSlotPanelWidget::HandleInventoryListUpdated);
     }
 
-    // 只在有物品时才选中第一个
-    if (CachedFilteredItems.Num() > 0)
+    ViewModel = InViewModel;
+
+    if (ViewModel)
     {
-        HandleSelectFirstSlot();
+        // 监听 VM 的列表更新广播
+        ViewModel->OnInventoryListUpdated.AddDynamic(this, &UItemSlotPanelWidget::HandleInventoryListUpdated);
+
+        // 立即刷新一次
+        HandleInventoryListUpdated();
     }
+}
+
+void UItemSlotPanelWidget::HandleInventoryListUpdated()
+{
+    if (!ItemTileView || !ViewModel)
+    {
+        return;
+    }
+
+    // 直接从 ViewModel 获取数据源，塞给 TileView 渲染
+    ItemTileView->SetListItems(ViewModel->GetFilteredItemObjects());
 }
 
 void UItemSlotPanelWidget::SetSortMode(EItemSortMode NewSortMode)
 {
-    SortMode = NewSortMode;
-    RefreshInventoryGrid();
+    if (ViewModel)
+    {
+        ViewModel->SetSortMode(NewSortMode);
+    }
 }
 
 void UItemSlotPanelWidget::SetRarityFilter(EItemRarity NewFilter)
 {
-    RarityFilter = NewFilter;
-    RefreshInventoryGrid();
-}
-
-void UItemSlotPanelWidget::HandleSelectFirstSlot()
-{
-    if (ItemWrapBox && ItemWrapBox->GetChildrenCount() > 0)
+    if (ViewModel)
     {
-        UItemSlotWidget* FirstSlot = Cast<UItemSlotWidget>(ItemWrapBox->GetChildAt(0));
-        if (FirstSlot)
-        {
-            HandleSelectedSlot(FirstSlot->ItemArrayIndex, FirstSlot->ItemInstance, FirstSlot->GetCachedItemData(), FirstSlot);
-        }
-    }
-}
-
-void UItemSlotPanelWidget::HandleSelectedSlot(int32 Index, const FItemInstance& Instance, const FItemData& Data, UItemSlotWidget* SlotWidget)
-{
-    // 使用 GUID 而非 ItemID 作为选中标识
-    SelectedItemGUID = Instance.ItemGUID;
-    SelectedItemInstance = Instance;
-
-    if (SelectedItemSlot)
-    {
-        SelectedItemSlot->SetSelectionState(false);
-    }
-
-    SelectedItemSlot = SlotWidget;
-    if (SelectedItemSlot)
-    {
-        SelectedItemSlot->SetSelectionState(true);
-    }
-
-    if (OnItemSelectedInGrid.IsBound())
-    {
-        OnItemSelectedInGrid.Broadcast(SelectedItemGUID, Instance.ItemID, SelectedItemInstance);
+        ViewModel->SetRarityFilter(NewFilter);
     }
 }
