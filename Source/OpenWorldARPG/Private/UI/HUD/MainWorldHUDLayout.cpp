@@ -6,7 +6,7 @@
 #include "UI/HUD/InteractionListWidget.h"
 #include "Components/HeroUIExtensionComponent.h"
 #include "Characters/PlayerCharacter.h"
-#include "Core/PlayerStates/MainGamePlayerState.h"
+#include "Core/PlayerStates/GameplayPlayerState.h"
 #include "Managers/UIManagerSubsystem.h"
 #include "Managers/TeamManagerSubsystem.h"
 #include "Managers/CharacterManagerSubsystem.h"

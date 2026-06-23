@@ -1,27 +1,27 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
-#include "Core/PlayerStates/MainGamePlayerState.h"
+#include "Core/PlayerStates/GameplayPlayerState.h"
 #include "Characters/PlayerCharacter.h"
 #include "Managers/TeamManagerSubsystem.h"
 #include "Net/UnrealNetwork.h"
 
-AMainGamePlayerState::AMainGamePlayerState()
+AGameplayPlayerState::AGameplayPlayerState()
 {
 }
 
-void AMainGamePlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+void AGameplayPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	// 队伍角色数组仅同步给拥有此 PlayerState 的客户端
 	// 其他客户端不需要也不应持有别人的非激活角色引用
-	DOREPLIFETIME_CONDITION(AMainGamePlayerState, TeamCharacterActors, COND_OwnerOnly);
-	DOREPLIFETIME(AMainGamePlayerState, ActiveCharacterIndex);
+	DOREPLIFETIME_CONDITION(AGameplayPlayerState, TeamCharacterActors, COND_OwnerOnly);
+	DOREPLIFETIME(AGameplayPlayerState, ActiveCharacterIndex);
 }
 
 // --- 队伍角色 Actor 管理 ---
 
-APlayerCharacter* AMainGamePlayerState::GetTeamCharacterByIndex(int32 Index) const
+APlayerCharacter* AGameplayPlayerState::GetTeamCharacterByIndex(int32 Index) const
 {
 	if (TeamCharacterActors.IsValidIndex(Index))
 	{
@@ -31,7 +31,7 @@ APlayerCharacter* AMainGamePlayerState::GetTeamCharacterByIndex(int32 Index) con
 	return nullptr;
 }
 
-APlayerCharacter* AMainGamePlayerState::GetTeamCharacterByTag(const FGameplayTag& CharacterTag) const
+APlayerCharacter* AGameplayPlayerState::GetTeamCharacterByTag(const FGameplayTag& CharacterTag) const
 {
 	for (APlayerCharacter* Character : TeamCharacterActors)
 	{
@@ -43,7 +43,7 @@ APlayerCharacter* AMainGamePlayerState::GetTeamCharacterByTag(const FGameplayTag
 	return nullptr;
 }
 
-void AMainGamePlayerState::GetAllTeamCharacters(TArray<APlayerCharacter*>& OutCharacters) const
+void AGameplayPlayerState::GetAllTeamCharacters(TArray<APlayerCharacter*>& OutCharacters) const
 {
 	OutCharacters.Empty();
 	OutCharacters.Reserve(TeamCharacterActors.Num());
@@ -56,7 +56,7 @@ void AMainGamePlayerState::GetAllTeamCharacters(TArray<APlayerCharacter*>& OutCh
 	}
 }
 
-void AMainGamePlayerState::SetTeamCharacterActors(const TArray<APlayerCharacter*>& InActors)
+void AGameplayPlayerState::SetTeamCharacterActors(const TArray<APlayerCharacter*>& InActors)
 {
 	if (HasAuthority())
 	{
@@ -64,7 +64,7 @@ void AMainGamePlayerState::SetTeamCharacterActors(const TArray<APlayerCharacter*
 	}
 }
 
-void AMainGamePlayerState::AddTeamCharacter(APlayerCharacter* InCharacter)
+void AGameplayPlayerState::AddTeamCharacter(APlayerCharacter* InCharacter)
 {
 	if (HasAuthority() && IsValid(InCharacter))
 	{
@@ -74,12 +74,12 @@ void AMainGamePlayerState::AddTeamCharacter(APlayerCharacter* InCharacter)
 
 // --- 激活角色索引 ---
 
-APlayerCharacter* AMainGamePlayerState::GetActiveCharacter() const
+APlayerCharacter* AGameplayPlayerState::GetActiveCharacter() const
 {
 	return GetTeamCharacterByIndex(ActiveCharacterIndex);
 }
 
-void AMainGamePlayerState::SetActiveCharacterIndex(int32 NewIndex)
+void AGameplayPlayerState::SetActiveCharacterIndex(int32 NewIndex)
 {
 	if (HasAuthority())
 	{
@@ -96,7 +96,7 @@ void AMainGamePlayerState::SetActiveCharacterIndex(int32 NewIndex)
 
 // --- OnRep 回调 (客户端收到同步后，驱动本地 UI) ---
 
-void AMainGamePlayerState::OnRep_ActiveCharacterIndex(int32 OldIndex)
+void AGameplayPlayerState::OnRep_ActiveCharacterIndex(int32 OldIndex)
 {
 	// 客户端收到 ActiveCharacterIndex 同步后：
 	// 1. 广播本地事件，驱动 UI 刷新（使用 UE 提供的旧值参数）
@@ -112,7 +112,7 @@ void AMainGamePlayerState::OnRep_ActiveCharacterIndex(int32 OldIndex)
 	}
 }
 
-void AMainGamePlayerState::OnRep_TeamCharacterActors()
+void AGameplayPlayerState::OnRep_TeamCharacterActors()
 {
 	// 客户端收到队伍角色列表同步后：
 	// 1. 广播本地事件

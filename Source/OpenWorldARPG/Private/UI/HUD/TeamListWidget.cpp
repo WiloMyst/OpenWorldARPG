@@ -6,7 +6,7 @@
 #include "Managers/TeamManagerSubsystem.h"
 #include "Managers/CharacterManagerSubsystem.h"
 #include "Data/CharacterRegistryRow.h"
-#include "Core/PlayerStates/MainGamePlayerState.h"
+#include "Core/PlayerStates/GameplayPlayerState.h"
 #include "Characters/PlayerCharacter.h"
 #include "AbilitySystemComponent.h"
 #include "Engine/GameInstance.h"
@@ -119,7 +119,7 @@ void UTeamListWidget::UpdateTeamList()
     UE_LOG(LogTemp, Warning, TEXT("[TeamListWidget] 执行队伍刷新，当前队伍人数: %d"), TeamTags.Num());
 
     APlayerController* PC = GetOwningPlayer();
-    AMainGamePlayerState* PS = PC ? PC->GetPlayerState<AMainGamePlayerState>() : nullptr;
+    AGameplayPlayerState* PS = PC ? PC->GetPlayerState<AGameplayPlayerState>() : nullptr;
 
     int32 MaxLoopCount = FMath::Max(TeamTags.Num(), TeamSlotPool.Num());
 

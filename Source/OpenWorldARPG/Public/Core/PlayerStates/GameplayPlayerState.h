@@ -5,7 +5,7 @@
 #include "CoreMinimal.h"
 #include "Core/OpenWorldARPGPlayerState.h"
 #include "GameplayTagContainer.h"
-#include "MainGamePlayerState.generated.h"
+#include "GameplayPlayerState.generated.h"
 
 class APlayerCharacter;
 
@@ -18,16 +18,17 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnActiveCharacterIndexChanged, int
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnTeamCharacterActorsChanged);
 
 /**
- * 主游戏 PlayerState。掌管队伍角色实体的网络同步数据。
+ * 通用玩法 PlayerState。掌管队伍角色实体的网络同步数据。
+ * 无论在大世界还是副本，玩家状态的数据结构是通用的。
  * 服务器是数据真理，客户端通过 Replicated 属性接收同步。
  */
 UCLASS()
-class OPENWORLDARPG_API AMainGamePlayerState : public AOpenWorldARPGPlayerState
+class OPENWORLDARPG_API AGameplayPlayerState : public AOpenWorldARPGPlayerState
 {
 	GENERATED_BODY()
 
 public:
-	AMainGamePlayerState();
+	AGameplayPlayerState();
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 

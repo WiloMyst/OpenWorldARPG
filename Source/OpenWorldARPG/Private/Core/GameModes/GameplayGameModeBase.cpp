@@ -1,8 +1,8 @@
 // Copyright 2025 WiloMyst. All Rights Reserved.
 
-#include "Core/GameModes/MainGameGameMode.h"
+#include "Core/GameModes/GameplayGameModeBase.h"
 #include "Characters/PlayerCharacter.h"
-#include "Core/PlayerStates/MainGamePlayerState.h"
+#include "Core/PlayerStates/GameplayPlayerState.h"
 #include "Data/CharacterRegistryRow.h"
 #include "Data/CharacterVisualDataAsset.h"
 #include "Data/CharacterCombatDataAsset.h"
@@ -12,13 +12,13 @@
 #include "GameFramework/PlayerStart.h"
 #include "Kismet/GameplayStatics.h"
 
-AMainGameGameMode::AMainGameGameMode()
+AGameplayGameModeBase::AGameplayGameModeBase()
 {
     DefaultPlayerStartTag = FName("PlayerStart");
     AssetCleanupDelay = 3.0f;
 }
 
-void AMainGameGameMode::PostLogin(APlayerController* NewPlayer)
+void AGameplayGameModeBase::PostLogin(APlayerController* NewPlayer)
 {
     Super::PostLogin(NewPlayer);
 
@@ -33,14 +33,14 @@ void AMainGameGameMode::PostLogin(APlayerController* NewPlayer)
         GetWorld()->GetTimerManager().SetTimer(
             CleanupTimerHandle,
             this,
-            &AMainGameGameMode::CleanupAfterLoad,
+            &AGameplayGameModeBase::CleanupAfterLoad,
             AssetCleanupDelay,
             false
         );
     }
 }
 
-void AMainGameGameMode::GeneratePlayerCharacters(APlayerController* PlayerController)
+void AGameplayGameModeBase::GeneratePlayerCharacters(APlayerController* PlayerController)
 {
     // TODO [联机架构缺陷]: CharacterManagerSubsystem 和 TeamManagerSubsystem 是全局共享的
     // GameInstanceSubsystem，多玩家连入时数据会互相覆盖。
@@ -62,14 +62,14 @@ void AMainGameGameMode::GeneratePlayerCharacters(APlayerController* PlayerContro
     }
     if (!PlayerCharacterClass)
     {
-        UE_LOG(LogTemp, Error, TEXT("GeneratePlayerCharacters: PlayerCharacterClass 未配置！请在 MainGameGameMode 蓝图中设置。"));
+        UE_LOG(LogTemp, Error, TEXT("GeneratePlayerCharacters: PlayerCharacterClass 未配置！请在 GameplayGameModeBase 蓝图中设置。"));
         return;
     }
 
-    AMainGamePlayerState* PlayerState = PlayerController->GetPlayerState<AMainGamePlayerState>();
+    AGameplayPlayerState* PlayerState = PlayerController->GetPlayerState<AGameplayPlayerState>();
     if (!PlayerState)
     {
-        UE_LOG(LogTemp, Error, TEXT("GeneratePlayerCharacters: PlayerState 为空或类型不是 AMainGamePlayerState！"));
+        UE_LOG(LogTemp, Error, TEXT("GeneratePlayerCharacters: PlayerState 为空或类型不是 AGameplayPlayerState！"));
         return;
     }
 
@@ -105,7 +105,6 @@ void AMainGameGameMode::GeneratePlayerCharacters(APlayerController* PlayerContro
         FCharacterSaveData SaveData;
         if (!CharManager->GetCharacterSaveData(CharacterTag, SaveData))
         {
-            // 队伍 Tag 在玩家拥有的角色中找不到，输出 Error 并跳过
             UE_LOG(LogTemp, Error, TEXT("GeneratePlayerCharacters: 队伍角色 Tag=%s 在玩家拥有的角色存档中未找到！跳过生成。"), *CharacterTag.ToString());
             continue;
         }
@@ -179,11 +178,11 @@ void AMainGameGameMode::GeneratePlayerCharacters(APlayerController* PlayerContro
     }
 }
 
-void AMainGameGameMode::CleanupAfterLoad()
+void AGameplayGameModeBase::CleanupAfterLoad()
 {
     if (UGameAssetManagerSubsystem* AssetManager = GetGameInstance()->GetSubsystem<UGameAssetManagerSubsystem>())
     {
         AssetManager->CleanupAfterLoad();
-        UE_LOG(LogTemp, Log, TEXT("AMainGameGameMode: 异步资源已清理完毕。"));
+        UE_LOG(LogTemp, Log, TEXT("AGameplayGameModeBase: 异步资源已清理完毕。"));
     }
 }

@@ -6,7 +6,7 @@
 #include "Core/OpenWorldARPGPlayerController.h"
 #include "GameplayTagContainer.h"
 #include "InputActionValue.h"
-#include "MainGamePlayerController.generated.h"
+#include "GameplayPlayerController.generated.h"
 
 class UUserWidget;
 class UInputMappingContext;
@@ -14,15 +14,17 @@ class UInputAction;
 class APlayerCharacter;
 
 /**
- * 轻量化控制器。只接收输入并向下派发请求，不微操 Character 组件。
+ * 通用玩法控制器。只接收输入并向下派发请求，不微操 Character 组件。
+ * 无论在大世界还是副本，战斗输入绑定（跳跃、冲刺、切人等）均在此层完成。
+ * 大世界/副本专属逻辑在子类中扩展。
  */
 UCLASS()
-class OPENWORLDARPG_API AMainGamePlayerController : public AOpenWorldARPGPlayerController
+class OPENWORLDARPG_API AGameplayPlayerController : public AOpenWorldARPGPlayerController
 {
     GENERATED_BODY()
 
 public:
-    AMainGamePlayerController();
+    AGameplayPlayerController();
 
     // --- 角色切换 (Server RPC) ---
 
@@ -204,6 +206,10 @@ protected:
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags|Combat")
     FGameplayTag AimStopEventTag;
+
+    /** 防止切换上场的状态标签容器（目标角色拥有这些标签时禁止切换） */
+    UPROPERTY(EditDefaultsOnly, Category = "Config|Tags|Switch")
+    FGameplayTagContainer PreventSwitchTags;
 
     // --- 配置：镜头回正 ---
 

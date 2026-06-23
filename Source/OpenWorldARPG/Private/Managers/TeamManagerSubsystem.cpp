@@ -3,8 +3,8 @@
 #include "Managers/TeamManagerSubsystem.h"
 #include "Managers/CharacterManagerSubsystem.h"
 #include "Characters/PlayerCharacter.h"
-#include "Core/PlayerControllers/MainGamePlayerController.h"
-#include "Core/PlayerStates/MainGamePlayerState.h"
+#include "Core/PlayerControllers/GameplayPlayerController.h"
+#include "Core/PlayerStates/GameplayPlayerState.h"
 #include "Data/StartingRosterConfig.h"
 #include "Engine/GameInstance.h"
 #include "Engine/LocalPlayer.h"
@@ -73,7 +73,7 @@ void UTeamManagerSubsystem::SwitchToCharacterByIndex(int32 TeamIndex)
     {
         if (ULocalPlayer* LocalPlayer = World->GetFirstLocalPlayerFromController())
         {
-            if (AMainGamePlayerController* PC = Cast<AMainGamePlayerController>(LocalPlayer->GetPlayerController(World)))
+            if (AGameplayPlayerController* PC = Cast<AGameplayPlayerController>(LocalPlayer->GetPlayerController(World)))
             {
                 PC->Server_SwitchCharacter(TeamIndex);
                 UE_LOG(LogTemp, Log, TEXT("TeamManager: 通过 Server RPC 请求切换到索引 %d 的角色"), TeamIndex);
@@ -119,7 +119,7 @@ bool UTeamManagerSubsystem::IsCharacterSwitchable(int32 Index) const
     return true;
 }
 
-// --- PlayerState OnRep 回调 (由 MainGamePlayerState 调用) ---
+// --- PlayerState OnRep 回调 (由 GameplayPlayerState 调用) ---
 
 void UTeamManagerSubsystem::OnRep_ActiveCharacterIndexFromServer(int32 NewActiveIndex)
 {

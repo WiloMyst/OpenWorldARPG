@@ -244,6 +244,12 @@ void AEnemyCharacter::HandleDeath_Implementation()
 {
     Super::HandleDeath_Implementation();
 
+    // 隐藏头顶血条
+    if (HealthBarComponent)
+    {
+        HealthBarComponent->SetHiddenInGame(true);
+    }
+
     // 对应蓝图：获取 AI 控制器并停止逻辑
     AAIController* AIController = Cast<AAIController>(GetController());
     if (AIController && AIController->GetBrainComponent())

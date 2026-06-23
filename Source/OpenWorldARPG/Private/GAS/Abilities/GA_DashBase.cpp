@@ -6,7 +6,7 @@
 #include "Abilities/Tasks/AbilityTask_PlayMontageAndWait.h"
 #include "Characters/PlayerCharacter.h"
 #include "Components/OpenWorldARPGCharacterMovementComponent.h"
-#include "Core/PlayerControllers/MainGamePlayerController.h"
+#include "Core/PlayerControllers/GameplayPlayerController.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/RootMotionSource.h"
 #include "Kismet/KismetMathLibrary.h"
@@ -155,7 +155,7 @@ void UGA_DashBase::TryTransitionToSprint()
 
     // 通过 Controller 的 bIsSprintActionHeld 判断点按/长按
     // EventMagnitude: 1.0 = 长按（持久疾跑），0.0 = 点按（短时疾跑）
-    AMainGamePlayerController* PC = CachedPlayer->GetController<AMainGamePlayerController>();
+    AGameplayPlayerController* PC = CachedPlayer->GetController<AGameplayPlayerController>();
     const bool bIsLongPress = PC ? PC->IsSprintActionHeld() : false;
 
     if (SprintStartEventTag.IsValid())

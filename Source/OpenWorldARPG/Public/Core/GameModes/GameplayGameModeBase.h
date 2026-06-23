@@ -5,22 +5,23 @@
 #include "CoreMinimal.h"
 #include "Core/OpenWorldARPGGameModeBase.h"
 #include "GameplayTagContainer.h"
-#include "MainGameGameMode.generated.h"
+#include "GameplayGameModeBase.generated.h"
 
 class APlayerCharacter;
-class AMainGamePlayerState;
+class AGameplayPlayerState;
 
 /**
- * 主游戏 GameMode。负责服务器端角色生成与初始化。
- * 角色实体引用存入 PlayerState（Replicated），GameMode 不保留角色 TMap。
+ * 通用玩法 GameMode。负责服务器端角色生成与初始化。
+ * 无论在大世界还是副本，角色实体引用存入 PlayerState（Replicated），GameMode 不保留角色 TMap。
+ * 大世界/副本专属逻辑在子类中扩展。
  */
 UCLASS()
-class OPENWORLDARPG_API AMainGameGameMode : public AOpenWorldARPGGameModeBase
+class OPENWORLDARPG_API AGameplayGameModeBase : public AOpenWorldARPGGameModeBase
 {
     GENERATED_BODY()
 
 public:
-    AMainGameGameMode();
+    AGameplayGameModeBase();
 
     // --- 生命周期 ---
 

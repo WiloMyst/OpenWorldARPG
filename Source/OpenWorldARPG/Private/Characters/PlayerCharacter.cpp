@@ -22,7 +22,7 @@
 #include "Engine/AssetManager.h"
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemBlueprintLibrary.h"
-#include "Core/PlayerControllers/MainGamePlayerController.h"
+#include "Core/PlayerControllers/GameplayPlayerController.h"
 #include "Net/UnrealNetwork.h"
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/PlayerStart.h"
@@ -701,7 +701,7 @@ void APlayerCharacter::SetupUpperBodyLayers()
 void APlayerCharacter::Client_ResetCameraAndPhysics_Implementation(FRotator TargetRotation)
 {
 	// 从 Controller 读取玩家期望的镜头距离（切换角色后保持不变）
-	if (const AMainGamePlayerController* MainPC = Cast<AMainGamePlayerController>(GetController()))
+	if (const AGameplayPlayerController* MainPC = Cast<AGameplayPlayerController>(GetController()))
 	{
 		CurrentTargetArmLength = MainPC->GetPlayerDesiredArmLength();
 	}
@@ -833,7 +833,7 @@ void APlayerCharacter::AdjustAimingCamera(float DeltaTime)
 
 	// 正常状态下目标为 Controller 上玩家滚轮调节的期望距离（切换角色后保持不变）；瞄准状态下强制覆盖为瞄准距离
 	float TargetArmLength = NormalTargetArmLength;
-	if (const AMainGamePlayerController* MainPC = Cast<AMainGamePlayerController>(GetController()))
+	if (const AGameplayPlayerController* MainPC = Cast<AGameplayPlayerController>(GetController()))
 	{
 		TargetArmLength = MainPC->GetPlayerDesiredArmLength();
 	}
