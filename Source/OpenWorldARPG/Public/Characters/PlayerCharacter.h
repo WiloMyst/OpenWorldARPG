@@ -187,6 +187,14 @@ public:
 	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|MotionWarping")
 	UMotionWarpingComponent* GetMotionWarpingComp() const { return MotionWarpingComp; }
 
+	/** 获取当前移动输入 Y（前后方向），供 GA 读取输入意图（如攀爬跳跃分支判断） */
+	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Input")
+	float GetCurrentInputY() const { return CurrentInputY; }
+
+	/** 获取当前移动输入 X（左右方向），供 GA 读取输入意图 */
+	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Input")
+	float GetCurrentInputX() const { return CurrentInputX; }
+
 	/** 获取 UI 扩展组件（HUD 唯一数据来源） */
 	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|UI")
 	UHeroUIExtensionComponent* GetHeroUIExtensionComp() const { return HeroUIExtensionComp; }
@@ -350,6 +358,10 @@ protected:
 	/** 停止攀爬事件标签（攀爬中按跳跃时发送，与 CMC 检测到落地时发送的同一 Tag） */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
 	FGameplayTag ClimbStopEventTag;
+
+	/** 攀爬跳跃事件标签（攀爬中按空格时发送，激活 GA_ClimbJump 处理向上冲刺/脱墙后空翻） */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")
+	FGameplayTag ClimbJumpEventTag;
 
 	/** 跳跃开始事件标签 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")

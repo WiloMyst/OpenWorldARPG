@@ -108,6 +108,15 @@ public:
 	bool IsClimbingUp() const { return bIsClimbingUp; }
 	bool IsInCornerTransition() const;
 
+	/** 获取当前墙面法线（脱墙跳方向计算用） */
+	FVector GetClimbWallNormal() const { return ClimbWallNormal; }
+
+	/**
+	 * 脱墙跳：退出攀爬状态并赋予沿墙面法线向外+向上的速度。
+	 * 由 GA_ClimbJump 在脱墙后空翻分支中调用。
+	 */
+	void DoWallEject();
+
 	/** 执行攀爬环境检测，返回是否检测到可攀爬墙壁及 HitResult */
 	bool DetectClimbableWall(FHitResult& OutChestHit);
 
@@ -267,6 +276,18 @@ public:
 	/** 翻越位移偏移（相对于角色位置） */
 	UPROPERTY(EditDefaultsOnly, Category = "Climbing|ClimbUp")
 	FVector ClimbUpOffset = FVector(80.0f, 0.0f, 70.0f);
+
+	// ==========================================
+	// 攀爬配置 - 脱墙跳
+	// ==========================================
+
+	/** 脱墙跳水平速度（沿墙面法线向外） */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Climbing|Jump")
+	float WallEjectHorizontalSpeed = 500.0f;
+
+	/** 脱墙跳垂直速度（向上） */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Climbing|Jump")
+	float WallEjectVerticalSpeed = 600.0f;
 
 	// ==========================================
 	// 滑翔接口 (供 GA_GlideBase 调用)

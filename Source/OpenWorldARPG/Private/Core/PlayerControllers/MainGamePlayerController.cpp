@@ -462,11 +462,12 @@ void AMainGamePlayerController::Input_PlungeAttack()
 
 void AMainGamePlayerController::Input_Aim()
 {
-    if (APlayerCharacter* PC = Cast<APlayerCharacter>(GetPawn()))
-    {
-        if (AimEventTag.IsValid())
-        {
-            UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(PC, AimEventTag, FGameplayEventData());
-        }
-    }
+    APlayerCharacter* PC = Cast<APlayerCharacter>(GetPawn());
+    if (!PC) return;
+
+    bIsAiming = !bIsAiming;
+    FGameplayTag TagToSend = bIsAiming ? AimStartEventTag : AimStopEventTag;
+
+    if (TagToSend.IsValid())
+        UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(PC, TagToSend, FGameplayEventData());
 }

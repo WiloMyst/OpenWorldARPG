@@ -195,7 +195,10 @@ protected:
     FGameplayTag AimAttackEventTag;
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags|Combat")
-    FGameplayTag AimEventTag;
+    FGameplayTag AimStartEventTag;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Config|Tags|Combat")
+    FGameplayTag AimStopEventTag;
 
     // --- 配置：镜头回正 ---
 
@@ -217,6 +220,7 @@ protected:
 
 private:
     bool bIsWalking = false;
+    bool bIsAiming = false;
     bool bIsPhysicsAnimDisabled = false;
 
     /** 精准记录玩家是否正在按住 Dash/Sprint 动作键（Enhanced Input 无关物理按键） */

@@ -60,6 +60,14 @@ void UOpenWorldARPGAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
     // --- 通用物理快照（子类共享）---
 
     SnapshotVelocity = Character->GetVelocity();
+
+    // --- 计算并快照相对速度（剔除移动平台速度，解决平台抽搐）---
+    FVector BaseVelocity = FVector::ZeroVector;
+    if (UPrimitiveComponent* MovementBase = Character->GetMovementBase())
+    {
+        BaseVelocity = MovementBase->GetComponentVelocity();
+    }
+    SnapshotRelativeVelocity = SnapshotVelocity - BaseVelocity;
     SnapshotActorRotation = Character->GetActorRotation();
     SnapshotActorLocation = Character->GetActorLocation();
     SnapshotActorForwardVector = Character->GetActorForwardVector();
@@ -87,11 +95,11 @@ void UOpenWorldARPGAnimInstance::NativeThreadSafeUpdateAnimation(float DeltaSeco
     // 所有数据来源均为 NativeUpdateAnimation 中写入的 Snapshot... 变量。
 
     // --- 1. 基础运动数据 (Locomotion) ---
-
-    const FVector VelocityXY(SnapshotVelocity.X, SnapshotVelocity.Y, 0.0f);
+    // 强制使用主线程传入的相对速度快照，完美解决移动平台抽搐问题
+    const FVector VelocityXY(SnapshotRelativeVelocity.X, SnapshotRelativeVelocity.Y, 0.0f);
 
     GroundSpeed = VelocityXY.Size();
-    VelocityZ = SnapshotVelocity.Z;
+    VelocityZ = SnapshotRelativeVelocity.Z;
 
     // 本地空间速度方向角度（驱动方向混合空间）
     if (GroundSpeed > MoveSpeedThreshold)

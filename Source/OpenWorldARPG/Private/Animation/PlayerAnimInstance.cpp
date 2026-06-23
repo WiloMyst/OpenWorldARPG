@@ -175,42 +175,92 @@ void UPlayerAnimInstance::NativeThreadSafeUpdateAnimation(float DeltaSeconds)
 
     // --- 5. Update Step Stop State ---
 
-    const bool bHasSpeed = (GroundSpeed > 5.0f);
-    const bool bNoInput = AccelerationVector.IsNearlyZero();
-
-    // 1. 记录上一帧的状态（核心逻辑：边缘检测）
+    // 使用带有容差的相对速度判断
+    const bool bHasRelativeSpeed = (GroundSpeed > 5.0f);
+    const bool bHasInput = !AccelerationVector.IsNearlyZero();
     const bool bPrevInStepStopping = bInStepStopping;
 
-    // 2. 更新当前急停状态标志
-    bInStepStopping = (bHasSpeed && bNoInput && !bIsFalling);
-
-    // 3. 状态机判断：当且仅当刚刚进入急停状态的那一帧执行
-    if (bInStepStopping && !bPrevInStepStopping)
+    // --- 外力抗性逻辑 ---
+    if (bHasInput)
     {
-        // 捕获最高速度，且后续减速期间不再被覆盖
-        SpeedOnStop = GroundSpeed;
-
-        // 计算停步时是左脚还是右脚在前
-        // 使用基类快照 SnapshotActorLocation / SnapshotActorForwardVector
-        const FVector RootLoc = SnapshotActorLocation;
-        const FVector ForwardDir = SnapshotActorForwardVector;
-
-        // 将脚部位置向量与角色面朝前向向量做点乘 (Dot Product)
-        const float LeftForwardDist = FVector::DotProduct(SnapshotLeftFootLoc - RootLoc, ForwardDir);
-        const float RightForwardDist = FVector::DotProduct(SnapshotRightFootLoc - RootLoc, ForwardDir);
-
-        // 如果左脚的投影距离大于右脚，说明左脚在前
-        bStopOnLeftFoot = (LeftForwardDist > RightForwardDist);
+        // 只要有输入，绝对不是急停
+        bInStepStopping = false;
     }
-    else if (!bInStepStopping)
+    else
     {
-        // 恢复正常状态逻辑保持不变
-        if (!bCanSetSpeedOnStep)
+        // 没有输入时，判断是"玩家刚松手"还是"被外力推着走"
+        if (bHadInputLastFrame && bHasRelativeSpeed && bIsGrounded)
         {
-            SpeedOnStop = 0.0f;
+            // 玩家上一帧有输入，这帧松手了，且有残余速度，合法进入急停
+            bInStepStopping = true;
+        }
+        else if (bInStepStopping && bHasRelativeSpeed && bIsGrounded)
+        {
+            // 已经在急停状态中，且速度还没降到阈值以下，继续保持急停
+            bInStepStopping = true;
+        }
+        else
+        {
+            // 速度降下来了，或者根本不是玩家主动起步的（单纯被外力推挤），不触发急停
+            bInStepStopping = false;
         }
     }
 
+    // --- 状态机快照：当且仅当刚刚进入急停状态的那一帧执行 ---
+    if (bInStepStopping && !bPrevInStepStopping)
+    {
+        // 捕获最高速度，后续减速期间不再被覆盖
+        SpeedOnStop = GroundSpeed;
+
+        // --- 意图继承与大角度转身判定 ---
+        if (!SnapshotLastInputVector.IsNearlyZero())
+        {
+            // 计算玩家最后意图方向的旋转
+            const FRotator IntentRot = SnapshotLastInputVector.Rotation();
+
+            // 计算当前角色朝向与意图朝向的角度差（自动归一化到 -180 到 +180）
+            StopYawDelta = FMath::FindDeltaAngleDegrees(SnapshotActorRotation.Yaw, IntentRot.Yaw);
+
+            // 判断是否大于 90 度（大角度转身）
+            if (FMath::Abs(StopYawDelta) > 90.0f)
+            {
+                bIsTurnStop = true;
+                bTurnStopRight = (StopYawDelta > 0.0f); // 正数为右转，负数为左转
+            }
+            else
+            {
+                bIsTurnStop = false;
+            }
+        }
+        else
+        {
+            StopYawDelta = 0.0f;
+            bIsTurnStop = false;
+        }
+
+        // --- 计算停步时是左脚还是右脚在前 ---
+        const FVector RootLoc = SnapshotActorLocation;
+        const FVector ForwardDir = SnapshotActorForwardVector;
+
+        const float LeftForwardDist = FVector::DotProduct(SnapshotLeftFootLoc - RootLoc, ForwardDir);
+        const float RightForwardDist = FVector::DotProduct(SnapshotRightFootLoc - RootLoc, ForwardDir);
+
+        bStopOnLeftFoot = (LeftForwardDist > RightForwardDist);
+    }
+    else if (bHasInput)
+    {
+        // 【防提前归零修复】：只有当玩家再次推摇杆时，才重置速度缓存
+        SpeedOnStop = 0.0f;
+
+        // 清理转身状态
+        bIsTurnStop = false;
+        StopYawDelta = 0.0f;
+    }
+
+    // 记录本帧的输入状态，供下一帧判定使用
+    bHadInputLastFrame = bHasInput;
+
+    bShouldGroundMove2StopStep = (bInStepStopping && !bIsAiming);
     bShouldStopStep2GroundMove = (bIsGrounded && bIsMoving);
     bShouldAirborne2GroundMove = (bIsGrounded && bIsMoving);
     bShouldGroundMove2JumpStart = (VelocityZ > 30.0f);

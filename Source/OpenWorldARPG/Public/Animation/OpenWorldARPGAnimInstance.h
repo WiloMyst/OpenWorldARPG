@@ -84,6 +84,9 @@ protected:
     /** 主线程快照：角色速度（cm/s） */
     FVector SnapshotVelocity = FVector::ZeroVector;
 
+    /** 主线程快照：剔除 MovementBase (移动平台) 速度后的真实相对速度 */
+    FVector SnapshotRelativeVelocity = FVector::ZeroVector;
+
     /** 主线程快照：角色旋转 */
     FRotator SnapshotActorRotation = FRotator::ZeroRotator;
 

@@ -239,6 +239,18 @@ void APlayerCharacter::InitializeCharacter(const FCharacterSaveData& InSaveData,
 			}
 		}
 
+		// ==========================================
+		// 其他 GA 能力赋予（仅需 GA 类，无需连招图）
+		// ==========================================
+		for (const TSubclassOf<UGameplayAbility>& AbilityClass : InCombatData->GenericAbilities)
+		{
+			if (AbilityClass)
+			{
+				AbilitySystemComponent->GiveAbility(FGameplayAbilitySpec(AbilityClass, 1, INDEX_NONE, this));
+				UE_LOG(LogTemp, Warning, TEXT("[PlayerChar] Granted GenericAbility: %s"), *AbilityClass->GetName());
+			}
+		}
+
 		for (const TSubclassOf<UGameplayAbility>& AbilityClass : PermanentAbilitiesToActivate)
 		{
 			if (AbilityClass)
@@ -337,9 +349,8 @@ void APlayerCharacter::OnMeshLoaded(const UCharacterVisualDataAsset* VisualData)
 		}
 	}
 
-	SetupAimAnimLayers();
-	SetupPhysicsAnimLayers();
 	SetupUpperBodyLayers();
+	SetupPhysicsAnimLayers();
 }
 
 UAbilitySystemComponent* APlayerCharacter::GetAbilitySystemComponent() const
@@ -555,10 +566,13 @@ void APlayerCharacter::HandleSpacebarInput()
     UOpenWorldARPGCharacterMovementComponent* CustomMoveComp = GetCustomMovementComp();
     if (!CustomMoveComp) return;
 
-    // 1. 如果在攀爬，执行跳跃（退出攀爬）
+    // 1. 如果在攀爬，发送专属攀爬跳跃事件（由 GA_ClimbJump 处理向上冲刺/脱墙后空翻）
     if (CustomMoveComp->IsClimbing())
     {
-        HandleJumpStartInput();
+        if (AbilitySystemComponent && ClimbJumpEventTag.IsValid())
+        {
+            UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(this, ClimbJumpEventTag, FGameplayEventData());
+        }
         return;
     }
 
@@ -586,18 +600,9 @@ void APlayerCharacter::HandleSpacebarInput()
 
 void APlayerCharacter::HandleJumpStartInput()
 {
-	// 攀爬状态下按跳跃：发送停止攀爬事件，由 GA_ClimbBase 监听并清理现场后退出
-	if (AbilitySystemComponent && ClimbingStateTag.IsValid()
-		&& AbilitySystemComponent->HasMatchingGameplayTag(ClimbingStateTag))
-	{
-		if (ClimbStopEventTag.IsValid())
-		{
-			UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(this, ClimbStopEventTag, FGameplayEventData());
-		}
-		return;
-	}
-
 	// 发送跳跃 GAS 事件（由 GA_JumpBase 监听并激活）
+	// 注意：攀爬状态下的跳跃已在 HandleSpacebarInput() 中被拦截并发送 ClimbJumpEventTag，
+	//       由 GA_ClimbJumpBase 处理，不会走到这里。
     if (JumpStartEventTag.IsValid())
     {
         UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(this, JumpStartEventTag, FGameplayEventData());

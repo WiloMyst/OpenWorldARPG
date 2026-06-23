@@ -304,6 +304,23 @@ void UOpenWorldARPGCharacterMovementComponent::ExitClimb()
 	Char->SetActorRotation(FRotator(0.0f, CurrentRot.Yaw, 0.0f));
 }
 
+void UOpenWorldARPGCharacterMovementComponent::DoWallEject()
+{
+	if (!IsClimbing()) return;
+
+	// 计算反冲力：沿墙面法线向外 + 向上
+	const FVector EjectVelocity = (ClimbWallNormal * WallEjectHorizontalSpeed) + (FVector::UpVector * WallEjectVerticalSpeed);
+
+	// 退出攀爬状态（会清理攀爬状态并切换到 Falling）
+	ExitClimb();
+
+	// 赋予脱墙速度
+	Velocity = EjectVelocity;
+
+	// 强制更新组件速度
+	UpdateComponentVelocity();
+}
+
 void UOpenWorldARPGCharacterMovementComponent::TryClimbUp()
 {
 	ACharacter* Char = CachedOwnerCharacter.Get();

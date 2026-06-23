@@ -35,11 +35,11 @@ void UGA_AimBase::ActivateAbility(const FGameplayAbilitySpecHandle Handle, const
         return;
     }
 
-        // CMC 职责：修改 MaxWalkSpeed、旋转模式
+    // CMC 职责：修改 MaxWalkSpeed、旋转模式
     // GA 只发送"进入瞄准"的意愿，不传递任何物理参数
-        CustomMoveComp->EnterAimMode();
+    CustomMoveComp->EnterAimMode();
 
-        // GA 职责：意愿和表现
+    // GA 职责：意愿和表现
 
     // 0. 武器拿到手上
     if (UWeaponManagerComponent* WeaponComp = Character->FindComponentByClass<UWeaponManagerComponent>())

@@ -65,6 +65,18 @@ public:
     UPROPERTY(BlueprintReadWrite, Category = "AnimData|Locomotion")
     bool bCanSetSpeedOnStep = false;
 
+    /** 停步时角色朝向与最后输入意图方向的角度差 [-180, 180] */
+    UPROPERTY(BlueprintReadOnly, Category = "AnimData|Locomotion")
+    float StopYawDelta = 0.0f;
+
+    /** 是否触发了大角度转身急停 (角度差绝对值 > 90度) */
+    UPROPERTY(BlueprintReadOnly, Category = "AnimData|Locomotion")
+    bool bIsTurnStop = false;
+
+    /** 转身急停方向：True 为向右转，False 为向左转 */
+    UPROPERTY(BlueprintReadOnly, Category = "AnimData|Locomotion")
+    bool bTurnStopRight = false;
+
     // --- Aim ---
 
     /** 瞄准俯仰角 (度)，驱动上半身/头部 AimOffset 混合空间 [-90, 90] */
@@ -110,6 +122,10 @@ public:
     bool bIsFastSwimming = false;
 
     // --- Transition ---
+    
+    /** 是否从地面移动过渡到急停 */
+    UPROPERTY(BlueprintReadOnly, Category = "AnimData|Transitions")
+    bool bShouldGroundMove2StopStep = false;
 
     /** 是否从急停过渡到地面移动 */
     UPROPERTY(BlueprintReadOnly, Category = "AnimData|Transitions")
@@ -184,4 +200,7 @@ private:
 
     UPROPERTY(EditDefaultsOnly, Category = "Movement|Stop")
     FName RightFootBoneName = TEXT("Right-toe");
+
+    /** 记录上一帧是否有移动输入（用于过滤外力推挤导致的误停步） */
+    bool bHadInputLastFrame = false;
 };

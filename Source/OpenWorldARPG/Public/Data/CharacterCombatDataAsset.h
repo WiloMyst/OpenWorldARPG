@@ -189,4 +189,20 @@ public:
      */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Talents", meta = (DisplayName = "角色天赋字典"))
     TMap<FGameplayTag, FTalentConfig> CharacterTalents;
+
+    /**
+     * 其他通用 GA 能力列表（仅需配置 GA 类，无需蒙太奇/连招图）。
+     *
+     * 用于角色专属但不需要连招图的简单能力，例如：
+     *   - 攀爬跳跃（GA_ClimbJumpBase）
+     *   - 钩索
+     *   - 闪避
+     *   - 交互
+     *
+     * 与 CharacterTalents 的区别：
+     * - CharacterTalents 面向连招型天赋，需要 ComboGraph/Icon/Tag
+     * - 本字段面向纯 GA 能力，只需配置类即可，轻量无负担
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Abilities", meta = (DisplayName = "其他GA能力"))
+    TArray<TSubclassOf<UGameplayAbility>> GenericAbilities;
 };
