@@ -341,9 +341,7 @@ void UGameAssetManagerSubsystem::StartInnerAssetLoading()
                     AssetPathsToLoad.Add(VisualData->AnimationBlueprint.ToSoftObjectPath());
 
                     // 动画层
-                    AssetPathsToLoad.Add(VisualData->AimAnimLayers.ToSoftObjectPath());
                     AssetPathsToLoad.Add(VisualData->UpperBodyLayers.ToSoftObjectPath());
-                    AssetPathsToLoad.Add(VisualData->PhysicsAnimLayers.ToSoftObjectPath());
 
                     // 武器蓝图
                     AssetPathsToLoad.Add(VisualData->WeaponBlueprint.ToSoftObjectPath());

@@ -147,15 +147,6 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|Animation")
 	void SetupUpperBodyLayers();
 
-	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|Animation")
-	void SetupAimAnimLayers();
-
-	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|Animation")
-	void SetupPhysicsAnimLayers();
-
-	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|Animation")
-	void ClearPhysicsAnimLayers();
-
 	// 用于通知客户端重置摄像机延迟和物理表现
 	UFUNCTION(Client, Reliable)
 	void Client_ResetCameraAndPhysics(FRotator TargetRotation);

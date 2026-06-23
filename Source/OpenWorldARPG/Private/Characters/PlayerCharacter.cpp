@@ -22,7 +22,7 @@
 #include "Engine/AssetManager.h"
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemBlueprintLibrary.h"
-#include "Managers/GameAssetManagerSubsystem.h"
+#include "Core/PlayerControllers/MainGamePlayerController.h"
 #include "Net/UnrealNetwork.h"
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/PlayerStart.h"
@@ -350,7 +350,6 @@ void APlayerCharacter::OnMeshLoaded(const UCharacterVisualDataAsset* VisualData)
 	}
 
 	SetupUpperBodyLayers();
-	SetupPhysicsAnimLayers();
 }
 
 UAbilitySystemComponent* APlayerCharacter::GetAbilitySystemComponent() const
@@ -685,20 +684,6 @@ void APlayerCharacter::NotifySwapOutCompleted(const FTransform& SwapTransform)
 	OnSwapOutCompleted.Broadcast(this, SwapTransform);
 }
 
-void APlayerCharacter::SetupAimAnimLayers()
-{
-	if (!VisualDataAsset || !GetMesh()) return;
-
-	UClass* AnimLayerClass = VisualDataAsset->AimAnimLayers.IsValid()
-		? VisualDataAsset->AimAnimLayers.Get()
-		: VisualDataAsset->AimAnimLayers.LoadSynchronous();
-
-	if (AnimLayerClass && GetMesh()->GetAnimInstance())
-	{
-		GetMesh()->GetAnimInstance()->LinkAnimClassLayers(AnimLayerClass);
-	}
-}
-
 void APlayerCharacter::SetupUpperBodyLayers()
 {
 	if (!VisualDataAsset || !GetMesh()) return;
@@ -713,37 +698,17 @@ void APlayerCharacter::SetupUpperBodyLayers()
 	}
 }
 
-void APlayerCharacter::SetupPhysicsAnimLayers()
-{
-	if (!VisualDataAsset || !GetMesh()) return;
-
-	UClass* AnimLayerClass = VisualDataAsset->PhysicsAnimLayers.IsValid()
-		? VisualDataAsset->PhysicsAnimLayers.Get()
-		: VisualDataAsset->PhysicsAnimLayers.LoadSynchronous();
-
-	if (AnimLayerClass && GetMesh()->GetAnimInstance())
-	{
-		GetMesh()->GetAnimInstance()->LinkAnimClassLayers(AnimLayerClass);
-	}
-}
-
-void APlayerCharacter::ClearPhysicsAnimLayers()
-{
-	if (!VisualDataAsset || !GetMesh()) return;
-
-	UClass* AnimLayerClass = VisualDataAsset->PhysicsAnimLayers.IsValid()
-		? VisualDataAsset->PhysicsAnimLayers.Get()
-		: VisualDataAsset->PhysicsAnimLayers.LoadSynchronous();
-
-	if (AnimLayerClass && GetMesh()->GetAnimInstance())
-	{
-		GetMesh()->GetAnimInstance()->UnlinkAnimClassLayers(AnimLayerClass);
-	}
-}
-
 void APlayerCharacter::Client_ResetCameraAndPhysics_Implementation(FRotator TargetRotation)
 {
-	CurrentTargetArmLength = NormalTargetArmLength;
+	// 从 Controller 读取玩家期望的镜头距离（切换角色后保持不变）
+	if (const AMainGamePlayerController* MainPC = Cast<AMainGamePlayerController>(GetController()))
+	{
+		CurrentTargetArmLength = MainPC->GetPlayerDesiredArmLength();
+	}
+	else
+	{
+		CurrentTargetArmLength = NormalTargetArmLength;
+	}
 	CurrentTargetSocketOffset = NormalSocketOffset;
 
 	if (Controller)
@@ -866,7 +831,12 @@ void APlayerCharacter::AdjustAimingCamera(float DeltaTime)
 {
 	if (!AbilitySystemComponent) return;
 
+	// 正常状态下目标为 Controller 上玩家滚轮调节的期望距离（切换角色后保持不变）；瞄准状态下强制覆盖为瞄准距离
 	float TargetArmLength = NormalTargetArmLength;
+	if (const AMainGamePlayerController* MainPC = Cast<AMainGamePlayerController>(GetController()))
+	{
+		TargetArmLength = MainPC->GetPlayerDesiredArmLength();
+	}
 	FVector TargetSocketOffset = NormalSocketOffset;
 
 	if (AbilitySystemComponent->HasMatchingGameplayTag(AimingStateTag))

@@ -13,21 +13,6 @@ class UAnimMontage;
 
 /**
  * 角色外观表现数据资产。仅存储用于 3D 渲染和动画表现的资源。
- *
- * 【架构设计：UI / 表现 / 战斗 三层解耦】
- * 本资产是"表现层"的唯一载体，职责极度单一：
- * - 只存放骨骼网格体、动画蓝图、动画层、武器蓝图、攀爬蒙太奇等纯视觉数据
- * - 不包含任何 UI 展示字段（Name, Icon, Rarity 等）→ 由 FCharacterRegistryRow 负责
- * - 不包含任何战斗逻辑字段（Attributes, Talents 等）→ 由 UCharacterCombatDataAsset 负责
- *
- * 【极致内存管理：全软引用】
- * 所有资源引用均使用 TSoftObjectPtr / TSoftClassPtr，不产生硬引用加载。
- * 资产本身在编辑器中配置时只记录路径字符串，运行时由 GameAssetManagerSubsystem
- * 按需异步加载，避免将所有角色的 Mesh/AnimBP 常驻内存。
- *
- * 【Perforce 协同规范】
- * 本资产由美术人员负责签出和修改（调整 Mesh、AnimBP、蒙太奇等），
- * 与战斗策划签出的 UCharacterCombatDataAsset 完全独立，不会产生锁冲突。
  */
 UCLASS(BlueprintType)
 class OPENWORLDARPG_API UCharacterVisualDataAsset : public UPrimaryDataAsset
@@ -45,17 +30,9 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Visuals|Animation", meta = (DisplayName = "角色动画蓝图"))
     TSoftClassPtr<UAnimInstance> AnimationBlueprint;
 
-    /** 角色瞄准动画层蓝图（瞄准时叠加） */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Visuals|Animation", meta = (DisplayName = "瞄准动画层"))
-    TSoftClassPtr<UAnimInstance> AimAnimLayers;
-
     /** 角色上半身动画层蓝图 */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Visuals|Animation", meta = (DisplayName = "上半身动画层"))
     TSoftClassPtr<UAnimInstance> UpperBodyLayers;
-
-    /** 角色物理模拟动画层蓝图（布娃娃/受击等） */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Visuals|Animation", meta = (DisplayName = "物理模拟动画层"))
-    TSoftClassPtr<UAnimInstance> PhysicsAnimLayers;
 
     // --- 武器 ---
 

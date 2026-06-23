@@ -80,8 +80,6 @@ void AMainGamePlayerController::SetupInputComponent()
         if (IA_PickUp) EnhancedInputComponent->BindAction(IA_PickUp, ETriggerEvent::Started, this, &AMainGamePlayerController::Input_PickUp);
         // 打开背包
         if (IA_ToggleInventory) EnhancedInputComponent->BindAction(IA_ToggleInventory, ETriggerEvent::Started, this, &AMainGamePlayerController::Input_ToggleInventory);
-        // 头发布料模拟 (FlipFlop)
-        if (IA_ClothSimulation) EnhancedInputComponent->BindAction(IA_ClothSimulation, ETriggerEvent::Started, this, &AMainGamePlayerController::Input_ClothSimulation);
 
         // 队伍切换 1~4
         if (IA_Switch_1) EnhancedInputComponent->BindAction(IA_Switch_1, ETriggerEvent::Started, this, &AMainGamePlayerController::Input_Switch1);
@@ -94,6 +92,9 @@ void AMainGamePlayerController::SetupInputComponent()
         if (IA_AimAttack)    EnhancedInputComponent->BindAction(IA_AimAttack, ETriggerEvent::Triggered, this, &AMainGamePlayerController::Input_AimAttack);
         if (IA_Aim)          EnhancedInputComponent->BindAction(IA_Aim, ETriggerEvent::Started, this, &AMainGamePlayerController::Input_Aim);
         if (IA_PlungeAttack) EnhancedInputComponent->BindAction(IA_PlungeAttack, ETriggerEvent::Started, this, &AMainGamePlayerController::Input_PlungeAttack);
+
+        // 镜头缩放（鼠标滚轮）
+        if (IA_CameraZoom) EnhancedInputComponent->BindAction(IA_CameraZoom, ETriggerEvent::Triggered, this, &AMainGamePlayerController::Input_CameraZoom);
 
         
     }
@@ -400,22 +401,6 @@ void AMainGamePlayerController::Input_ToggleInventory()
     }
 }
 
-void AMainGamePlayerController::Input_ClothSimulation()
-{
-    APlayerCharacter* PC = Cast<APlayerCharacter>(GetPawn());
-    if (!PC) return;
-
-    bIsPhysicsAnimDisabled = !bIsPhysicsAnimDisabled;
-    if (bIsPhysicsAnimDisabled)
-    {
-        PC->ClearPhysicsAnimLayers();
-    }
-    else
-    {
-        PC->SetupPhysicsAnimLayers();
-    }
-}
-
 void AMainGamePlayerController::Input_NormalAttack()
 {
     if (APlayerCharacter* PC = Cast<APlayerCharacter>(GetPawn()))
@@ -462,12 +447,22 @@ void AMainGamePlayerController::Input_PlungeAttack()
 
 void AMainGamePlayerController::Input_Aim()
 {
-    APlayerCharacter* PC = Cast<APlayerCharacter>(GetPawn());
-    if (!PC) return;
+	APlayerCharacter* PC = Cast<APlayerCharacter>(GetPawn());
+	if (!PC) return;
 
-    bIsAiming = !bIsAiming;
-    FGameplayTag TagToSend = bIsAiming ? AimStartEventTag : AimStopEventTag;
+	bIsAiming = !bIsAiming;
+	FGameplayTag TagToSend = bIsAiming ? AimStartEventTag : AimStopEventTag;
 
-    if (TagToSend.IsValid())
-        UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(PC, TagToSend, FGameplayEventData());
+	if (TagToSend.IsValid())
+		UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(PC, TagToSend, FGameplayEventData());
+}
+
+void AMainGamePlayerController::Input_CameraZoom(const FInputActionValue& Value)
+{
+    const float ZoomValue = Value.Get<float>();
+    if (FMath::IsNearlyZero(ZoomValue)) return;
+
+    // 滚轮向上（ZoomValue > 0）拉近，滚轮向下（ZoomValue < 0）拉远
+    PlayerDesiredArmLength -= (ZoomValue * CameraZoomStep);
+    PlayerDesiredArmLength = FMath::Clamp(PlayerDesiredArmLength, MinCameraDistance, MaxCameraDistance);
 }

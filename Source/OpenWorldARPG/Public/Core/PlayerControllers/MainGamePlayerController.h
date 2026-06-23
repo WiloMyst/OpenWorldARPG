@@ -40,6 +40,9 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Input")
     bool IsSprintActionHeld() const { return bIsSprintActionHeld; }
 
+    /** 获取玩家期望的镜头距离（切换角色后保持不变） */
+    float GetPlayerDesiredArmLength() const { return PlayerDesiredArmLength; }
+
     /** Server RPC：客户端同步 bIsSprintActionHeld 到服务器，确保多端一致 */
     UFUNCTION(Server, Reliable, WithValidation)
     void Server_SetSprintActionHeld(bool bHeld);
@@ -88,7 +91,6 @@ protected:
     void Input_Hook();
     void Input_PickUp();
     void Input_ToggleInventory();
-    void Input_ClothSimulation();
 
     // 队伍切换
     void Input_Switch1() { HandleSwitchCharacterInput(0); }
@@ -101,6 +103,9 @@ protected:
     void Input_PlungeAttack();
     void Input_AimAttack();
     void Input_Aim();
+
+    /** 鼠标滚轮缩放镜头回调 */
+    void Input_CameraZoom(const FInputActionValue& Value);
 
 protected:
     // --- 配置：输入资产 ---
@@ -133,9 +138,6 @@ protected:
     TObjectPtr<UInputAction> IA_ToggleInventory;
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
-    TObjectPtr<UInputAction> IA_ClothSimulation;
-
-    UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
     TObjectPtr<UInputAction> IA_Switch_1;
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
@@ -161,6 +163,9 @@ protected:
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Input|Combat")
     TObjectPtr<UInputAction> IA_Aim;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
+    TObjectPtr<UInputAction> IA_CameraZoom;
 
     // --- 配置：Tags ---
 
@@ -221,7 +226,6 @@ protected:
 private:
     bool bIsWalking = false;
     bool bIsAiming = false;
-    bool bIsPhysicsAnimDisabled = false;
 
     /** 精准记录玩家是否正在按住 Dash/Sprint 动作键（Enhanced Input 无关物理按键） */
     bool bIsSprintActionHeld = false;
@@ -234,4 +238,22 @@ private:
 
     /** 缓存的出场 Transform，由 Controller 在激活 GA_SwapInBase 前设置到角色上 */
     FTransform PendingSwapTransform;
+
+    // --- Camera Zoom ---
+
+    /** 镜头最近距离限制 */
+    UPROPERTY(EditDefaultsOnly, Category = "Camera|Zoom")
+    float MinCameraDistance = 150.0f;
+
+    /** 镜头最远距离限制 */
+    UPROPERTY(EditDefaultsOnly, Category = "Camera|Zoom")
+    float MaxCameraDistance = 800.0f;
+
+    /** 每次滚轮缩放的步长 */
+    UPROPERTY(EditDefaultsOnly, Category = "Camera|Zoom")
+    float CameraZoomStep = 50.0f;
+
+    /** 玩家主动调节的期望镜头距离，作为 Normal 状态下的目标值（切换角色后保持不变） */
+    UPROPERTY(VisibleAnywhere, Category = "Camera|Zoom")
+    float PlayerDesiredArmLength = 400.0f;
 };
