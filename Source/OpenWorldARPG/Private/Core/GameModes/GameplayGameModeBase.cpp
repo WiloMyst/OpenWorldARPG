@@ -62,8 +62,7 @@ void AGameplayGameModeBase::GeneratePlayerCharacters(APlayerController* PlayerCo
     }
     if (!PlayerCharacterClass)
     {
-        UE_LOG(LogTemp, Error, TEXT("GeneratePlayerCharacters: PlayerCharacterClass 未配置！请在 GameplayGameModeBase 蓝图中设置。"));
-        return;
+        UE_LOG(LogTemp, Warning, TEXT("GeneratePlayerCharacters: 全局 PlayerCharacterClass 未配置，将完全依赖 VisualData 中的配置。"));
     }
 
     AGameplayPlayerState* PlayerState = PlayerController->GetPlayerState<AGameplayPlayerState>();
@@ -126,11 +125,29 @@ void AGameplayGameModeBase::GeneratePlayerCharacters(APlayerController* PlayerCo
             continue;
         }
 
-        UE_LOG(LogTemp, Log, TEXT("GeneratePlayerCharacters: 尝试生成队伍角色 Tag=%s (索引=%d)"), *CharacterTag.ToString(), TeamIndex);
+        // --- 确定要生成的角色蓝图类 ---
+        // 默认使用 GameMode 配的兜底类，优先使用 VisualData 中按体型配置的蓝图类
+        UClass* ClassToSpawn = PlayerCharacterClass;
+        if (VisualData->CharacterBlueprint.IsValid())
+        {
+            ClassToSpawn = VisualData->CharacterBlueprint.Get();
+        }
+        else if (!VisualData->CharacterBlueprint.IsNull())
+        {
+            ClassToSpawn = VisualData->CharacterBlueprint.LoadSynchronous();
+        }
+
+        if (!ClassToSpawn)
+        {
+            UE_LOG(LogTemp, Error, TEXT("GeneratePlayerCharacters: 角色 Tag=%s 既没有配置 CharacterBlueprint，也没有全局兜底类！跳过生成。"), *CharacterTag.ToString());
+            continue;
+        }
+
+        UE_LOG(LogTemp, Log, TEXT("GeneratePlayerCharacters: 尝试生成队伍角色 Tag=%s (索引=%d), 使用蓝图类=%s"), *CharacterTag.ToString(), TeamIndex, *ClassToSpawn->GetName());
 
         // 生成角色实体
         APlayerCharacter* SpawnedChar = GetWorld()->SpawnActor<APlayerCharacter>(
-            PlayerCharacterClass,
+            ClassToSpawn,
             SpawnTransform,
             SpawnParams
         );

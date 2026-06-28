@@ -25,7 +25,8 @@ public class OpenWorldARPG : ModuleRules
 			"AIModule",
             "DeveloperSettings",
             "ChaosVehicles",
-			"MotionWarping"
+			"MotionWarping",
+			"NavigationSystem"
         });
 	}
 }

@@ -68,6 +68,15 @@ protected:
     UFUNCTION()
     void OnAttackInputEventReceived(FGameplayEventData Payload);
 
+    /**
+     * 长按派生重击检查回调。
+     * 动画播放到 AN_CheckHeavyAttackBranch 帧时触发，
+     * 若玩家仍在按住普攻键，则模拟发送一次重击输入事件，
+     * 顺滑走入连招图的重击分支。
+     */
+    UFUNCTION()
+    void OnHeavyBranchCheckReceived(FGameplayEventData Payload);
+
 protected:
     // --- 配置 ---
 
@@ -110,12 +119,28 @@ protected:
     FGameplayTag ComboWindowCloseTag;
 
     /**
-     * 攻击输入事件 Tag（如 Input.Attack.Normal）。
-     * 玩家按下攻击键时，PlayerCharacter 发送此事件。
-     * GA 收到后，如果连招窗口已打开，立即流转到下一个连招节点。
+     * 基础攻击输入 Tag（父级标签，如 Input.Attack）。
+     * 在引擎蓝图里配置为父级标签，WaitGameplayEvent 的 OnlyMatchExact 设为 false，
+     * 这样 Input.Attack.Normal 和 Input.Attack.Heavy 都能被监听到，
+     * 实现轻重击随意穿插派生。
      */
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
-    FGameplayTag AttackInputTag;
+    FGameplayTag BaseAttackInputTag;
+
+    /**
+     * 长按派生重击检查事件 Tag（如 Character.Event.CheckHeavyBranch）。
+     * 由蒙太奇中的 AN_CheckHeavyAttackBranch AnimNotify 在指定帧发送。
+     * GA 收到后检查玩家是否仍在按住普攻键，若是则模拟发送重击输入。
+     */
+    UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
+    FGameplayTag HeavyBranchCheckTag;
+
+    /**
+     * 重击输入事件 Tag（如 Input.Attack.Heavy）。
+     * 长按派生检查通过后，GA 用此 Tag 模拟发送重击输入事件，触发连招图的重击派生分支。
+     */
+    UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
+    FGameplayTag HeavyAttackInputTag;
 
     /** Motion Warping Target 名称（需与蒙太奇中的 Motion Warping AnimNotifyState 匹配） */
     UPROPERTY(EditDefaultsOnly, Category = "Config|MotionWarping")
@@ -176,4 +201,7 @@ private:
 
     UPROPERTY()
     TObjectPtr<UAbilityTask_WaitGameplayEvent> InputTask;
+
+    UPROPERTY()
+    TObjectPtr<UAbilityTask_WaitGameplayEvent> HeavyBranchCheckTask;
 };

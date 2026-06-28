@@ -87,9 +87,18 @@ void AGameplayPlayerController::SetupInputComponent()
         if (IA_Switch_3) EnhancedInputComponent->BindAction(IA_Switch_3, ETriggerEvent::Started, this, &AGameplayPlayerController::Input_Switch3);
         if (IA_Switch_4) EnhancedInputComponent->BindAction(IA_Switch_4, ETriggerEvent::Started, this, &AGameplayPlayerController::Input_Switch4);
 
-        if (IA_NormalAttack) EnhancedInputComponent->BindAction(IA_NormalAttack, ETriggerEvent::Triggered, this, &AGameplayPlayerController::Input_NormalAttack);
-        if (IA_HeavyAttack)  EnhancedInputComponent->BindAction(IA_HeavyAttack, ETriggerEvent::Triggered, this, &AGameplayPlayerController::Input_HeavyAttack);
-        if (IA_AimAttack)    EnhancedInputComponent->BindAction(IA_AimAttack, ETriggerEvent::Triggered, this, &AGameplayPlayerController::Input_AimAttack);
+        if (IA_NormalAttack) 
+        {
+            EnhancedInputComponent->BindAction(IA_NormalAttack, ETriggerEvent::Started, this, &AGameplayPlayerController::Input_NormalAttack);
+            EnhancedInputComponent->BindAction(IA_NormalAttack, ETriggerEvent::Completed, this, &AGameplayPlayerController::Input_NormalAttackReleased);
+            EnhancedInputComponent->BindAction(IA_NormalAttack, ETriggerEvent::Canceled, this, &AGameplayPlayerController::Input_NormalAttackReleased);
+        }
+        if (IA_HeavyAttack)  EnhancedInputComponent->BindAction(IA_HeavyAttack, ETriggerEvent::Started, this, &AGameplayPlayerController::Input_HeavyAttack);
+        if (IA_AimAttack)
+        {
+            EnhancedInputComponent->BindAction(IA_AimAttack, ETriggerEvent::Started, this, &AGameplayPlayerController::Input_AimAttack);
+            EnhancedInputComponent->BindAction(IA_AimAttack, ETriggerEvent::Completed, this, &AGameplayPlayerController::Input_AimAttackReleased);
+        }
         if (IA_Aim)          EnhancedInputComponent->BindAction(IA_Aim, ETriggerEvent::Started, this, &AGameplayPlayerController::Input_Aim);
         if (IA_PlungeAttack) EnhancedInputComponent->BindAction(IA_PlungeAttack, ETriggerEvent::Started, this, &AGameplayPlayerController::Input_PlungeAttack);
 
@@ -416,6 +425,8 @@ void AGameplayPlayerController::Input_ToggleInventory()
 
 void AGameplayPlayerController::Input_NormalAttack()
 {
+    bIsNormalAttackHeld = true;
+
     if (APlayerCharacter* PC = Cast<APlayerCharacter>(GetPawn()))
     {
         if (NormalAttackEventTag.IsValid())
@@ -423,6 +434,11 @@ void AGameplayPlayerController::Input_NormalAttack()
             UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(PC, NormalAttackEventTag, FGameplayEventData());
         }
     }
+}
+
+void AGameplayPlayerController::Input_NormalAttackReleased()
+{
+    bIsNormalAttackHeld = false;
 }
 
 void AGameplayPlayerController::Input_HeavyAttack()
@@ -440,9 +456,20 @@ void AGameplayPlayerController::Input_AimAttack()
 {
     if (APlayerCharacter* PC = Cast<APlayerCharacter>(GetPawn()))
     {
-        if (AimAttackEventTag.IsValid())
+        if (AimAttackStartEventTag.IsValid())
         {
-            UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(PC, AimAttackEventTag, FGameplayEventData());
+            UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(PC, AimAttackStartEventTag, FGameplayEventData());
+        }
+    }
+}
+
+void AGameplayPlayerController::Input_AimAttackReleased()
+{
+    if (APlayerCharacter* PC = Cast<APlayerCharacter>(GetPawn()))
+    {
+        if (AimAttackStopEventTag.IsValid())
+        {
+            UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(PC, AimAttackStopEventTag, FGameplayEventData());
         }
     }
 }

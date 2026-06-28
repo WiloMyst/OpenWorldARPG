@@ -42,6 +42,10 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Input")
     bool IsSprintActionHeld() const { return bIsSprintActionHeld; }
 
+    /** 返回玩家是否正在按住普攻键（用于长按派生重击检测） */
+    UFUNCTION(BlueprintCallable, Category = "Input")
+    bool IsNormalAttackHeld() const { return bIsNormalAttackHeld; }
+
     /** 获取玩家期望的镜头距离（切换角色后保持不变） */
     float GetPlayerDesiredArmLength() const { return PlayerDesiredArmLength; }
 
@@ -101,9 +105,11 @@ protected:
     void Input_Switch4() { HandleSwitchCharacterInput(3); }
 
     void Input_NormalAttack();
+    void Input_NormalAttackReleased();
     void Input_HeavyAttack();
     void Input_PlungeAttack();
     void Input_AimAttack();
+    void Input_AimAttackReleased();
     void Input_Aim();
 
     /** 鼠标滚轮缩放镜头回调 */
@@ -199,7 +205,10 @@ protected:
     FGameplayTag PlungeAttackEventTag;
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags|Combat")
-    FGameplayTag AimAttackEventTag;
+    FGameplayTag AimAttackStartEventTag;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Config|Tags|Combat")
+    FGameplayTag AimAttackStopEventTag;
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags|Combat")
     FGameplayTag AimStartEventTag;
@@ -235,6 +244,9 @@ private:
 
     /** 精准记录玩家是否正在按住 Dash/Sprint 动作键（Enhanced Input 无关物理按键） */
     bool bIsSprintActionHeld = false;
+
+    /** 精准记录玩家是否正在按住普攻键（长按派生重击检测用） */
+    bool bIsNormalAttackHeld = false;
 
     /** 镜头是否正在自动回正 */
     bool bIsResettingCamera = false;

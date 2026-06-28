@@ -7,6 +7,7 @@
 #include "Abilities/Tasks/AbilityTask_WaitGameplayEvent.h"
 #include "Characters/PlayerCharacter.h"
 #include "Components/WeaponManagerComponent.h"
+#include "Core/PlayerControllers/GameplayPlayerController.h"
 #include "Data/CharacterCombatDataAsset.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "MotionWarpingComponent.h"
@@ -127,10 +128,19 @@ void UGA_MeleeAttackBase::ExecuteAttack(FName NodeName)
         ComboCloseTask->EventReceived.AddDynamic(this, &UGA_MeleeAttackBase::OnComboCloseEventReceived);
     }
 
-    if (AttackInputTag.IsValid())
+    // 基础攻击输入监听：OnlyMatchExact = false
+    // 配置为父级标签 Input.Attack，可同时捕获 Input.Attack.Normal 和 Input.Attack.Heavy
+    if (BaseAttackInputTag.IsValid())
     {
-        InputTask = UAbilityTask_WaitGameplayEvent::WaitGameplayEvent(this, AttackInputTag, nullptr, false, false);
+        InputTask = UAbilityTask_WaitGameplayEvent::WaitGameplayEvent(this, BaseAttackInputTag, nullptr, false, false);
         InputTask->EventReceived.AddDynamic(this, &UGA_MeleeAttackBase::OnAttackInputEventReceived);
+    }
+
+    // 长按派生重击检查事件监听
+    if (HeavyBranchCheckTag.IsValid())
+    {
+        HeavyBranchCheckTask = UAbilityTask_WaitGameplayEvent::WaitGameplayEvent(this, HeavyBranchCheckTag, nullptr, false, false);
+        HeavyBranchCheckTask->EventReceived.AddDynamic(this, &UGA_MeleeAttackBase::OnHeavyBranchCheckReceived);
     }
 
     // ==========================================
@@ -146,6 +156,7 @@ void UGA_MeleeAttackBase::ExecuteAttack(FName NodeName)
     if (ComboOpenTask) ComboOpenTask->ReadyForActivation();
     if (ComboCloseTask) ComboCloseTask->ReadyForActivation();
     if (InputTask) InputTask->ReadyForActivation();
+    if (HeavyBranchCheckTask) HeavyBranchCheckTask->ReadyForActivation();
 }
 
 void UGA_MeleeAttackBase::AttackOrientation(float MaxWarpDistance)
@@ -325,13 +336,11 @@ void UGA_MeleeAttackBase::OnAttackInputEventReceived(FGameplayEventData Payload)
     }
 
     // ==========================================
-    // 直接响应输入（无缓存）
+    // 直接响应输入
     //
     // 只有连招窗口打开时才响应输入：
     // - 窗口已打开：立即流转到下一个连招节点
-    // - 窗口未打开：忽略输入（不缓存）
-    //
-    // 玩家需要在正确的窗口内按键才能触发下一段连招。
+    // - 窗口未打开：忽略输入
     // ==========================================
     if (bComboWindowOpen && Payload.EventTag.IsValid() && CurrentNode)
     {
@@ -340,6 +349,30 @@ void UGA_MeleeAttackBase::OnAttackInputEventReceived(FGameplayEventData Payload)
             FName ResolvedNextName = *NextNodeName;
             bComboWindowOpen = false;
             ExecuteAttack(ResolvedNextName);
+        }
+    }
+}
+
+void UGA_MeleeAttackBase::OnHeavyBranchCheckReceived(FGameplayEventData Payload)
+{
+    // 防串线校验
+    if (Payload.OptionalObject && Payload.OptionalObject != ActiveAttackMontage)
+    {
+        return;
+    }
+
+    // 动画播放到 AN_CheckHeavyAttackBranch 帧时触发
+    // 检查玩家是否仍在按住普攻键，若是则模拟发送重击输入事件
+    APlayerController* PC = Cast<APlayerController>(GetAvatarActorFromActorInfo()->GetInstigatorController());
+    if (AGameplayPlayerController* GameplayPC = Cast<AGameplayPlayerController>(PC))
+    {
+        if (GameplayPC->IsNormalAttackHeld())
+        {
+            // 玩家仍在长按！模拟发送一个重击事件给自身系统
+            // 复用现有的输入响应逻辑：它会自动去 NextNodes 里查，并触发 ExecuteAttack
+            FGameplayEventData FakePayload;
+            FakePayload.EventTag = HeavyAttackInputTag;
+            OnAttackInputEventReceived(FakePayload);
         }
     }
 }
@@ -380,6 +413,7 @@ void UGA_MeleeAttackBase::ClearAllTasks()
     if (ComboOpenTask) { ComboOpenTask->EndTask(); ComboOpenTask = nullptr; }
     if (ComboCloseTask) { ComboCloseTask->EndTask(); ComboCloseTask = nullptr; }
     if (InputTask) { InputTask->EndTask(); InputTask = nullptr; }
+    if (HeavyBranchCheckTask) { HeavyBranchCheckTask->EndTask(); HeavyBranchCheckTask = nullptr; }
 }
 
 void UGA_MeleeAttackBase::CorrectPawnOrient()

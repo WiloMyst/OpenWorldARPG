@@ -10,6 +10,7 @@
 class USkeletalMesh;
 class UAnimInstance;
 class UAnimMontage;
+class APlayerCharacter;
 
 /**
  * 角色外观表现数据资产。仅存储用于 3D 渲染和动画表现的资源。
@@ -21,6 +22,13 @@ class OPENWORLDARPG_API UCharacterVisualDataAsset : public UPrimaryDataAsset
 
 public:
     // --- 骨骼与动画 ---
+
+    /**
+     * 角色的基础蓝图类（按体型区分，例如 BP_Player_MaleAdult, BP_Player_Loli）。
+     * 运行时将根据此配置生成对应的 Actor 实体。
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Visuals|Blueprint", meta = (DisplayName = "角色蓝图类"))
+    TSoftClassPtr<APlayerCharacter> CharacterBlueprint;
 
     /** 角色骨骼网格体（软引用，运行时异步加载） */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Visuals|Mesh", meta = (DisplayName = "角色骨骼网格体"))

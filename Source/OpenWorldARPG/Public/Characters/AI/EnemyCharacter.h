@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Characters/AI/AiCharacter.h"
+#include "AI/AIPatrolAreaBase.h"
 #include "AbilitySystemInterface.h"
 #include "GameplayTagContainer.h"
 #include "GameplayEffectTypes.h"
@@ -129,7 +130,7 @@ protected:
 
 public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Enemy|AI")
-    TObjectPtr<AActor> PatrolArea;
+    TObjectPtr<AAIPatrolAreaBase> PatrolArea;
 
 private:
     UPROPERTY()

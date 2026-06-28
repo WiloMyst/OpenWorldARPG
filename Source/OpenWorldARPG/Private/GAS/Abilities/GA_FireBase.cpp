@@ -3,12 +3,13 @@
 #include "GAS/Abilities/GA_FireBase.h"
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemBlueprintLibrary.h"
-#include "Abilities/Tasks/AbilityTask_PlayMontageAndWait.h"
+#include "Abilities/Tasks/AbilityTask_WaitGameplayEvent.h"
 #include "Characters/PlayerCharacter.h"
 #include "Components/WeaponManagerComponent.h"
 #include "Weapons/GunBase.h"
 #include "Camera/CameraComponent.h"
 #include "Kismet/KismetMathLibrary.h"
+#include "TimerManager.h"
 
 UGA_FireBase::UGA_FireBase()
 {
@@ -24,7 +25,7 @@ void UGA_FireBase::ActivateAbility(const FGameplayAbilitySpecHandle Handle, cons
         return;
     }
 
-    // 1. 缓存角色 (告别 BP_PlayerCharacter 强转)
+    // 1. 缓存角色与武器
     CachedPlayer = Cast<APlayerCharacter>(GetAvatarActorFromActorInfo());
     if (!CachedPlayer)
     {
@@ -32,7 +33,6 @@ void UGA_FireBase::ActivateAbility(const FGameplayAbilitySpecHandle Handle, cons
         return;
     }
 
-    // 2. 缓存武器 (告别 BP_Gun 强转)
     if (UWeaponManagerComponent* WeaponComp = CachedPlayer->FindComponentByClass<UWeaponManagerComponent>())
     {
         CachedWeapon = WeaponComp->CharacterWeapon;
@@ -44,36 +44,51 @@ void UGA_FireBase::ActivateAbility(const FGameplayAbilitySpecHandle Handle, cons
         return;
     }
 
-    // 3. 执行攻击
-    ExecuteAttack();
-}
-
-void UGA_FireBase::ExecuteAttack()
-{
-    if (!CachedPlayer || !FireMontage)
+    // 2. 开启"停止事件"的异步监听
+    // 等待玩家松开按键 (控制器在 Completed 时发送该 Tag)
+    if (StopFireEventTag.IsValid())
     {
-        EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);
-        return;
+        StopEventTask = UAbilityTask_WaitGameplayEvent::WaitGameplayEvent(this, StopFireEventTag, nullptr, false, false);
+        StopEventTask->EventReceived.AddDynamic(this, &UGA_FireBase::OnStopFireEventReceived);
+        StopEventTask->ReadyForActivation();
     }
 
-    // 1. 对应蓝图图2：播放开火蒙太奇
-    MontageTask = UAbilityTask_PlayMontageAndWait::CreatePlayMontageAndWaitProxy(
-        this, NAME_None, FireMontage, MontagePlayRate, NAME_None, true, 1.0f, 0.0f);
+    // 3. 立即执行第一发子弹射击
+    PerformSingleShot();
 
-    MontageTask->OnCompleted.AddDynamic(this, &UGA_FireBase::OnMontageFinished);
-    MontageTask->OnBlendOut.AddDynamic(this, &UGA_FireBase::OnMontageFinished);
-    MontageTask->OnInterrupted.AddDynamic(this, &UGA_FireBase::OnMontageFinished);
-    MontageTask->OnCancelled.AddDynamic(this, &UGA_FireBase::OnMontageFinished);
+    // 4. 如果是全自动武器 (FireRate > 0)，开启连发定时器
+    if (FireRate > 0.0f)
+    {
+        GetWorld()->GetTimerManager().SetTimer(FireTimerHandle, this, &UGA_FireBase::PerformSingleShot, FireRate, true);
+    }
+    else
+    {
+        // 如果是半自动单发武器 (FireRate <= 0)，射完一发直接结束，或者等待动画结束
+        // 这里可以直接结束，因为动画是由原生 API 播放的
+        EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
+    }
+}
 
-    // 激活任务
-    MontageTask->ReadyForActivation();
+void UGA_FireBase::PerformSingleShot()
+{
+    if (!CachedPlayer) return;
+
+    // 播放蒙太奇：
+    // 在超高射速(如0.1s一发)的情况下，如果用 AbilityTask_PlayMontageAndWait 会瞬间产生大量 Task 导致卡顿和泄漏。
+    // 大厂对于这种高频循环动作，通常直接调用角色原生的 PlayAnimMontage (Fire&Forget 模式)。
+    if (FireMontage)
+    {
+        CachedPlayer->PlayAnimMontage(FireMontage, MontagePlayRate);
+    }
 
     AGunBase* Gun = Cast<AGunBase>(CachedWeapon);
     if (Gun)
     {
-        // 命令枪械播放自己的声光电表现
+        // 枪口火光、抛壳、开火音效
         Gun->PlayShootFX();
     }
+
+    // 结算射线判定与伤害
     ApplyDamage();
 }
 
@@ -84,13 +99,11 @@ void UGA_FireBase::ApplyDamage()
     // LocalPredicted GA：伤害应用必须只在权威端（服务器）执行
     if (!GetAvatarActorFromActorInfo()->HasAuthority()) return;
 
-    // 强转为我们的枪械基类，获取准确的枪械独立数据
     AGunBase* Gun = Cast<AGunBase>(CachedWeapon);
     UCameraComponent* FollowCamera = CachedPlayer->GetFollowCamera();
 
     if (!Gun || !FollowCamera) return;
 
-    // 向枪械动态索要射程和真实的枪口位置 (彻底摆脱硬编码与找组件的开销)
     float CurrentFireRange = Gun->GetFireRange();
     FVector MuzzleLoc = Gun->GetMuzzleTransform().GetLocation();
 
@@ -101,8 +114,8 @@ void UGA_FireBase::ApplyDamage()
     Params.AddIgnoredActor(CachedPlayer);
     Params.AddIgnoredActor(CachedWeapon);
 
-        // 第一步：摄像机射线 (寻找准心在世界中的落点)
-        FVector CamTraceEnd = CameraLoc + CameraForward * (CurrentFireRange + 500.0f);
+    // 第一步：摄像机射线 (寻找准心在世界中的落点)
+    FVector CamTraceEnd = CameraLoc + CameraForward * (CurrentFireRange + 500.0f);
 
     FHitResult CamHitResult;
     bool bCamHit = GetWorld()->LineTraceSingleByChannel(CamHitResult, CameraLoc, CamTraceEnd, TraceChannel, Params);
@@ -110,30 +123,26 @@ void UGA_FireBase::ApplyDamage()
     // 目标落点：如果摄像机打到东西了，就是撞击点；如果没打到，就是射线的尽头
     FVector TargetAimPoint = bCamHit ? CamHitResult.ImpactPoint : CamTraceEnd;
 
-        // 第二步：枪口射线 (真实弹道计算)
-        // 计算从枪口指向准心落点的标准化方向向量
+    // 第二步：枪口射线 (真实弹道计算)
     FVector ShootDirection = (TargetAimPoint - MuzzleLoc).GetSafeNormal();
-
-    // 根据动态射程，计算真实的枪口射线终点
     FVector MuzzleTraceEnd = MuzzleLoc + ShootDirection * CurrentFireRange;
 
     FHitResult MuzzleHitResult;
     bool bMuzzleHit = GetWorld()->LineTraceSingleByChannel(MuzzleHitResult, MuzzleLoc, MuzzleTraceEnd, TraceChannel, Params);
 
-        // 第三步：结算伤害 (GAS 核心流程)
-        if (bMuzzleHit)
+    // 第三步：结算伤害 (GAS 核心流程)
+    if (bMuzzleHit)
     {
         AActor* HitActor = MuzzleHitResult.GetActor();
         if (HitActor)
         {
-            // 通过 GAS 库安全地获取对方的 ASC
             UAbilitySystemComponent* TargetASC = UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(HitActor);
             UAbilitySystemComponent* SourceASC = GetAbilitySystemComponentFromActorInfo();
 
             if (TargetASC && SourceASC && DamageEffectClass)
             {
                 FGameplayEffectContextHandle Context = SourceASC->MakeEffectContext();
-                Context.AddHitResult(MuzzleHitResult); // 传入真实的枪口 Hit 结果
+                Context.AddHitResult(MuzzleHitResult);
                 Context.AddSourceObject(this);
 
                 FGameplayEffectSpecHandle SpecHandle = SourceASC->MakeOutgoingSpec(DamageEffectClass, GetAbilityLevel(), Context);
@@ -146,17 +155,25 @@ void UGA_FireBase::ApplyDamage()
     }
 }
 
-void UGA_FireBase::OnMontageFinished()
+void UGA_FireBase::OnStopFireEventReceived(FGameplayEventData Payload)
 {
+    // 收到控制器发来的“松开鼠标”事件，结束开火
     EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, false);
 }
 
 void UGA_FireBase::EndAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateEndAbility, bool bWasCancelled)
 {
-    if (MontageTask)
+    // 清理连发定时器，停止自动射击
+    if (UWorld* World = GetWorld())
     {
-        MontageTask->EndTask();
-        MontageTask = nullptr;
+        World->GetTimerManager().ClearTimer(FireTimerHandle);
+    }
+
+    // 清理异步监听任务
+    if (StopEventTask)
+    {
+        StopEventTask->EndTask();
+        StopEventTask = nullptr;
     }
 
     Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
