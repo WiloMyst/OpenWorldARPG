@@ -2,16 +2,20 @@
 
 #include "Core/PlayerControllers/MainMenuPlayerController.h"
 #include "Managers/UIManagerSubsystem.h"
+#include "Managers/GameFlowSubsystem.h"
 #include "Core/GameModes/MainMenuGameMode.h"
+#include "Data/StartingRosterConfig.h"
 #include "UI/Screens/LoginScreenWidget.h"
 #include "UI/Screens/StartGameScreenWidget.h"
+#include "Engine/GameInstance.h"
+#include "Engine/LocalPlayer.h"
 #include "Kismet/GameplayStatics.h"
 
 void AMainMenuPlayerController::BeginPlay()
 {
     Super::BeginPlay();
 
-    UUIManagerSubsystem* UIManager = GetGameInstance()->GetSubsystem<UUIManagerSubsystem>();
+    UUIManagerSubsystem* UIManager = GetLocalPlayer()->GetSubsystem<UUIManagerSubsystem>();
     if (!UIManager) return;
 
     // 1. 安全检查：确保蓝图里配置了 Tag
@@ -35,7 +39,7 @@ void AMainMenuPlayerController::BeginPlay()
 
 void AMainMenuPlayerController::HandleOnLoginButtonClicked()
 {
-    UUIManagerSubsystem* UIManager = GetGameInstance()->GetSubsystem<UUIManagerSubsystem>();
+    UUIManagerSubsystem* UIManager = GetLocalPlayer()->GetSubsystem<UUIManagerSubsystem>();
     if (!UIManager) return;
 
     // 1. 关闭登录界面
@@ -62,20 +66,24 @@ void AMainMenuPlayerController::HandleOnLoginButtonClicked()
 void AMainMenuPlayerController::HandleOnStartButtonClicked()
 {
     // 1. 关闭开始游戏界面
-    if (UUIManagerSubsystem* UIManager = GetGameInstance()->GetSubsystem<UUIManagerSubsystem>())
+    if (UUIManagerSubsystem* UIManager = GetLocalPlayer()->GetSubsystem<UUIManagerSubsystem>())
     {
         UIManager->CloseTopUI();
     }
 
-    // TODO [联机架构缺陷]: GetGameMode 在客户端返回 nullptr。
-    // 联机时客户端点击"开始游戏"需要通过 Server RPC 通知服务器。
-    // 当前仅在 Host/单机场景下有效。
-    if (AMainMenuGameMode* MainMenuGM = Cast<AMainMenuGameMode>(UGameplayStatics::GetGameMode(this)))
+    // 2. 从 GameMode 取配置数据，交给 FlowManager 统筹切图
+    // 注：主菜单作为纯本地关卡运行（Standalone / Listen Server Host），故可安全获取 AuthGameMode
+    AMainMenuGameMode* MainMenuGM = Cast<AMainMenuGameMode>(UGameplayStatics::GetGameMode(this));
+    UGameFlowSubsystem* FlowManager = GetGameInstance()->GetSubsystem<UGameFlowSubsystem>();
+
+    if (MainMenuGM && FlowManager)
     {
-        MainMenuGM->HandleStartGameRequest();
+        UStartingRosterConfig* RosterConfig = MainMenuGM->GetStartingRosterConfig();
+        TSoftObjectPtr<UWorld> TargetLevel = MainMenuGM->GetTargetLevelToLoad();
+        FlowManager->RequestTravelFromMainMenu(TargetLevel, RosterConfig);
     }
     else
     {
-        UE_LOG(LogTemp, Error, TEXT("MainMenuPlayerController: 无法获取 MainMenuGameMode！"));
+        UE_LOG(LogTemp, Error, TEXT("MainMenuPlayerController: GameFlowSubsystem 或 MainMenuGameMode 获取失败！"));
     }
 }

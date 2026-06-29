@@ -49,6 +49,36 @@ public:
     /** 获取玩家期望的镜头距离（切换角色后保持不变） */
     float GetPlayerDesiredArmLength() const { return PlayerDesiredArmLength; }
 
+    // --- 角色界面 (Character Screen) ---
+    // 展台生命周期、视角切换、拖拽输入全部由 UCharacterScreenMainWidget 自己管理。
+    // PlayerController 仅保留输入回调，委托 UIManager 打开/关闭 UI。
+
+    /**
+     * 角色界面是否处于打开状态。
+     * 不再使用本地 bool 缓存，而是查询 UIManagerSubsystem 的唯一事实来源，
+     * 彻底消除"按钮关闭 / 快捷键关闭"导致的状态脱节 Bug。
+     */
+    UFUNCTION(BlueprintPure, Category = "CharacterScreen")
+    bool IsCharacterScreenOpen() const;
+
+    /** 设置主大世界 HUD 的可见性（供全屏 UI 菜单调用，如角色界面、编队界面） */
+    UFUNCTION(BlueprintCallable, Category = "UI")
+    void SetMainHUDVisible(bool bIsVisible);
+
+    // --- 编队界面 (Team Setup Screen) ---
+
+    /** 打开编队界面（仅委托 UIManager，展台生命周期由 UI 自己管理） */
+    UFUNCTION(BlueprintCallable, Category = "TeamSetup")
+    void OpenTeamSetupScreen();
+
+    /** 关闭编队界面（仅委托 UIManager） */
+    UFUNCTION(BlueprintCallable, Category = "TeamSetup")
+    void CloseTeamSetupScreen();
+
+    /** 编队界面是否处于打开状态 */
+    UFUNCTION(BlueprintPure, Category = "TeamSetup")
+    bool IsTeamSetupScreenOpen() const { return bTeamSetupScreenOpen; }
+
     /** Server RPC：客户端同步 bIsSprintActionHeld 到服务器，确保多端一致 */
     UFUNCTION(Server, Reliable, WithValidation)
     void Server_SetSprintActionHeld(bool bHeld);
@@ -94,9 +124,10 @@ protected:
     void Input_ShiftReleased();
 
     void Input_Walk();
-    void Input_Hook();
     void Input_PickUp();
     void Input_ToggleInventory();
+    void Input_OpenCharacterScreen();
+    void Input_OpenTeamSetupScreen();
 
     // 队伍切换
     void Input_Switch1() { HandleSwitchCharacterInput(0); }
@@ -137,13 +168,18 @@ protected:
     TObjectPtr<UInputAction> IA_Walk;
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
-    TObjectPtr<UInputAction> IA_Hook;
-
-    UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
     TObjectPtr<UInputAction> IA_PickUp;
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
     TObjectPtr<UInputAction> IA_ToggleInventory;
+
+    /** 打开角色界面的输入动作 */
+    UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
+    TObjectPtr<UInputAction> IA_OpenCharacterScreen;
+
+    /** 打开编队界面的输入动作 */
+    UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
+    TObjectPtr<UInputAction> IA_OpenTeamSetupScreen;
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
     TObjectPtr<UInputAction> IA_Switch_1;
@@ -180,6 +216,14 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
     FGameplayTag InventoryUITag;
 
+    /** 角色界面 UI 标签（通过 UIManagerSubsystem 打开） */
+    UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
+    FGameplayTag CharacterScreenUITag;
+
+    /** 编队界面 UI 标签（通过 UIManagerSubsystem 打开） */
+    UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
+    FGameplayTag TeamSetupScreenUITag;
+
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
     FGameplayTag DashEventTag;
 
@@ -191,9 +235,6 @@ protected:
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
     FGameplayTag WalkStopEventTag;
-
-    UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
-    FGameplayTag HookStartEventTag;
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags|Combat")
     FGameplayTag NormalAttackEventTag;
@@ -247,6 +288,16 @@ private:
 
     /** 精准记录玩家是否正在按住普攻键（长按派生重击检测用） */
     bool bIsNormalAttackHeld = false;
+
+    // --- 角色界面状态 ---
+
+    // 【已删除】bool bCharacterScreenOpen：UI 状态由 UIManagerSubsystem 统一收口，
+    // Controller 不再本地缓存，彻底消除"按钮关闭 / 快捷键关闭"导致的状态脱节 Bug。
+
+    // --- 编队界面状态 ---
+
+    /** 编队界面是否处于打开状态 */
+    bool bTeamSetupScreenOpen = false;
 
     /** 镜头是否正在自动回正 */
     bool bIsResettingCamera = false;

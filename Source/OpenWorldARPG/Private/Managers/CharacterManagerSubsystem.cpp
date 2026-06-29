@@ -57,7 +57,7 @@ void UCharacterManagerSubsystem::InitializeFromDataObject(UObject* InDataObject)
 	UE_LOG(LogTemp, Log, TEXT("InitializeFromDataObject: 成功填充 OwnedCharactersSaveData，数量为 %d"), OwnedCharactersSaveData.Num());
 }
 
-const bool UCharacterManagerSubsystem::GetCharacterRegistryRowByTag(const FGameplayTag& CharacterTag, FCharacterRegistryRow& OutRow) const
+bool UCharacterManagerSubsystem::GetCharacterRegistryRowByTag(const FGameplayTag& CharacterTag, FCharacterRegistryRow& OutRow) const
 {
 	EnsureTagMapBuilt();
 
@@ -93,21 +93,19 @@ FName UCharacterManagerSubsystem::GetRowNameByTag(const FGameplayTag& CharacterT
 	return RowNamePtr ? *RowNamePtr : NAME_None;
 }
 
-bool UCharacterManagerSubsystem::GetCharacterSaveData(const FGameplayTag& CharacterTag, FCharacterSaveData& OutData) const
+TArray<FCharacterSaveData> UCharacterManagerSubsystem::GetAllOwnedCharacterSaveData() const
 {
-	const FCharacterSaveData* FoundData = OwnedCharactersSaveData.Find(CharacterTag);
-	if (FoundData)
-	{
-		OutData = *FoundData;
-		return true;
-	}
-
-	UE_LOG(LogTemp, Warning, TEXT("GetCharacterSaveData: Tag [%s] 不在 OwnedCharactersSaveData 中！共 %d 条记录"),
-		*CharacterTag.ToString(), OwnedCharactersSaveData.Num());
-	return false;
+	TArray<FCharacterSaveData> Result;
+	OwnedCharactersSaveData.GenerateValueArray(Result);
+	return Result;
 }
 
-void UCharacterManagerSubsystem::UpdateCharacterSaveData(const FGameplayTag& CharacterTag, const FCharacterSaveData& NewData)
+const FCharacterSaveData* UCharacterManagerSubsystem::GetCharacterSaveData(const FGameplayTag& CharacterTag) const
+{
+	return OwnedCharactersSaveData.Find(CharacterTag);
+}
+
+void UCharacterManagerSubsystem::SetCharacterSaveData(const FGameplayTag& CharacterTag, const FCharacterSaveData& NewData)
 {
 	FCharacterSaveData* ExistingData = OwnedCharactersSaveData.Find(CharacterTag);
 	if (ExistingData)
@@ -116,7 +114,7 @@ void UCharacterManagerSubsystem::UpdateCharacterSaveData(const FGameplayTag& Cha
 	}
 	else
 	{
-		UE_LOG(LogTemp, Warning, TEXT("UpdateCharacterSaveData: Tag [%s] 不存在于 OwnedCharactersSaveData 中，跳过更新。"), *CharacterTag.ToString());
+		UE_LOG(LogTemp, Warning, TEXT("SetCharacterSaveData: Tag [%s] 不存在于 OwnedCharactersSaveData 中，跳过更新。"), *CharacterTag.ToString());
 	}
 }
 

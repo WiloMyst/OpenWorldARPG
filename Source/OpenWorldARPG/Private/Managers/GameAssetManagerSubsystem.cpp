@@ -8,12 +8,10 @@
 #include "Data/CharacterRegistryRow.h"
 #include "Data/CharacterGeneralDataAsset.h"
 #include "Data/UIDataAsset.h"
-#include "UI/Screens/LoadingScreenWidget.h"
 #include "GameplayTagContainer.h"
 #include "AbilitySystemGlobals.h"
 #include "Engine/StreamableManager.h"
 #include "Engine/AssetManager.h"
-#include "Kismet/GameplayStatics.h"
 
 void UGameAssetManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -98,12 +96,6 @@ UUIDataAsset* UGameAssetManagerSubsystem::GetUIMapDataAsset()
     return CachedUIMapDataAsset;
 }
 
-TSubclassOf<ULoadingScreenWidget> UGameAssetManagerSubsystem::GetLoadingScreenWidgetClass() const
-{
-    const UOpenWorldARPGSettings& Settings = UOpenWorldARPGSettings::Get();
-    return Settings.LoadingScreenWidgetClass;
-}
-
 // --- 异步加载调度 ---
 
 float UGameAssetManagerSubsystem::GetTotalLoadingProgress() const
@@ -185,7 +177,7 @@ void UGameAssetManagerSubsystem::TryStartAsyncLevelLoading(TSoftObjectPtr<UWorld
     CurrentLevelToLoad = LevelToLoad;
     TargetLevelName = FName(*FPackageName::GetShortName(LevelToLoad.GetLongPackageName()));
 
-    ShowLoadingScreen();
+    // UI Block 由 GameFlowSubsystem 统筹，AssetManager 只负责资源加载
     StartLevelLoading();
 }
 
@@ -424,52 +416,17 @@ void UGameAssetManagerSubsystem::OnAllTeamAssetsLoaded()
     CurrentLoadingPhase = ELoadingPhase::Complete;
     UE_LOG(LogTemp, Log, TEXT("Phase 2 Complete: All team assets loaded."));
 
-    UGameplayStatics::OpenLevel(GetWorld(), TargetLevelName);
+    // 广播加载完成事件，由 GameFlowSubsystem 决定何时执行切图
+    OnLoadComplete.Broadcast();
 }
 
 // ####################################################################
-// #                         UI 和清理辅助函数                          #
+// #                         清理辅助函数                              #
 // ####################################################################
-
-void UGameAssetManagerSubsystem::ShowLoadingScreen()
-{
-    if (GetWorld()->GetNetMode() == NM_DedicatedServer) return;
-
-    TSubclassOf<ULoadingScreenWidget> WidgetClass = GetLoadingScreenWidgetClass();
-    if (WidgetClass && !LoadingScreenInstance)
-    {
-        LoadingScreenInstance = CreateWidget<ULoadingScreenWidget>(GetGameInstance(), WidgetClass);
-        if (LoadingScreenInstance)
-        {
-            GetGameInstance()->GetGameViewportClient()->AddViewportWidgetContent(
-                LoadingScreenInstance->TakeWidget(),
-                100
-            );
-        }
-    }
-}
-
-void UGameAssetManagerSubsystem::HideLoadingScreen()
-{
-    if (LoadingScreenInstance)
-    {
-        UGameInstance* GameInstance = GetGameInstance();
-        if (GameInstance && GameInstance->GetGameViewportClient())
-        {
-            GameInstance->GetGameViewportClient()->RemoveViewportWidgetContent(
-                LoadingScreenInstance->TakeWidget()
-            );
-        }
-
-        LoadingScreenInstance->MarkAsGarbage();
-        LoadingScreenInstance = nullptr;
-    }
-}
 
 void UGameAssetManagerSubsystem::CleanupAfterLoad()
 {
-    HideLoadingScreen();
-
+    // UI 隐藏由 GameFlowSubsystem 统筹，AssetManager 只负责资源清理
     CurrentLoadingPhase = ELoadingPhase::None;
     CurrentTeamToLoad.Empty();
     CurrentLevelToLoad.Reset();

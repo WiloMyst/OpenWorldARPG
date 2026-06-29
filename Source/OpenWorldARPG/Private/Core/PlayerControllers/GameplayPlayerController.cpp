@@ -10,6 +10,7 @@
 #include "Blueprint/UserWidget.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "Kismet/GameplayStatics.h"
 
 AGameplayPlayerController::AGameplayPlayerController()
 {
@@ -33,9 +34,6 @@ void AGameplayPlayerController::BeginPlay()
         MainHUDInstance = CreateWidget<UUserWidget>(this, MainHUDClass);
         if (MainHUDInstance) MainHUDInstance->AddToViewport();
     }
-
-    // 注意：不再绑定 TeamManager->OnRequestCharacterSwitch
-    // 角色切换现在通过 Server RPC 流程：输入 → HandleSwitchCharacterInput → Server_SwitchCharacter
 }
 
 void AGameplayPlayerController::SetupInputComponent()
@@ -74,12 +72,12 @@ void AGameplayPlayerController::SetupInputComponent()
 
         // 行走 (FlipFlop)
         if (IA_Walk) EnhancedInputComponent->BindAction(IA_Walk, ETriggerEvent::Started, this, &AGameplayPlayerController::Input_Walk);
-        // 钩索
-        if (IA_Hook) EnhancedInputComponent->BindAction(IA_Hook, ETriggerEvent::Started, this, &AGameplayPlayerController::Input_Hook);
         // 拾取
         if (IA_PickUp) EnhancedInputComponent->BindAction(IA_PickUp, ETriggerEvent::Started, this, &AGameplayPlayerController::Input_PickUp);
         // 打开背包
         if (IA_ToggleInventory) EnhancedInputComponent->BindAction(IA_ToggleInventory, ETriggerEvent::Started, this, &AGameplayPlayerController::Input_ToggleInventory);
+        if (IA_OpenCharacterScreen) EnhancedInputComponent->BindAction(IA_OpenCharacterScreen, ETriggerEvent::Started, this, &AGameplayPlayerController::Input_OpenCharacterScreen);
+        if (IA_OpenTeamSetupScreen) EnhancedInputComponent->BindAction(IA_OpenTeamSetupScreen, ETriggerEvent::Started, this, &AGameplayPlayerController::Input_OpenTeamSetupScreen);
 
         // 队伍切换 1~4
         if (IA_Switch_1) EnhancedInputComponent->BindAction(IA_Switch_1, ETriggerEvent::Started, this, &AGameplayPlayerController::Input_Switch1);
@@ -397,29 +395,20 @@ void AGameplayPlayerController::Input_Walk()
         UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(PC, TagToSend, FGameplayEventData());
 }
 
-void AGameplayPlayerController::Input_Hook()
+void AGameplayPlayerController::Input_ToggleInventory()
 {
-    if (APlayerCharacter* PC = Cast<APlayerCharacter>(GetPawn()))
+    if (UUIManagerSubsystem* UIManager = GetLocalPlayer()->GetSubsystem<UUIManagerSubsystem>())
     {
-        if (HookStartEventTag.IsValid())
-            UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(PC, HookStartEventTag, FGameplayEventData());
+        if (InventoryUITag.IsValid())
+            UIManager->ShowUIByTag(InventoryUITag);
     }
 }
 
 void AGameplayPlayerController::Input_PickUp()
 {
-    APlayerCharacter* PC = Cast<APlayerCharacter>(GetPawn());
-    if (!PC) return;
-
-    PC->HandleInteractInput();
-}
-
-void AGameplayPlayerController::Input_ToggleInventory()
-{
-    if (UUIManagerSubsystem* UIManager = GetGameInstance()->GetSubsystem<UUIManagerSubsystem>())
+    if (APlayerCharacter* PC = Cast<APlayerCharacter>(GetPawn()))
     {
-        if (InventoryUITag.IsValid())
-            UIManager->ShowUIByTag(InventoryUITag);
+        PC->HandleInteractInput();
     }
 }
 
@@ -505,4 +494,97 @@ void AGameplayPlayerController::Input_CameraZoom(const FInputActionValue& Value)
     // 滚轮向上（ZoomValue > 0）拉近，滚轮向下（ZoomValue < 0）拉远
     PlayerDesiredArmLength -= (ZoomValue * CameraZoomStep);
     PlayerDesiredArmLength = FMath::Clamp(PlayerDesiredArmLength, MinCameraDistance, MaxCameraDistance);
+}
+
+// ==========================================
+// 角色界面 (Character Screen)
+// ==========================================
+
+bool AGameplayPlayerController::IsCharacterScreenOpen() const
+{
+    // 唯一事实来源：询问 UIManagerSubsystem，而非本地 bool
+    if (UUIManagerSubsystem* UIManager = GetLocalPlayer() ? GetLocalPlayer()->GetSubsystem<UUIManagerSubsystem>() : nullptr)
+    {
+        return UIManager->IsUIOpen(CharacterScreenUITag);
+    }
+    return false;
+}
+
+void AGameplayPlayerController::SetMainHUDVisible(bool bIsVisible)
+{
+    if (MainHUDInstance)
+    {
+        MainHUDInstance->SetVisibility(bIsVisible ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+    }
+}
+
+void AGameplayPlayerController::Input_OpenCharacterScreen()
+{
+    UUIManagerSubsystem* UIManager = GetLocalPlayer() ? GetLocalPlayer()->GetSubsystem<UUIManagerSubsystem>() : nullptr;
+    if (!UIManager || !CharacterScreenUITag.IsValid())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Input_OpenCharacterScreen: UIManager 或 CharacterScreenUITag 未配置"));
+        return;
+    }
+
+    // 询问 UIManager 唯一事实来源：UI 到底开没开？
+    if (UIManager->IsUIOpen(CharacterScreenUITag))
+    {
+        // 已打开：说明玩家想通过快捷键关闭它
+        // 使用 CloseUIByTag 而非 CloseTopUI，精确关闭目标 UI，
+        // 即使上方还有其他 UI 叠加也能正确关闭角色界面
+        UIManager->CloseUIByTag(CharacterScreenUITag);
+    }
+    else
+    {
+        // 未打开：请求 UIManager 打开（展台生命周期由 UI 自己管理）
+        UIManager->ShowUIByTag(CharacterScreenUITag);
+    }
+}
+
+// ==========================================
+// 编队界面 (Team Setup Screen)
+// ==========================================
+
+void AGameplayPlayerController::Input_OpenTeamSetupScreen()
+{
+    if (bTeamSetupScreenOpen)
+    {
+        CloseTeamSetupScreen();
+    }
+    else
+    {
+        OpenTeamSetupScreen();
+    }
+}
+
+void AGameplayPlayerController::OpenTeamSetupScreen()
+{
+    if (bTeamSetupScreenOpen) return;
+
+    UUIManagerSubsystem* UIManager = GetLocalPlayer() ? GetLocalPlayer()->GetSubsystem<UUIManagerSubsystem>() : nullptr;
+    if (!UIManager || !TeamSetupScreenUITag.IsValid())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("OpenTeamSetupScreen: UIManager 或 TeamSetupScreenUITag 未配置"));
+        return;
+    }
+
+    // 仅委托 UIManager 打开 UI，展台生成、视角切换、输入模式全部由 UI 自己管理
+    if (UIManager->ShowUIByTag(TeamSetupScreenUITag))
+    {
+        bTeamSetupScreenOpen = true;
+    }
+}
+
+void AGameplayPlayerController::CloseTeamSetupScreen()
+{
+    if (!bTeamSetupScreenOpen) return;
+
+    // 仅委托 UIManager 关闭 UI，展台销毁、视角恢复由 UI 的 NativeDestruct 处理
+    if (UUIManagerSubsystem* UIManager = GetLocalPlayer() ? GetLocalPlayer()->GetSubsystem<UUIManagerSubsystem>() : nullptr)
+    {
+        UIManager->CloseTopUI();
+    }
+
+    bTeamSetupScreenOpen = false;
 }

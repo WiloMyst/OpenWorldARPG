@@ -257,6 +257,13 @@ void UInteractionComponent::HandleOnItemDropped(int32 ItemID, int32 DroppedAmoun
     if (!GetOwner()->HasAuthority()) return;
     if (IsCharacterInStandby()) return;
 
+    // 防止队伍中所有角色的 InteractionComponent 都响应同一个 OnItemDropped 广播。
+    // InventoryManagerSubsystem 是 UGameInstanceSubsystem（全队共享），
+    // 其 OnItemDropped 会通知到所有角色的组件。只有当前被玩家控制的（已 Possess 的）
+    // 角色才应该生成丢弃物，其余待机角色不应响应。
+    APawn* OwnerPawn = Cast<APawn>(GetOwner());
+    if (!OwnerPawn || !OwnerPawn->IsPlayerControlled()) return;
+
     SpawnDroppedItem(ItemID, DroppedAmount);
 }
 

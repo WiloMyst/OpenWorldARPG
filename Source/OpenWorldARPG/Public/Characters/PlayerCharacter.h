@@ -226,6 +226,15 @@ public:
 	FCharacterSaveData& GetRuntimeDataRef() { return RuntimeData; }
 	const FCharacterSaveData& GetRuntimeData() const { return RuntimeData; }
 
+	/**
+	 * 将 GAS AttributeSet 中算好的真实属性值反写回 RuntimeData 的属性快照，
+	 * 并同步到 CharacterManagerSubsystem，作为 UI 面板展示的唯一数据源。
+	 * 调用时机：角色属性发生永久性变化（升级、换武器、突破、装备圣遗物等）时。
+	 * 注意：展台角色没有 ASC，因此所有 UI 展示必须依赖此快照，而非实时 GAS 查询。
+	 */
+	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|Data")
+	void SyncAttributesToSaveData();
+
 	const TArray<TSubclassOf<UGameplayAbility>>& GetPermanentAbilitiesToActivate() const { return PermanentAbilitiesToActivate; }
 
 protected:

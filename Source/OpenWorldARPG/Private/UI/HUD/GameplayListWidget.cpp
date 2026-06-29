@@ -25,9 +25,9 @@ void UGameplayListWidget::NativeOnInitialized()
 void UGameplayListWidget::OnInventoryButtonClicked()
 {
     // 呼叫全局 UI 管理器打开背包
-    if (UGameInstance* GI = GetGameInstance())
+    if (APlayerController* PC = GetOwningPlayer())
     {
-        if (UUIManagerSubsystem* UIManager = GI->GetSubsystem<UUIManagerSubsystem>())
+        if (UUIManagerSubsystem* UIManager = PC->GetLocalPlayer()->GetSubsystem<UUIManagerSubsystem>())
         {
             UIManager->ShowUIByTag(InventoryUITag);
         }
@@ -37,9 +37,9 @@ void UGameplayListWidget::OnInventoryButtonClicked()
 void UGameplayListWidget::OnCharacterButtonClicked()
 {
     // 呼叫全局 UI 管理器打开角色面板
-    if (UGameInstance* GI = GetGameInstance())
+    if (APlayerController* PC = GetOwningPlayer())
     {
-        if (UUIManagerSubsystem* UIManager = GI->GetSubsystem<UUIManagerSubsystem>())
+        if (UUIManagerSubsystem* UIManager = PC->GetLocalPlayer()->GetSubsystem<UUIManagerSubsystem>())
         {
             UIManager->ShowUIByTag(CharacterPanelUITag);
         }

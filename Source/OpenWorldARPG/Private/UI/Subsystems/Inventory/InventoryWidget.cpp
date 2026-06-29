@@ -116,9 +116,12 @@ void UInventoryWidget::HandleOnTabClicked(UItemCategoryTabWidget* NewCategoryTab
 
 void UInventoryWidget::OnCloseButtonClicked()
 {
-    if (UUIManagerSubsystem* UIManager = GetGameInstance()->GetSubsystem<UUIManagerSubsystem>())
+    if (APlayerController* PC = GetOwningPlayer())
     {
-        UIManager->CloseTopUI();
+        if (UUIManagerSubsystem* UIManager = PC->GetLocalPlayer()->GetSubsystem<UUIManagerSubsystem>())
+        {
+            UIManager->CloseTopUI();
+        }
     }
 }
 

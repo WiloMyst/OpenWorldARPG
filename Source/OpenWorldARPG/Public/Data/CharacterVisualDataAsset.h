@@ -38,6 +38,14 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Visuals|Animation", meta = (DisplayName = "角色动画蓝图"))
     TSoftClassPtr<UAnimInstance> AnimationBlueprint;
 
+    /**
+     * 3D 展台专用展示动画蓝图（软类引用）。
+     * 为 UI 展台（角色界面、编队界面）定制的 AnimBP，内部状态机仅保留待机/站姿/呼吸等展示状态，
+     * 不包含 GAS 战斗逻辑。若未配置则回退使用 AnimationBlueprint。
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Visuals|Animation", meta = (DisplayName = "展示动画蓝图"))
+    TSoftClassPtr<UAnimInstance> ShowcaseAnimationBlueprint;
+
     /** 角色上半身动画层蓝图 */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Visuals|Animation", meta = (DisplayName = "上半身动画层"))
     TSoftClassPtr<UAnimInstance> UpperBodyLayers;

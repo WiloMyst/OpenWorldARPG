@@ -7,6 +7,7 @@
 #include "Data/CharacterGeneralDataAsset.h"
 #include "Managers/GameAssetManagerSubsystem.h"
 #include "Managers/CharacterManagerSubsystem.h"
+#include "Core/PlayerControllers/GameplayPlayerController.h"
 #include "GAS/AttributeSets/AS_Player.h"
 #include "Components/OpenWorldARPGCharacterMovementComponent.h"
 #include "Components/WeaponManagerComponent.h"
@@ -22,7 +23,6 @@
 #include "Engine/AssetManager.h"
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemBlueprintLibrary.h"
-#include "Core/PlayerControllers/GameplayPlayerController.h"
 #include "Net/UnrealNetwork.h"
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/PlayerStart.h"
@@ -355,6 +355,38 @@ void APlayerCharacter::OnMeshLoaded(const UCharacterVisualDataAsset* VisualData)
 UAbilitySystemComponent* APlayerCharacter::GetAbilitySystemComponent() const
 {
 	return AbilitySystemComponent;
+}
+
+void APlayerCharacter::SyncAttributesToSaveData()
+{
+	// 【数据同步通道】：GAS AttributeSet -> RuntimeData 快照 -> CharacterManagerSubsystem
+	// UI 面板展示的唯一数据源是 RuntimeData 中的属性快照，而非实时 GAS 查询。
+	// 调用时机：角色属性发生永久性变化（升级、换武器、突破、装备圣遗物等）时。
+
+	if (!AttributeSet)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("SyncAttributesToSaveData: AttributeSet 无效，跳过同步"));
+		return;
+	}
+
+	UAS_Player* PlayerAS = Cast<UAS_Player>(AttributeSet);
+	if (!PlayerAS) return;
+
+	// 1. 将 GAS 算好的真实属性值反写到 RuntimeData 快照
+	RuntimeData.MaxHealth = PlayerAS->GetMaxHealth();
+
+	// TODO: 当前 AS_Player 尚未定义 Attack/Defense/CritRate/CritDamage 属性，
+	// 待 GAS 扩展后在下方补充对应反写逻辑：
+	// RuntimeData.Attack      = PlayerAS->GetAttack();
+	// RuntimeData.Defense     = PlayerAS->GetDefense();
+	// RuntimeData.CritRate    = PlayerAS->GetCritRate();
+	// RuntimeData.CritDamage  = PlayerAS->GetCritDamage();
+
+	// 2. 同步到 CharacterManagerSubsystem，确保 UI 拉取到最新数据
+	if (UCharacterManagerSubsystem* Subsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UCharacterManagerSubsystem>() : nullptr)
+	{
+		Subsystem->SetCharacterSaveData(GetCharacterTag(), RuntimeData);
+	}
 }
 
 void APlayerCharacter::SetStandbyMode(bool bNewStandbyState)

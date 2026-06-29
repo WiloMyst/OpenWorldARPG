@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 
 #include "Core/OpenWorldARPGPlayerController.h"
@@ -22,7 +22,7 @@ void AOpenWorldARPGPlayerController::BeginPlay()
     }
 
     // 订阅 UIManager 的 UI 栈变化广播
-    if (UUIManagerSubsystem* UIManager = GetGameInstance()->GetSubsystem<UUIManagerSubsystem>())
+    if (UUIManagerSubsystem* UIManager = GetLocalPlayer()->GetSubsystem<UUIManagerSubsystem>())
     {
         // 当收到 UI 发生变化的广播时，触发本类的 UpdateInputMode 进行重新仲裁
         UIManager->OnUIStackChanged.AddDynamic(this, &AOpenWorldARPGPlayerController::UpdateInputMode);
@@ -65,7 +65,7 @@ void AOpenWorldARPGPlayerController::HideCursorTemporarily(const FInputActionVal
 
 void AOpenWorldARPGPlayerController::UpdateInputMode()
 {
-    UUIManagerSubsystem* UIManager = GetGameInstance()->GetSubsystem<UUIManagerSubsystem>();
+    UUIManagerSubsystem* UIManager = GetLocalPlayer()->GetSubsystem<UUIManagerSubsystem>();
     
     UWindowWidgetBase* TopUI = UIManager ? UIManager->GetTopWindowWidget() : nullptr; 
 

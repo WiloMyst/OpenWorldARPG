@@ -17,9 +17,9 @@ void UPlayerControlButtonWidget::NativeOnInitialized()
 
 void UPlayerControlButtonWidget::OnPlayerPanelButtonClicked()
 {
-    if (UGameInstance* GI = GetGameInstance())
+    if (APlayerController* PC = GetOwningPlayer())
     {
-        if (UUIManagerSubsystem* UIManager = GI->GetSubsystem<UUIManagerSubsystem>())
+        if (UUIManagerSubsystem* UIManager = PC->GetLocalPlayer()->GetSubsystem<UUIManagerSubsystem>())
         {
             UIManager->ShowUIByTag(PlayerPanelUITag);
         }

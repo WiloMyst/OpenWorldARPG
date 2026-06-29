@@ -7,7 +7,6 @@
 #include "GameplayTagContainer.h"
 #include "GameplayGameModeBase.generated.h"
 
-class APlayerCharacter;
 class AGameplayPlayerState;
 
 /**
@@ -37,9 +36,6 @@ protected:
 
     UPROPERTY(EditDefaultsOnly, Category = "GameMode|Config")
     FName DefaultPlayerStartTag;
-
-    UPROPERTY(EditDefaultsOnly, Category = "GameMode|Config")
-    TSubclassOf<APlayerCharacter> PlayerCharacterClass;
 
     UPROPERTY(EditDefaultsOnly, Category = "GameMode|Config")
     float AssetCleanupDelay;

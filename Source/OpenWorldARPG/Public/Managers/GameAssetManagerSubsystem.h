@@ -7,7 +7,6 @@
 #include "GameplayTagContainer.h"
 #include "GameAssetManagerSubsystem.generated.h"
 
-class ULoadingScreenWidget;
 class UDataTable;
 class UCharacterGeneralDataAsset;
 class UUIDataAsset;
@@ -60,9 +59,6 @@ public:
     /** UI 映射数据资产 */
     UUIDataAsset* GetUIMapDataAsset();
 
-    /** 加载界面 Widget 类 */
-    TSubclassOf<ULoadingScreenWidget> GetLoadingScreenWidgetClass() const;
-
     // --- 异步加载调度 ---
 
     /** 获取总加载进度 (0.0 - 1.0)，UI 进度条绑定此函数 */
@@ -80,14 +76,6 @@ public:
     /** 加载完成后分帧释放资源句柄，平滑 GC 卡顿 */
     UFUNCTION(BlueprintCallable, Category = "Asset Loading")
     void CleanupAfterLoad();
-
-    /** 显示加载界面 */
-    UFUNCTION(BlueprintCallable, Category = "Asset Loading")
-    void ShowLoadingScreen();
-
-    /** 隐藏加载界面 */
-    UFUNCTION(BlueprintCallable, Category = "Asset Loading")
-    void HideLoadingScreen();
 
     // --- 事件 ---
 
@@ -135,9 +123,6 @@ protected:
     void OnStaggeredReleaseComplete();
 
 protected:
-    UPROPERTY()
-    TObjectPtr<ULoadingScreenWidget> LoadingScreenInstance;
-
     // --- 缓存资产 ---
 
     UPROPERTY()

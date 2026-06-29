@@ -16,8 +16,11 @@ void UPlayerPanelWidget::NativeConstruct()
 
 void UPlayerPanelWidget::HandleCloseClicked()
 {
-    if (UUIManagerSubsystem* UIManager = GetGameInstance()->GetSubsystem<UUIManagerSubsystem>())
+    if (APlayerController* PC = GetOwningPlayer())
     {
-        UIManager->CloseTopUI();
+        if (UUIManagerSubsystem* UIManager = PC->GetLocalPlayer()->GetSubsystem<UUIManagerSubsystem>())
+        {
+            UIManager->CloseTopUI();
+        }
     }
 }

@@ -1,15 +1,17 @@
 // Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Core/GameModes/GameplayGameModeBase.h"
-#include "Characters/PlayerCharacter.h"
 #include "Core/PlayerStates/GameplayPlayerState.h"
+#include "Characters/PlayerCharacter.h"
 #include "Data/CharacterRegistryRow.h"
 #include "Data/CharacterVisualDataAsset.h"
 #include "Data/CharacterCombatDataAsset.h"
 #include "Managers/CharacterManagerSubsystem.h"
 #include "Managers/TeamManagerSubsystem.h"
 #include "Managers/GameAssetManagerSubsystem.h"
+#include "Managers/GameFlowSubsystem.h"
 #include "GameFramework/PlayerStart.h"
+#include "Engine/GameInstance.h"
 #include "Kismet/GameplayStatics.h"
 
 AGameplayGameModeBase::AGameplayGameModeBase()
@@ -26,6 +28,12 @@ void AGameplayGameModeBase::PostLogin(APlayerController* NewPlayer)
     if (!HasAuthority()) return;
 
     GeneratePlayerCharacters(NewPlayer);
+
+    // 向 FlowManager 报到：新关卡初始化完毕，可关闭 Loading 屏
+    if (UGameFlowSubsystem* FlowManager = GetGameInstance()->GetSubsystem<UGameFlowSubsystem>())
+    {
+        FlowManager->NotifyNewLevelReady();
+    }
 
     // 只在首次 PostLogin 时设置清理定时器（避免多玩家连入时覆盖）
     if (!CleanupTimerHandle.IsValid())
@@ -60,11 +68,6 @@ void AGameplayGameModeBase::GeneratePlayerCharacters(APlayerController* PlayerCo
         UE_LOG(LogTemp, Error, TEXT("GeneratePlayerCharacters: TeamManager 为空！"));
         return;
     }
-    if (!PlayerCharacterClass)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("GeneratePlayerCharacters: 全局 PlayerCharacterClass 未配置，将完全依赖 VisualData 中的配置。"));
-    }
-
     AGameplayPlayerState* PlayerState = PlayerController->GetPlayerState<AGameplayPlayerState>();
     if (!PlayerState)
     {
@@ -101,8 +104,8 @@ void AGameplayGameModeBase::GeneratePlayerCharacters(APlayerController* PlayerCo
         const FGameplayTag& CharacterTag = TeamTags[TeamIndex];
 
         // 从 CharacterManagerSubsystem 查询该角色的存档数据
-        FCharacterSaveData SaveData;
-        if (!CharManager->GetCharacterSaveData(CharacterTag, SaveData))
+        const FCharacterSaveData* SaveDataPtr = CharManager->GetCharacterSaveData(CharacterTag);
+        if (!SaveDataPtr)
         {
             UE_LOG(LogTemp, Error, TEXT("GeneratePlayerCharacters: 队伍角色 Tag=%s 在玩家拥有的角色存档中未找到！跳过生成。"), *CharacterTag.ToString());
             continue;
@@ -126,8 +129,8 @@ void AGameplayGameModeBase::GeneratePlayerCharacters(APlayerController* PlayerCo
         }
 
         // --- 确定要生成的角色蓝图类 ---
-        // 默认使用 GameMode 配的兜底类，优先使用 VisualData 中按体型配置的蓝图类
-        UClass* ClassToSpawn = PlayerCharacterClass;
+        // 完全依赖 VisualData 中按体型配置的蓝图类（数据驱动）
+        UClass* ClassToSpawn = nullptr;
         if (VisualData->CharacterBlueprint.IsValid())
         {
             ClassToSpawn = VisualData->CharacterBlueprint.Get();
@@ -139,7 +142,7 @@ void AGameplayGameModeBase::GeneratePlayerCharacters(APlayerController* PlayerCo
 
         if (!ClassToSpawn)
         {
-            UE_LOG(LogTemp, Error, TEXT("GeneratePlayerCharacters: 角色 Tag=%s 既没有配置 CharacterBlueprint，也没有全局兜底类！跳过生成。"), *CharacterTag.ToString());
+            UE_LOG(LogTemp, Error, TEXT("GeneratePlayerCharacters: 角色 Tag=%s 的 VisualData 未配置 CharacterBlueprint！跳过生成。"), *CharacterTag.ToString());
             continue;
         }
 
@@ -155,7 +158,7 @@ void AGameplayGameModeBase::GeneratePlayerCharacters(APlayerController* PlayerCo
         if (SpawnedChar)
         {
             // 初始化: SaveData + VisualData + CombatData + RegistryRow（三层解耦）
-            SpawnedChar->InitializeCharacter(SaveData, VisualData, CombatData, RegistryRow);
+            SpawnedChar->InitializeCharacter(*SaveDataPtr, VisualData, CombatData, RegistryRow);
 
             // 按队伍索引存入 TeamActors
             TeamActors[TeamIndex] = SpawnedChar;
