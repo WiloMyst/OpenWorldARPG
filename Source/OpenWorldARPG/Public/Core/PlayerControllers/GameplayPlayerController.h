@@ -14,9 +14,8 @@ class UInputAction;
 class APlayerCharacter;
 
 /**
- * 通用玩法控制器。只接收输入并向下派发请求，不微操 Character 组件。
- * 无论在大世界还是副本，战斗输入绑定（跳跃、冲刺、切人等）均在此层完成。
- * 大世界/副本专属逻辑在子类中扩展。
+ * 通用玩法控制器。只接收输入并向下派发，不微操 Character 组件。
+ * 大世界/副本专属逻辑在子类扩展。
  */
 UCLASS()
 class OPENWORLDARPG_API AGameplayPlayerController : public AOpenWorldARPGPlayerController
@@ -26,115 +25,35 @@ class OPENWORLDARPG_API AGameplayPlayerController : public AOpenWorldARPGPlayerC
 public:
     AGameplayPlayerController();
 
-    // --- 角色切换 (Server RPC) ---
-
-    void HandleSwitchCharacterInput(int32 Index);
-
-    UFUNCTION(Server, Reliable, WithValidation)
-    void Server_SwitchCharacter(int32 TargetIndex);
-
-    void Server_SwitchCharacter_Implementation(int32 TargetIndex);
-    bool Server_SwitchCharacter_Validate(int32 TargetIndex);
-
-    // --- Dash/Sprint 动作键状态 ---
-
-    /** 返回玩家是否正在按住 Dash/Sprint 动作键（不关心具体绑定的物理按键） */
-    UFUNCTION(BlueprintCallable, Category = "Input")
-    bool IsSprintActionHeld() const { return bIsSprintActionHeld; }
-
-    /** 返回玩家是否正在按住普攻键（用于长按派生重击检测） */
-    UFUNCTION(BlueprintCallable, Category = "Input")
-    bool IsNormalAttackHeld() const { return bIsNormalAttackHeld; }
-
-    /** 获取玩家期望的镜头距离（切换角色后保持不变） */
-    float GetPlayerDesiredArmLength() const { return PlayerDesiredArmLength; }
-
-    // --- 角色界面 (Character Screen) ---
-    // 展台生命周期、视角切换、拖拽输入全部由 UCharacterScreenMainWidget 自己管理。
-    // PlayerController 仅保留输入回调，委托 UIManager 打开/关闭 UI。
-
-    /**
-     * 角色界面是否处于打开状态。
-     * 不再使用本地 bool 缓存，而是查询 UIManagerSubsystem 的唯一事实来源，
-     * 彻底消除"按钮关闭 / 快捷键关闭"导致的状态脱节 Bug。
-     */
-    UFUNCTION(BlueprintPure, Category = "CharacterScreen")
-    bool IsCharacterScreenOpen() const;
-
-    /** 设置主大世界 HUD 的可见性（供全屏 UI 菜单调用，如角色界面、编队界面） */
-    UFUNCTION(BlueprintCallable, Category = "UI")
-    void SetMainHUDVisible(bool bIsVisible);
-
-    // --- 编队界面 (Team Setup Screen) ---
-
-    /** 打开编队界面（仅委托 UIManager，展台生命周期由 UI 自己管理） */
-    UFUNCTION(BlueprintCallable, Category = "TeamSetup")
-    void OpenTeamSetupScreen();
-
-    /** 关闭编队界面（仅委托 UIManager） */
-    UFUNCTION(BlueprintCallable, Category = "TeamSetup")
-    void CloseTeamSetupScreen();
-
-    /** 编队界面是否处于打开状态 */
-    UFUNCTION(BlueprintPure, Category = "TeamSetup")
-    bool IsTeamSetupScreenOpen() const { return bTeamSetupScreenOpen; }
-
-    /** Server RPC：客户端同步 bIsSprintActionHeld 到服务器，确保多端一致 */
-    UFUNCTION(Server, Reliable, WithValidation)
-    void Server_SetSprintActionHeld(bool bHeld);
-
-    void Server_SetSprintActionHeld_Implementation(bool bHeld);
-    bool Server_SetSprintActionHeld_Validate(bool bHeld);
-
-    UFUNCTION(Client, Unreliable)
-    void Client_OnCharacterSwitched(int32 NewActiveIndex);
-
-    /**
-     * GA_SwapOut 退场完成回调。由 PlayerCharacter::OnSwapOutCompleted 委托触发。
-     * 在服务器端执行 UnPossess → Possess → 激活 GA_SwapIn 的流水线。
-     */
-    UFUNCTION()
-    void OnSwapOutCompleted(APlayerCharacter* SwappedOutCharacter, FTransform SwapTransform);
-
 protected:
     virtual void BeginPlay() override;
-
     virtual void SetupInputComponent() override;
-
     virtual void PlayerTick(float DeltaTime) override;
 
-    // --- 镜头平滑回正 ---
-
-    /** 按下镜头回正键时触发 */
+    // --- 视角输入 ---
     void Input_CameraReset();
+    void Input_CameraZoom(const FInputActionValue& Value);
+    void Input_Look(const FInputActionValue& Value);  // 含回正打断检测
 
-    /** 视角输入处理：含回正打断检测 */
-    void Input_Look(const FInputActionValue& Value);
-
-protected:
-    // --- 输入绑定回调 ---
-
+    // --- 移动输入 ---
     void Input_Move(const FInputActionValue& Value);
     void Input_MoveCompleted(const FInputActionValue& Value);
-
+    void Input_Walk();
+    void Input_ShiftAction();
+    void Input_ShiftReleased();
     void Input_JumpStart();
     void Input_JumpStop();
 
-    void Input_ShiftAction();
-    void Input_ShiftReleased();
-
-    void Input_Walk();
+    // --- 交互 ---
     void Input_PickUp();
-    void Input_ToggleInventory();
-    void Input_OpenCharacterScreen();
-    void Input_OpenTeamSetupScreen();
 
-    // 队伍切换
+    // --- 队伍切换 ---
     void Input_Switch1() { HandleSwitchCharacterInput(0); }
     void Input_Switch2() { HandleSwitchCharacterInput(1); }
     void Input_Switch3() { HandleSwitchCharacterInput(2); }
     void Input_Switch4() { HandleSwitchCharacterInput(3); }
 
+    // --- 战斗输入 ---
     void Input_NormalAttack();
     void Input_NormalAttackReleased();
     void Input_HeavyAttack();
@@ -143,15 +62,48 @@ protected:
     void Input_AimAttackReleased();
     void Input_Aim();
 
-    /** 鼠标滚轮缩放镜头回调 */
-    void Input_CameraZoom(const FInputActionValue& Value);
+public:
+    /** 全屏 UI 菜单调用，控制大世界 HUD 可见性 */
+    void SetMainHUDVisible(bool bIsVisible);
+
+    float GetPlayerDesiredArmLength() const { return PlayerDesiredArmLength; }
+    bool IsSprintActionHeld() const { return bIsSprintActionHeld; }
+    bool IsNormalAttackHeld() const { return bIsNormalAttackHeld; }
+
+    // --- 角色切换 Server RPC ---
+
+    void HandleSwitchCharacterInput(int32 Index);
+
+    UFUNCTION(Server, Reliable, WithValidation)
+    void Server_SwitchCharacter(int32 TargetIndex);
+    void Server_SwitchCharacter_Implementation(int32 TargetIndex);
+    bool Server_SwitchCharacter_Validate(int32 TargetIndex);
+
+    /** 编队保存：服务器销毁旧队伍，按 NewTeamTags 重新 Spawn，Possess ActiveIndex */
+    UFUNCTION(Server, Reliable, WithValidation)
+    void Server_ApplyTeamChanges(const TArray<FGameplayTag>& NewTeamTags, int32 ActiveIndex);
+    void Server_ApplyTeamChanges_Implementation(const TArray<FGameplayTag>& NewTeamTags, int32 ActiveIndex);
+    bool Server_ApplyTeamChanges_Validate(const TArray<FGameplayTag>& NewTeamTags, int32 ActiveIndex);
+
+    /** 同步冲刺键状态到服务器 */
+    UFUNCTION(Server, Reliable, WithValidation)
+    void Server_SetSprintActionHeld(bool bHeld);
+    void Server_SetSprintActionHeld_Implementation(bool bHeld);
+    bool Server_SetSprintActionHeld_Validate(bool bHeld);
+
+    UFUNCTION(Client, Unreliable)
+    void Client_OnCharacterSwitched(int32 NewActiveIndex);
+
+    /** GA_SwapOut 退场完成回调，执行 UnPossess → Possess → GA_SwapIn */
+    UFUNCTION()
+    void OnSwapOutCompleted(APlayerCharacter* SwappedOutCharacter, FTransform SwapTransform);
 
 protected:
-    // --- 配置：输入资产 ---
+    // --- 输入资产 ---
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
     TObjectPtr<UInputAction> IA_Look;
-    
+
     UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
     TObjectPtr<UInputAction> IA_CameraReset;
 
@@ -169,17 +121,6 @@ protected:
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
     TObjectPtr<UInputAction> IA_PickUp;
-
-    UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
-    TObjectPtr<UInputAction> IA_ToggleInventory;
-
-    /** 打开角色界面的输入动作 */
-    UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
-    TObjectPtr<UInputAction> IA_OpenCharacterScreen;
-
-    /** 打开编队界面的输入动作 */
-    UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
-    TObjectPtr<UInputAction> IA_OpenTeamSetupScreen;
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
     TObjectPtr<UInputAction> IA_Switch_1;
@@ -211,18 +152,7 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
     TObjectPtr<UInputAction> IA_CameraZoom;
 
-    // --- 配置：Tags ---
-
-    UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
-    FGameplayTag InventoryUITag;
-
-    /** 角色界面 UI 标签（通过 UIManagerSubsystem 打开） */
-    UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
-    FGameplayTag CharacterScreenUITag;
-
-    /** 编队界面 UI 标签（通过 UIManagerSubsystem 打开） */
-    UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
-    FGameplayTag TeamSetupScreenUITag;
+    // --- Tags ---
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
     FGameplayTag DashEventTag;
@@ -257,72 +187,56 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags|Combat")
     FGameplayTag AimStopEventTag;
 
-    /** 防止切换上场的状态标签容器（目标角色拥有这些标签时禁止切换） */
+    /** 目标角色拥有这些标签时禁止切换 */
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags|Switch")
     FGameplayTagContainer PreventSwitchTags;
 
-    // --- 配置：镜头回正 ---
+    // --- 镜头回正 ---
 
     /** 镜头回正插值速度 */
     UPROPERTY(EditDefaultsOnly, Category = "Camera|Reset")
     float CameraResetInterpSpeed = 10.0f;
 
-    /** 回正时的目标俯角（黄金俯角，避免上下坡时看天/看地） */
+    /** 目标镜头 pitch 角度 */
     UPROPERTY(EditDefaultsOnly, Category = "Camera|Reset")
     float TargetResetPitch = -15.0f;
 
-    /** 用于打断回正的输入死区阈值 */
+    /** 镜头回正中断阈值 */
     UPROPERTY(EditDefaultsOnly, Category = "Camera|Reset")
     float CameraResetInterruptThreshold = 0.05f;
 
-    /** 到达目标角度的容差阈值（度） */
+    /** 镜头回正容差 */
     UPROPERTY(EditDefaultsOnly, Category = "Camera|Reset")
     float CameraResetTolerance = 1.0f;
 
 private:
     bool bIsWalking = false;
     bool bIsAiming = false;
-
-    /** 精准记录玩家是否正在按住 Dash/Sprint 动作键（Enhanced Input 无关物理按键） */
     bool bIsSprintActionHeld = false;
-
-    /** 精准记录玩家是否正在按住普攻键（长按派生重击检测用） */
     bool bIsNormalAttackHeld = false;
-
-    // --- 角色界面状态 ---
-
-    // 【已删除】bool bCharacterScreenOpen：UI 状态由 UIManagerSubsystem 统一收口，
-    // Controller 不再本地缓存，彻底消除"按钮关闭 / 快捷键关闭"导致的状态脱节 Bug。
-
-    // --- 编队界面状态 ---
-
-    /** 编队界面是否处于打开状态 */
-    bool bTeamSetupScreenOpen = false;
-
-    /** 镜头是否正在自动回正 */
     bool bIsResettingCamera = false;
 
-    /** 缓存的目标切换角色索引，GA_SwapOutBase 完成后使用 */
+    /** 待切换目标角色索引 */
     int32 PendingSwapTargetIndex = -1;
 
-    /** 缓存的出场 Transform，由 Controller 在激活 GA_SwapInBase 前设置到角色上 */
+    /** 出场 Transform，激活 GA_SwapInBase 前设置到角色上 */
     FTransform PendingSwapTransform;
 
-    // --- Camera Zoom ---
+    // --- 镜头缩放 ---
 
-    /** 镜头最近距离限制 */
+    /** 最小镜头距离 */
     UPROPERTY(EditDefaultsOnly, Category = "Camera|Zoom")
     float MinCameraDistance = 150.0f;
 
-    /** 镜头最远距离限制 */
+    /** 最大镜头距离 */
     UPROPERTY(EditDefaultsOnly, Category = "Camera|Zoom")
     float MaxCameraDistance = 800.0f;
 
-    /** 每次滚轮缩放的步长 */
+    /** 镜头缩放步长 */
     UPROPERTY(EditDefaultsOnly, Category = "Camera|Zoom")
     float CameraZoomStep = 50.0f;
 
-    /** 玩家主动调节的期望镜头距离，作为 Normal 状态下的目标值（切换角色后保持不变） */
+    /** Normal 状态下的目标镜头距离（切换角色后保持不变） */
     UPROPERTY(VisibleAnywhere, Category = "Camera|Zoom")
     float PlayerDesiredArmLength = 400.0f;
 };

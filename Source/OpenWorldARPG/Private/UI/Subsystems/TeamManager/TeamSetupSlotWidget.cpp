@@ -1,12 +1,23 @@
-// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WilloMyst. All Rights Reserved.
 
 #include "UI/Subsystems/TeamManager/TeamSetupSlotWidget.h"
+#include "Components/Button.h"
 #include "Components/Image.h"
 #include "Components/TextBlock.h"
 
 UTeamSetupSlotWidget::UTeamSetupSlotWidget(const FObjectInitializer& ObjectInitializer)
     : Super(ObjectInitializer)
 {
+}
+
+void UTeamSetupSlotWidget::NativeConstruct()
+{
+    Super::NativeConstruct();
+
+    if (ItemButton)
+    {
+        ItemButton->OnClicked.AddUniqueDynamic(this, &UTeamSetupSlotWidget::OnButtonClicked);
+    }
 }
 
 void UTeamSetupSlotWidget::InitializeSlot(const FGameplayTag& InCharacterTag, const FText& InDisplayName, UTexture2D* InHeadIcon, int32 InSlotIndex)
@@ -25,13 +36,20 @@ void UTeamSetupSlotWidget::InitializeSlot(const FGameplayTag& InCharacterTag, co
     }
 }
 
-FReply UTeamSetupSlotWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+void UTeamSetupSlotWidget::OnButtonClicked()
 {
-    if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton || InMouseEvent.IsTouchEvent())
-    {
-        OnSlotClicked.Broadcast(CharacterTag, SlotIndex);
-        return FReply::Handled();
-    }
+    // 通过 UButton 原生事件触发委托，避免事件吞噬
+    OnSlotClicked.Broadcast(CharacterTag, SlotIndex);
+}
 
-    return FReply::Unhandled();
+void UTeamSetupSlotWidget::SetHighlighted(bool bIsHighlighted)
+{
+    // 纯 C++ 视觉反馈：已上阵/选中 → 绿色，否则 → 白色
+    if (ItemButton)
+    {
+        const FLinearColor Color = bIsHighlighted
+            ? FLinearColor(0.8f, 1.0f, 0.2f, 1.0f)
+            : FLinearColor::White;
+        ItemButton->SetBackgroundColor(Color);
+    }
 }

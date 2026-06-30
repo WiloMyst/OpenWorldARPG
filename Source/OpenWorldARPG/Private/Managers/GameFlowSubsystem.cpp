@@ -5,7 +5,8 @@
 #include "Managers/GameAssetManagerSubsystem.h"
 #include "Managers/CharacterManagerSubsystem.h"
 #include "Managers/TeamManagerSubsystem.h"
-#include "Data/StartingRosterConfig.h"
+#include "Data/InitialArchiveData.h"
+#include "Core/OpenWorldARPGSettings.h"
 #include "Engine/GameInstance.h"
 #include "Engine/LocalPlayer.h"
 #include "Kismet/GameplayStatics.h"
@@ -20,7 +21,7 @@ void UGameFlowSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 // #                         流程入口                                   #
 // ####################################################################
 
-void UGameFlowSubsystem::RequestTravelFromMainMenu(TSoftObjectPtr<UWorld> TargetLevel, UStartingRosterConfig* RosterConfig)
+void UGameFlowSubsystem::RequestTravelFromMainMenu(TSoftObjectPtr<UWorld> TargetLevel)
 {
     if (CurrentGameState != EGameState::Idle)
     {
@@ -28,19 +29,19 @@ void UGameFlowSubsystem::RequestTravelFromMainMenu(TSoftObjectPtr<UWorld> Target
         return;
     }
 
-    if (TargetLevel.IsNull() || !RosterConfig)
+    if (TargetLevel.IsNull())
     {
-        UE_LOG(LogTemp, Error, TEXT("GameFlow: TargetLevel 或 RosterConfig 无效！"));
+        UE_LOG(LogTemp, Error, TEXT("GameFlow: TargetLevel 无效！"));
         return;
     }
 
     PendingTargetLevel = TargetLevel;
 
-    // 阶段 1：初始化队伍数据
-    InitializeTeamData(RosterConfig);
-
-    // 阶段 2：UI Block — 弹出 Loading 屏
+    // 阶段 1：UI Block — 弹出 Loading 屏
     BeginUIBlock();
+
+    // 阶段 2：初始化队伍数据（从 UOpenWorldARPGSettings 加载 UInitialArchiveData）
+    InitializeTeamData();
 
     // 阶段 3：Asset Block — 启动资源加载
     BeginAssetBlock();
@@ -50,8 +51,23 @@ void UGameFlowSubsystem::RequestTravelFromMainMenu(TSoftObjectPtr<UWorld> Target
 // #                         管线各阶段                                 #
 // ####################################################################
 
-void UGameFlowSubsystem::InitializeTeamData(UStartingRosterConfig* RosterConfig)
+void UGameFlowSubsystem::InitializeTeamData()
 {
+    // 从项目设置加载初始存档数据（UInitialArchiveData）
+    const TSoftObjectPtr<UInitialArchiveData>& ArchiveSoftPtr = UOpenWorldARPGSettings::Get().InitialArchiveData;
+    if (ArchiveSoftPtr.IsNull())
+    {
+        UE_LOG(LogTemp, Error, TEXT("GameFlow: OpenWorldARPGSettings.InitialArchiveData 未配置！无法初始化队伍数据。"));
+        return;
+    }
+
+    UInitialArchiveData* ArchiveData = ArchiveSoftPtr.LoadSynchronous();
+    if (!ArchiveData)
+    {
+        UE_LOG(LogTemp, Error, TEXT("GameFlow: InitialArchiveData 同步加载失败！"));
+        return;
+    }
+
     UGameInstance* GI = GetGameInstance();
 
     UCharacterManagerSubsystem* CharManager = GI->GetSubsystem<UCharacterManagerSubsystem>();
@@ -59,8 +75,8 @@ void UGameFlowSubsystem::InitializeTeamData(UStartingRosterConfig* RosterConfig)
 
     if (CharManager && TeamManager)
     {
-        CharManager->InitializeFromDataObject(RosterConfig);
-        TeamManager->InitializeFromDataObject(RosterConfig);
+        CharManager->InitializeFromDataObject(ArchiveData);
+        TeamManager->InitializeFromDataObject(ArchiveData);
     }
 }
 
@@ -72,6 +88,10 @@ void UGameFlowSubsystem::BeginUIBlock()
     if (UUIManagerSubsystem* UIManager = GetUIManager())
     {
         UIManager->ShowLoadingScreen();
+        while (UIManager->IsAnyUIOpen())
+        {
+            UIManager->CloseTopUI();
+        }
     }
 }
 

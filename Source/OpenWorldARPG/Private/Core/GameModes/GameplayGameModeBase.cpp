@@ -2,6 +2,7 @@
 
 #include "Core/GameModes/GameplayGameModeBase.h"
 #include "Core/PlayerStates/GameplayPlayerState.h"
+#include "Core/PlayerControllers/GameplayPlayerController.h"
 #include "Characters/PlayerCharacter.h"
 #include "Data/CharacterRegistryRow.h"
 #include "Data/CharacterVisualDataAsset.h"
@@ -204,5 +205,155 @@ void AGameplayGameModeBase::CleanupAfterLoad()
     {
         AssetManager->CleanupAfterLoad();
         UE_LOG(LogTemp, Log, TEXT("AGameplayGameModeBase: 异步资源已清理完毕。"));
+    }
+}
+
+// ==========================================
+// 编队保存：服务器应用新队伍（实体生成与销毁的工厂方法）
+// ==========================================
+
+void AGameplayGameModeBase::ApplyPlayerTeamChanges(AGameplayPlayerController* PlayerController, const TArray<FGameplayTag>& NewTeamTags, int32 ActiveIndex)
+{
+    if (!HasAuthority() || !PlayerController) return;
+
+    UCharacterManagerSubsystem* CharManager = GetGameInstance() ? GetGameInstance()->GetSubsystem<UCharacterManagerSubsystem>() : nullptr;
+    if (!CharManager)
+    {
+        UE_LOG(LogTemp, Error, TEXT("ApplyPlayerTeamChanges: CharacterManagerSubsystem 不可用！"));
+        return;
+    }
+
+    AGameplayPlayerState* PlayerState = PlayerController->GetPlayerState<AGameplayPlayerState>();
+    if (!PlayerState)
+    {
+        UE_LOG(LogTemp, Error, TEXT("ApplyPlayerTeamChanges: PlayerState 无效！"));
+        return;
+    }
+
+    // --- 1. 记录旧角色的出场 Transform（用于新角色继承位置） ---
+    FTransform SpawnTransform = FTransform::Identity;
+    if (APlayerCharacter* OldActiveChar = Cast<APlayerCharacter>(PlayerController->GetPawn()))
+    {
+        SpawnTransform = OldActiveChar->GetActorTransform();
+    }
+    else
+    {
+        // 退路：使用 GameMode 自带的 FindPlayerStart 查找出生点
+        if (AActor* FallbackStart = FindPlayerStart(PlayerController, DefaultPlayerStartTag.ToString()))
+        {
+            SpawnTransform = FallbackStart->GetActorTransform();
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("ApplyPlayerTeamChanges: 未找到 PlayerStart (Tag=%s)，使用 Identity 位置。"), *DefaultPlayerStartTag.ToString());
+        }
+    }
+
+    // --- 2. 销毁旧队伍所有角色实例 ---
+    TArray<APlayerCharacter*> OldTeam;
+    PlayerState->GetAllTeamCharacters(OldTeam);
+    for (APlayerCharacter* OldChar : OldTeam)
+    {
+        if (IsValid(OldChar))
+        {
+            // 先 UnPossess 避免销毁被控 Pawn 产生警告
+            if (PlayerController->GetPawn() == OldChar)
+            {
+                PlayerController->UnPossess();
+            }
+            OldChar->Destroy();
+        }
+    }
+
+    // --- 3. 按 NewTeamTags 重新 Spawn 新队伍 ---
+    TArray<APlayerCharacter*> NewTeamActors;
+    NewTeamActors.SetNum(NewTeamTags.Num());
+
+    FActorSpawnParameters SpawnParams;
+    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    SpawnParams.Owner = PlayerController;
+
+    for (int32 TeamIndex = 0; TeamIndex < NewTeamTags.Num(); ++TeamIndex)
+    {
+        const FGameplayTag& CharacterTag = NewTeamTags[TeamIndex];
+        if (!CharacterTag.IsValid()) continue;
+
+        // 查询存档数据
+        const FCharacterSaveData* SaveDataPtr = CharManager->GetCharacterSaveData(CharacterTag);
+        if (!SaveDataPtr)
+        {
+            UE_LOG(LogTemp, Error, TEXT("ApplyPlayerTeamChanges: Tag=%s 找不到存档数据，跳过。"), *CharacterTag.ToString());
+            continue;
+        }
+
+        // 查询注册表行（VisualData / CombatData 软引用桥梁）
+        FCharacterRegistryRow RegistryRow;
+        if (!CharManager->GetCharacterRegistryRowByTag(CharacterTag, RegistryRow))
+        {
+            UE_LOG(LogTemp, Error, TEXT("ApplyPlayerTeamChanges: Tag=%s 找不到 RegistryRow，跳过。"), *CharacterTag.ToString());
+            continue;
+        }
+
+        // 同步加载 VisualData 和 CombatData（三层解耦：保持软引用同步加载语义）
+        UCharacterVisualDataAsset* VisualData = RegistryRow.VisualData.LoadSynchronous();
+        UCharacterCombatDataAsset* CombatData = RegistryRow.CombatData.LoadSynchronous();
+        if (!VisualData || !CombatData)
+        {
+            UE_LOG(LogTemp, Error, TEXT("ApplyPlayerTeamChanges: Tag=%s VisualData/CombatData 加载失败，跳过。"), *CharacterTag.ToString());
+            continue;
+        }
+
+        // 解析要 Spawn 的角色蓝图类（数据驱动，按体型区分）
+        UClass* ClassToSpawn = nullptr;
+        if (VisualData->CharacterBlueprint.IsValid())
+        {
+            ClassToSpawn = VisualData->CharacterBlueprint.Get();
+        }
+        else if (!VisualData->CharacterBlueprint.IsNull())
+        {
+            ClassToSpawn = VisualData->CharacterBlueprint.LoadSynchronous();
+        }
+
+        if (!ClassToSpawn)
+        {
+            UE_LOG(LogTemp, Error, TEXT("ApplyPlayerTeamChanges: Tag=%s 未配置 CharacterBlueprint，跳过。"), *CharacterTag.ToString());
+            continue;
+        }
+
+        APlayerCharacter* SpawnedChar = GetWorld()->SpawnActor<APlayerCharacter>(ClassToSpawn, SpawnTransform, SpawnParams);
+        if (!SpawnedChar)
+        {
+            UE_LOG(LogTemp, Error, TEXT("ApplyPlayerTeamChanges: Tag=%s SpawnActor 失败！"), *CharacterTag.ToString());
+            continue;
+        }
+
+        // 初始化三层解耦数据：SaveData + VisualData + CombatData + RegistryRow
+        SpawnedChar->InitializeCharacter(*SaveDataPtr, VisualData, CombatData, RegistryRow);
+
+        // 非激活角色默认进入待机模式
+        SpawnedChar->SetStandbyMode(TeamIndex != ActiveIndex);
+
+        NewTeamActors[TeamIndex] = SpawnedChar;
+
+        UE_LOG(LogTemp, Log, TEXT("ApplyPlayerTeamChanges: 生成角色 Tag=%s (索引=%d) 成功。"), *CharacterTag.ToString(), TeamIndex);
+    }
+
+    // --- 4. 写入 PlayerState（触发全网同步） ---
+    PlayerState->SetTeamCharacterActors(NewTeamActors);
+
+    // --- 5. Possess 激活索引对应的新角色 ---
+    if (NewTeamActors.IsValidIndex(ActiveIndex) && NewTeamActors[ActiveIndex])
+    {
+        APlayerCharacter* ActiveChar = NewTeamActors[ActiveIndex];
+        ActiveChar->SetStandbyMode(false);
+        PlayerController->Possess(ActiveChar);
+
+        PlayerState->SetActiveCharacterIndex(ActiveIndex);
+
+        UE_LOG(LogTemp, Log, TEXT("ApplyPlayerTeamChanges: 已 Possess 激活角色索引 %d。"), ActiveIndex);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("ApplyPlayerTeamChanges: 激活索引 %d 无效！新队伍大小=%d"), ActiveIndex, NewTeamActors.Num());
     }
 }

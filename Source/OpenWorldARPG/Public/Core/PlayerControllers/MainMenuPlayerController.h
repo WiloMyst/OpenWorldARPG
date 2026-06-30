@@ -25,6 +25,9 @@ protected:
     // --- UI 配置 ---
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI Config")
+    FGameplayTag BackgroundUITag;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI Config")
     FGameplayTag LoginUITag;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI Config")

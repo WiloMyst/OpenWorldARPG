@@ -5,7 +5,7 @@
 #include "Characters/PlayerCharacter.h"
 #include "Core/PlayerControllers/GameplayPlayerController.h"
 #include "Core/PlayerStates/GameplayPlayerState.h"
-#include "Data/StartingRosterConfig.h"
+#include "Data/InitialArchiveData.h"
 #include "Engine/GameInstance.h"
 #include "Engine/LocalPlayer.h"
 
@@ -34,7 +34,7 @@ void UTeamManagerSubsystem::Deinitialize()
 
 void UTeamManagerSubsystem::InitializeFromDataObject(UObject* InDataObject)
 {
-    UStartingRosterConfig* ConfigData = Cast<UStartingRosterConfig>(InDataObject);
+    UInitialArchiveData* ConfigData = Cast<UInitialArchiveData>(InDataObject);
 
     if (!ConfigData)
     {

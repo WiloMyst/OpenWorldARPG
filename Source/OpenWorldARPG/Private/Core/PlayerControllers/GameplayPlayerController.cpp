@@ -3,6 +3,7 @@
 #include "Core/PlayerControllers/GameplayPlayerController.h"
 #include "Characters/PlayerCharacter.h"
 #include "Core/PlayerStates/GameplayPlayerState.h"
+#include "Core/GameModes/GameplayGameModeBase.h"
 #include "Managers/TeamManagerSubsystem.h"
 #include "Managers/UIManagerSubsystem.h"
 #include "AbilitySystemComponent.h"
@@ -10,7 +11,6 @@
 #include "Blueprint/UserWidget.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
-#include "Kismet/GameplayStatics.h"
 
 AGameplayPlayerController::AGameplayPlayerController()
 {
@@ -74,12 +74,6 @@ void AGameplayPlayerController::SetupInputComponent()
         if (IA_Walk) EnhancedInputComponent->BindAction(IA_Walk, ETriggerEvent::Started, this, &AGameplayPlayerController::Input_Walk);
         // 拾取
         if (IA_PickUp) EnhancedInputComponent->BindAction(IA_PickUp, ETriggerEvent::Started, this, &AGameplayPlayerController::Input_PickUp);
-        // 打开背包
-        if (IA_ToggleInventory) EnhancedInputComponent->BindAction(IA_ToggleInventory, ETriggerEvent::Started, this, &AGameplayPlayerController::Input_ToggleInventory);
-        if (IA_OpenCharacterScreen) EnhancedInputComponent->BindAction(IA_OpenCharacterScreen, ETriggerEvent::Started, this, &AGameplayPlayerController::Input_OpenCharacterScreen);
-        if (IA_OpenTeamSetupScreen) EnhancedInputComponent->BindAction(IA_OpenTeamSetupScreen, ETriggerEvent::Started, this, &AGameplayPlayerController::Input_OpenTeamSetupScreen);
-
-        // 队伍切换 1~4
         if (IA_Switch_1) EnhancedInputComponent->BindAction(IA_Switch_1, ETriggerEvent::Started, this, &AGameplayPlayerController::Input_Switch1);
         if (IA_Switch_2) EnhancedInputComponent->BindAction(IA_Switch_2, ETriggerEvent::Started, this, &AGameplayPlayerController::Input_Switch2);
         if (IA_Switch_3) EnhancedInputComponent->BindAction(IA_Switch_3, ETriggerEvent::Started, this, &AGameplayPlayerController::Input_Switch3);
@@ -274,13 +268,30 @@ void AGameplayPlayerController::Client_OnCharacterSwitched_Implementation(int32 
     UE_LOG(LogTemp, Log, TEXT("Client_OnCharacterSwitched: 切换完成，新激活索引 = %d"), NewActiveIndex);
 }
 
-// 输入回调实现 (邮局原则：只转发，不拦截)
-//
-// 注意 [联机安全]: SendGameplayEventToActor 在客户端本地执行。
-// 如果触发的技能是 LocalPredicted，GAS 会自动与服务器同步，无需额外 RPC。
-// 但如果是 ServerInitiated 技能，客户端调用 SendGameplayEventToActor 不会触发服务器执行，
-// 需要改为 Server RPC 调用 TryActivateAbility。
-// 请确保所有战斗技能的 NetExecutionPolicy 设置正确。
+// ==========================================
+// 编队保存：纯 RPC 转发器（工厂职责由 GameMode 承担）
+// ==========================================
+
+bool AGameplayPlayerController::Server_ApplyTeamChanges_Validate(const TArray<FGameplayTag>& NewTeamTags, int32 ActiveIndex)
+{
+    // 基础验证：激活索引合法 + 队伍不超 4 人
+    return ActiveIndex >= 0 && ActiveIndex < 4 && NewTeamTags.Num() <= 4;
+}
+
+void AGameplayPlayerController::Server_ApplyTeamChanges_Implementation(const TArray<FGameplayTag>& NewTeamTags, int32 ActiveIndex)
+{
+    if (!HasAuthority()) return;
+
+    // 邮局原则：仅向 GameMode 工厂转发请求，不直接 Spawn/Destroy 任何实体
+    if (AGameplayGameModeBase* GM = Cast<AGameplayGameModeBase>(GetWorld()->GetAuthGameMode()))
+    {
+        GM->ApplyPlayerTeamChanges(this, NewTeamTags, ActiveIndex);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("Server_ApplyTeamChanges: 无法获取 AGameplayGameModeBase！"));
+    }
+}
 
 void AGameplayPlayerController::Input_Look(const FInputActionValue& Value)
 {
@@ -395,15 +406,6 @@ void AGameplayPlayerController::Input_Walk()
         UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(PC, TagToSend, FGameplayEventData());
 }
 
-void AGameplayPlayerController::Input_ToggleInventory()
-{
-    if (UUIManagerSubsystem* UIManager = GetLocalPlayer()->GetSubsystem<UUIManagerSubsystem>())
-    {
-        if (InventoryUITag.IsValid())
-            UIManager->ShowUIByTag(InventoryUITag);
-    }
-}
-
 void AGameplayPlayerController::Input_PickUp()
 {
     if (APlayerCharacter* PC = Cast<APlayerCharacter>(GetPawn()))
@@ -496,95 +498,10 @@ void AGameplayPlayerController::Input_CameraZoom(const FInputActionValue& Value)
     PlayerDesiredArmLength = FMath::Clamp(PlayerDesiredArmLength, MinCameraDistance, MaxCameraDistance);
 }
 
-// ==========================================
-// 角色界面 (Character Screen)
-// ==========================================
-
-bool AGameplayPlayerController::IsCharacterScreenOpen() const
-{
-    // 唯一事实来源：询问 UIManagerSubsystem，而非本地 bool
-    if (UUIManagerSubsystem* UIManager = GetLocalPlayer() ? GetLocalPlayer()->GetSubsystem<UUIManagerSubsystem>() : nullptr)
-    {
-        return UIManager->IsUIOpen(CharacterScreenUITag);
-    }
-    return false;
-}
-
 void AGameplayPlayerController::SetMainHUDVisible(bool bIsVisible)
 {
     if (MainHUDInstance)
     {
         MainHUDInstance->SetVisibility(bIsVisible ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
     }
-}
-
-void AGameplayPlayerController::Input_OpenCharacterScreen()
-{
-    UUIManagerSubsystem* UIManager = GetLocalPlayer() ? GetLocalPlayer()->GetSubsystem<UUIManagerSubsystem>() : nullptr;
-    if (!UIManager || !CharacterScreenUITag.IsValid())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Input_OpenCharacterScreen: UIManager 或 CharacterScreenUITag 未配置"));
-        return;
-    }
-
-    // 询问 UIManager 唯一事实来源：UI 到底开没开？
-    if (UIManager->IsUIOpen(CharacterScreenUITag))
-    {
-        // 已打开：说明玩家想通过快捷键关闭它
-        // 使用 CloseUIByTag 而非 CloseTopUI，精确关闭目标 UI，
-        // 即使上方还有其他 UI 叠加也能正确关闭角色界面
-        UIManager->CloseUIByTag(CharacterScreenUITag);
-    }
-    else
-    {
-        // 未打开：请求 UIManager 打开（展台生命周期由 UI 自己管理）
-        UIManager->ShowUIByTag(CharacterScreenUITag);
-    }
-}
-
-// ==========================================
-// 编队界面 (Team Setup Screen)
-// ==========================================
-
-void AGameplayPlayerController::Input_OpenTeamSetupScreen()
-{
-    if (bTeamSetupScreenOpen)
-    {
-        CloseTeamSetupScreen();
-    }
-    else
-    {
-        OpenTeamSetupScreen();
-    }
-}
-
-void AGameplayPlayerController::OpenTeamSetupScreen()
-{
-    if (bTeamSetupScreenOpen) return;
-
-    UUIManagerSubsystem* UIManager = GetLocalPlayer() ? GetLocalPlayer()->GetSubsystem<UUIManagerSubsystem>() : nullptr;
-    if (!UIManager || !TeamSetupScreenUITag.IsValid())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("OpenTeamSetupScreen: UIManager 或 TeamSetupScreenUITag 未配置"));
-        return;
-    }
-
-    // 仅委托 UIManager 打开 UI，展台生成、视角切换、输入模式全部由 UI 自己管理
-    if (UIManager->ShowUIByTag(TeamSetupScreenUITag))
-    {
-        bTeamSetupScreenOpen = true;
-    }
-}
-
-void AGameplayPlayerController::CloseTeamSetupScreen()
-{
-    if (!bTeamSetupScreenOpen) return;
-
-    // 仅委托 UIManager 关闭 UI，展台销毁、视角恢复由 UI 的 NativeDestruct 处理
-    if (UUIManagerSubsystem* UIManager = GetLocalPlayer() ? GetLocalPlayer()->GetSubsystem<UUIManagerSubsystem>() : nullptr)
-    {
-        UIManager->CloseTopUI();
-    }
-
-    bTeamSetupScreenOpen = false;
 }

@@ -6,7 +6,6 @@
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "GameFlowSubsystem.generated.h"
 
-class UStartingRosterConfig;
 class UUIManagerSubsystem;
 
 /** 游戏全局状态。FlowManager 用它来追踪当前处于哪个阶段 */
@@ -45,10 +44,11 @@ public:
      * 从主菜单发起进入游戏请求。
      * 总指挥接管流程：初始化队伍数据 → UI Block → Asset Block → Travel
      * @param TargetLevel 目标关卡软引用
-     * @param RosterConfig 初始队伍配置（包含拥有角色、队伍成员、激活索引）
+     *
+     * 注：初始存档数据（UInitialArchiveData）从 UOpenWorldARPGSettings 获取，调用方无需传入。
      */
     UFUNCTION(BlueprintCallable, Category = "Game Flow")
-    void RequestTravelFromMainMenu(TSoftObjectPtr<UWorld> TargetLevel, UStartingRosterConfig* RosterConfig);
+    void RequestTravelFromMainMenu(TSoftObjectPtr<UWorld> TargetLevel);
 
     // --- 新关卡报到 ---
 
@@ -70,8 +70,8 @@ public:
 protected:
     // --- 管线各阶段 ---
 
-    /** 阶段 1：初始化队伍数据（从 StartingRosterConfig） */
-    void InitializeTeamData(UStartingRosterConfig* RosterConfig);
+    /** 阶段 1：初始化队伍数据（从 UOpenWorldARPGSettings 配置的 UInitialArchiveData 加载） */
+    void InitializeTeamData();
 
     /** 阶段 2：UI Block — 弹出 Loading 屏，屏蔽输入 */
     void BeginUIBlock();

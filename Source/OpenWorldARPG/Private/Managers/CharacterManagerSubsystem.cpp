@@ -3,7 +3,7 @@
 #include "Managers/CharacterManagerSubsystem.h"
 #include "Characters/PlayerCharacter.h"
 #include "Data/CharacterRegistryRow.h"
-#include "Data/StartingRosterConfig.h"
+#include "Data/InitialArchiveData.h"
 #include "Managers/GameAssetManagerSubsystem.h"
 
 UCharacterManagerSubsystem::UCharacterManagerSubsystem()
@@ -30,7 +30,7 @@ void UCharacterManagerSubsystem::Deinitialize()
 
 void UCharacterManagerSubsystem::InitializeFromDataObject(UObject* InDataObject)
 {
-	UStartingRosterConfig* ConfigData = Cast<UStartingRosterConfig>(InDataObject);
+	UInitialArchiveData* ConfigData = Cast<UInitialArchiveData>(InDataObject);
 
 	if (!ConfigData)
 	{

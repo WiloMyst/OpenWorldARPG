@@ -128,6 +128,21 @@ void UWeaponManagerComponent::SetWeaponHidden(bool bHidden)
     }
 }
 
+void UWeaponManagerComponent::DestroyCharacterWeapon()
+{
+    if (CharacterWeapon)
+    {
+        CharacterWeapon->Destroy();
+        CharacterWeapon = nullptr;
+    }
+}
+
+void UWeaponManagerComponent::OnComponentDestroyed(bool bDestroyingHierarchy)
+{
+    DestroyCharacterWeapon();
+    Super::OnComponentDestroyed(bDestroyingHierarchy);
+}
+
 // --- 状态轮询 (自动收回逻辑) ---
 
 void UWeaponManagerComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)

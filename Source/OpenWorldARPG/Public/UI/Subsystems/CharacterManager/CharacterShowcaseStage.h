@@ -13,6 +13,7 @@ class USpotLightComponent;
 class UStaticMeshComponent;
 class UCharacterVisualDataAsset;
 class UAnimInstance;
+struct FStreamableHandle;
 
 /**
  * 角色 3D 展台（Diorama）。
@@ -24,7 +25,7 @@ class UAnimInstance;
  *   供 UI 主壳子和 PlayerController 调用。
  *
  * 【数据流向】
- * UI 不直接修改数据 → 通知 ShowcaseStage 切换模型 → ShowcaseStage 从 VisualDataAsset 加载 Mesh 和 AnimBP
+ * UI 不直接修改数据 → 通知 ShowcaseStage 切换模型 → ShowcaseStage 从 VisualDataAsset 异步加载 Mesh 和同步加载 AnimBP
  */
 UCLASS(Blueprintable)
 class OPENWORLDARPG_API ACharacterShowcaseStage : public AActor
@@ -36,7 +37,7 @@ public:
 
     /**
      * 切换展台展示的角色。
-     * 从 VisualDataAsset 中加载 SkeletalMesh 和动画蓝图，赋值给 DisplayMesh。
+     * 异步加载 SkeletalMesh，同步加载动画蓝图，赋值给 DisplayMesh。
      * @param VisualData 角色外观数据资产（包含 Mesh 和 AnimBP 软引用）
      */
     UFUNCTION(BlueprintCallable, Category = "CharacterShowcase")
@@ -54,6 +55,9 @@ public:
 
 protected:
     virtual void BeginPlay() override;
+
+    /** 异步加载骨骼网格体完成的回调 */
+    void OnMeshLoaded();
 
     // --- 组件 ---
 
@@ -92,4 +96,13 @@ protected:
     /** 轮廓光（Rim/Back Light）：背后打光，勾勒角色轮廓 */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Showcase|Components|Lighting")
     TObjectPtr<USpotLightComponent> RimLight;
+
+    // --- 异步加载状态 ---
+
+    /** 当前正在异步加载的 VisualData（弱引用，避免影响外部生命周期） */
+    UPROPERTY(Transient)
+    TWeakObjectPtr<const UCharacterVisualDataAsset> PendingVisualData;
+
+    /** 异步加载句柄（保持存活直到加载完成，避免被提前 GC） */
+    TSharedPtr<FStreamableHandle> MeshStreamingHandle;
 };

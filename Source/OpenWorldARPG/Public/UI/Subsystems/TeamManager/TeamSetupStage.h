@@ -11,6 +11,7 @@ class USceneComponent;
 class UCameraComponent;
 class USkeletalMeshComponent;
 class USpotLightComponent;
+class UStaticMeshComponent;
 
 /**
  * 3D 编队展台 Actor（Diorama 黑盒）。
@@ -61,7 +62,7 @@ public:
     UFUNCTION(BlueprintPure, Category = "TeamSetupStage")
     UCameraComponent* GetStageCamera() const { return StageCamera; }
 
-    /** 获取指定槽位的展示网格体（供蓝图扩展打光/特效） */
+    /** 获取指定槽位的展示网格体 */
     UFUNCTION(BlueprintPure, Category = "TeamSetupStage")
     USkeletalMeshComponent* GetSlotMesh(int32 SlotIndex) const;
 
@@ -102,6 +103,12 @@ protected:
     /** 轮廓光（Rim/Back Light） */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "TeamSetupStage|Lighting")
     TObjectPtr<USpotLightComponent> RimLight;
+
+    // --- 展台环境 ---
+
+    /** 展台纯色背景幕布（深灰色，禁用碰撞/物理/投影，纯视觉） */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "TeamSetupStage|Environment")
+    TObjectPtr<UStaticMeshComponent> BackdropMesh;
 
 private:
     /** 初始化 4 个槽位锚点和网格体（构造函数中调用） */

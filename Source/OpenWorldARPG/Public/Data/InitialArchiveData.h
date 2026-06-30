@@ -6,13 +6,13 @@
 #include "Engine/DataAsset.h"
 #include "Data/CharacterSaveData.h"
 #include "GameplayTagContainer.h"
-#include "StartingRosterConfig.generated.h"
+#include "InitialArchiveData.generated.h"
 
 /**
  * 新建账号初始状态配置。
  */
 UCLASS(BlueprintType)
-class OPENWORLDARPG_API UStartingRosterConfig : public UPrimaryDataAsset
+class OPENWORLDARPG_API UInitialArchiveData : public UPrimaryDataAsset
 {
     GENERATED_BODY()
 

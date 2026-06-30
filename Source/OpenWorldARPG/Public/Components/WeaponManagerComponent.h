@@ -21,8 +21,12 @@ public:
 
 protected:
     virtual void BeginPlay() override;
+    virtual void OnComponentDestroyed(bool bDestroyingHierarchy) override;
 
 public:
+    UFUNCTION(BlueprintCallable, Category = "Weapon System")
+    void DestroyCharacterWeapon();
+
     UFUNCTION(BlueprintCallable, Category = "Weapon System")
     void InitializeCharacterWeapon();
 

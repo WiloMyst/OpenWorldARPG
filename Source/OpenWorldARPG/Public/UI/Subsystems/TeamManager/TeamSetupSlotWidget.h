@@ -9,6 +9,7 @@
 
 class UImage;
 class UTextBlock;
+class UButton;
 
 /**
  * 编队界面槽位 / 头像列表项 Widget（对应 WBP_TeamSetupSlot）。
@@ -21,6 +22,8 @@ class OPENWORLDARPG_API UTeamSetupSlotWidget : public UUserWidget
 
 public:
     UTeamSetupSlotWidget(const FObjectInitializer& ObjectInitializer);
+
+    virtual void NativeConstruct() override;
 
     /** 初始化槽位数据 */
     UFUNCTION(BlueprintCallable, Category = "TeamSetupSlot")
@@ -38,8 +41,11 @@ public:
     UFUNCTION(BlueprintPure, Category = "TeamSetupSlot")
     bool IsEmpty() const { return !CharacterTag.IsValid(); }
 
-    /** 设置选中高亮（蓝图实现） */
-    UFUNCTION(BlueprintImplementableEvent, Category = "TeamSetupSlot")
+    /**
+     * 设置选中高亮（纯 C++ 实现，不依赖蓝图）。
+     * 选中时按钮背景变绿，未选中变白。
+     */
+    UFUNCTION(BlueprintCallable, Category = "TeamSetupSlot")
     void SetHighlighted(bool bIsHighlighted);
 
 public:
@@ -50,7 +56,9 @@ public:
     FOnSlotClickedSignature OnSlotClicked;
 
 protected:
-    virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+    /** UButton 原生点击回调（替代 NativeOnMouseButtonDown，避免事件被吞噬） */
+    UFUNCTION()
+    void OnButtonClicked();
 
     // --- 绑定控件 ---
 
@@ -59,6 +67,9 @@ protected:
 
     UPROPERTY(BlueprintReadOnly, Category = "TeamSetupSlot|Widgets", meta = (BindWidget))
     TObjectPtr<UTextBlock> NameText;
+
+    UPROPERTY(BlueprintReadOnly, Category = "TeamSetupSlot|Widgets", meta = (BindWidget))
+    TObjectPtr<UButton> ItemButton;
 
     // --- 数据 ---
 

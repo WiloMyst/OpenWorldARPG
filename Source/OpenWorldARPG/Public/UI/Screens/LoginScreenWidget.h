@@ -23,7 +23,7 @@ protected:
     virtual void NativeConstruct() override;
 
     UPROPERTY(meta = (BindWidget))
-    UButton* LunchButton;
+    UButton* LoginButton;
 
 private:
     UFUNCTION()

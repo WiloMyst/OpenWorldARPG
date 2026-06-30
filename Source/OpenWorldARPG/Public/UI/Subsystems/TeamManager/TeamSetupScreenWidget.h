@@ -15,6 +15,7 @@ class UHorizontalBox;
 class UWrapBox;
 class UPanelWidget;
 class UTeamSetupSlotWidget;
+class UTeamSetupOwnedCharacterListWidget;
 
 /**
  * 编队界面主壳子（对应 WBP_TeamSetupScreen）。
@@ -30,7 +31,8 @@ class UTeamSetupSlotWidget;
  * - 仅当点击"保存"或退出界面时，才调用 UTeamManagerSubsystem::SetCurrentTeam 持久化。
  *
  * 【布局】
- * - 底部：保存 / 退出按钮
+ * - 底部：保存按钮（保存后不关闭界面）
+ * - 右上角：关闭按钮（走 UIManager 关闭）
  * - 中部：4 个透明可交互 DropZone（位置与展台 4 个槽位大致重合）
  * - 顶部 / 侧边：角色头像列表（已拥有角色，供拖拽上场）
  *
@@ -64,6 +66,10 @@ public:
     UFUNCTION(BlueprintPure, Category = "TeamSetup")
     ATeamSetupStage* GetSpawnedStage() const { return SpawnedStage; }
 
+    /** 关闭按钮点击回调（与 CharacterScreenMainWidget 一致，统一走 UIManager 关闭） */
+    UFUNCTION()
+    void OnCloseButtonClicked();
+
     // --- 槽位操作（供蓝图 DropZone 调用） ---
 
     /**
@@ -83,38 +89,54 @@ public:
     void ClearSlot(int32 SlotIndex);
 
     /**
-     * 保存并退出：将 PendingTeam 写入 TeamManagerSubsystem 并关闭界面。
+     * 选中指定槽位（标记为当前点击列表头像时放入的目标槽位）。
+     * 会触发 OnSlotSelected 蓝图事件以更新 4 个槽位的高亮表现框。
+     */
+    UFUNCTION(BlueprintCallable, Category = "TeamSetup")
+    void SelectSlot(int32 SlotIndex);
+
+    /** 获取当前选中的槽位索引 */
+    UFUNCTION(BlueprintPure, Category = "TeamSetup")
+    int32 GetSelectedSlotIndex() const { return SelectedSlotIndex; }
+
+    /**
+     * 保存：将 PendingTeam 写入 TeamManagerSubsystem 并通知服务器 Spawn 新队伍。
+     * 注意：保存后不关闭界面，玩家可继续查看/调整。
      * 由蓝图"保存"按钮调用。
      */
     UFUNCTION(BlueprintCallable, Category = "TeamSetup")
     void SaveAndExit();
 
-    /** 不保存直接退出（恢复原队伍显示） */
-    UFUNCTION(BlueprintCallable, Category = "TeamSetup")
-    void CancelAndExit();
-
 protected:
     // --- 绑定控件（蓝图配置） ---
 
-    /** 4 个槽位 DropZone 的 Button（位置与展台槽位对应） */
+    /**
+     * 4 个槽位 DropZone 的 Button（位置与展台槽位对应）。
+     * 蓝图侧在 Widget 中放置 4 个 Button，分别命名为 SlotButton_0 ~ SlotButton_3 即可自动绑定。
+     */
     UPROPERTY(BlueprintReadOnly, Category = "TeamSetup|Widgets", meta = (BindWidget))
-    TArray<TObjectPtr<UButton>> SlotButtons;
+    TObjectPtr<UButton> SlotButton_0;
+
+    UPROPERTY(BlueprintReadOnly, Category = "TeamSetup|Widgets", meta = (BindWidget))
+    TObjectPtr<UButton> SlotButton_1;
+
+    UPROPERTY(BlueprintReadOnly, Category = "TeamSetup|Widgets", meta = (BindWidget))
+    TObjectPtr<UButton> SlotButton_2;
+
+    UPROPERTY(BlueprintReadOnly, Category = "TeamSetup|Widgets", meta = (BindWidget))
+    TObjectPtr<UButton> SlotButton_3;
 
     /** 底部"保存"按钮 */
     UPROPERTY(BlueprintReadOnly, Category = "TeamSetup|Widgets", meta = (BindWidget))
     TObjectPtr<UButton> SaveButton;
 
-    /** 底部"取消"按钮 */
+    /** 右上角"关闭"按钮（与 CharacterScreenMainWidget 行为一致：仅调用 UIManager->CloseTopUI） */
     UPROPERTY(BlueprintReadOnly, Category = "TeamSetup|Widgets", meta = (BindWidget))
-    TObjectPtr<UButton> CancelButton;
+    TObjectPtr<UButton> CloseButton;
 
-    /** 已拥有角色头像列表容器（用于拖拽上场） */
+    /** 已拥有角色列表子组件（管理头像生成/排布，职责单一） */
     UPROPERTY(BlueprintReadOnly, Category = "TeamSetup|Widgets", meta = (BindWidget))
-    TObjectPtr<UPanelWidget> OwnedCharacterList;
-
-    /** 头像 Item Widget 类（蓝图配置） */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "TeamSetup|Config")
-    TSubclassOf<UTeamSetupSlotWidget> SlotItemClass;
+    TObjectPtr<UTeamSetupOwnedCharacterListWidget> OwnedCharacterListWidget;
 
     // --- 展台配置（蓝图配置要生成的展台类） ---
 
@@ -131,10 +153,6 @@ protected:
     /** UI 拥有的展台实例（NativeConstruct 生成，NativeDestruct 销毁） */
     UPROPERTY(Transient)
     TObjectPtr<ATeamSetupStage> SpawnedStage;
-
-    /** 打开界面前摄像机看着的目标（通常是大世界主角），关闭时切回去 */
-    UPROPERTY(Transient)
-    TWeakObjectPtr<AActor> PreviousViewTarget;
 
     /** 本地 Pending 队伍（未保存） */
     UPROPERTY(Transient)
@@ -160,19 +178,26 @@ protected:
     /** 刷新 3D 展台显示 */
     void RefreshStageDisplay();
 
-    /** 刷新已拥有角色头像列表 */
-    void RefreshOwnedCharacterList();
-
     /** Subsystem 队伍变化的回调（外部修改时同步） */
     UFUNCTION()
     void HandleTeamListUpdated();
 
-    /** 头像被点击/拖拽时触发，请求将该角色放入指定槽位（默认放第一个空槽） */
+    /**
+     * 已拥有角色列表点击回调（由 OwnedCharacterListWidget 委托触发）。
+     * 直接将角色放入当前选中的槽位 SelectedSlotIndex。
+     */
     UFUNCTION()
-    void HandleCharacterPicked(const FGameplayTag& CharacterTag, int32 SourceSlotIndex);
+    void HandleCharacterPicked(const FGameplayTag& CharacterTag);
+
+    // --- 槽位按钮点击回调（4 个无参函数，供 NativeConstruct 绑定） ---
+
+    UFUNCTION() void OnSlot0Clicked();
+    UFUNCTION() void OnSlot1Clicked();
+    UFUNCTION() void OnSlot2Clicked();
+    UFUNCTION() void OnSlot3Clicked();
 
 public:
-    /** 当角色被选中/拖拽时触发（向上传递，蓝图可绑定） */
+    /** 当角色被选中/拖拽时触发 */
     DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCharacterPickedSignature, const FGameplayTag&, CharacterTag);
 
     UPROPERTY(BlueprintAssignable, Category = "TeamSetup|Events")
@@ -182,4 +207,13 @@ protected:
     /** 槽位发生变化的视觉更新（蓝图实现：更新 DropZone 高亮 / 名称） */
     UFUNCTION(BlueprintImplementableEvent, Category = "TeamSetup")
     void OnSlotsChanged(int32 ChangedSlotIndex);
+
+    /** 选中槽位变化的视觉更新（蓝图实现：更新 4 个槽位的高亮表现框） */
+    UFUNCTION(BlueprintImplementableEvent, Category = "TeamSetup")
+    void OnSlotSelected(int32 SelectedIndex);
+
+    // --- 选中槽位状态 ---
+
+    /** 当前选中的槽位索引（默认 0，点击列表头像时放入此槽位） */
+    int32 SelectedSlotIndex = 0;
 };

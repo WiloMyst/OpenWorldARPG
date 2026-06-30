@@ -8,7 +8,7 @@
 #include "CharacterManagerSubsystem.generated.h"
 
 class UObject;
-class UStartingRosterConfig;
+class UInitialArchiveData;
 class UDataTable;
 class APlayerCharacter;
 struct FCharacterRegistryRow;
@@ -25,11 +25,11 @@ class OPENWORLDARPG_API UCharacterManagerSubsystem : public UGameInstanceSubsyst
 
 public:
 	UCharacterManagerSubsystem();
-	
+
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
 
-	/** 从 StartingRosterConfig 填充玩家拥有的角色存档数据 */
+	/** 从 UInitialArchiveData 填充玩家拥有的角色存档数据 */
 	void InitializeFromDataObject(UObject* InDataObject);
 
 	// --- Registry 查询 ---

@@ -3,6 +3,7 @@
 #include "UI/Subsystems/TeamManager/TeamSetupStage.h"
 #include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Camera/CameraComponent.h"
 #include "Components/SpotLightComponent.h"
 #include "Managers/CharacterManagerSubsystem.h"
@@ -62,6 +63,25 @@ ATeamSetupStage::ATeamSetupStage()
     RimLight->AttenuationRadius = 1200.0f;
     RimLight->InnerConeAngle = 40.0f;
     RimLight->OuterConeAngle = 60.0f;
+
+    // --- 展台幕布 (Backdrop) ---
+    BackdropMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BackdropMesh"));
+    BackdropMesh->SetupAttachment(Root);
+
+    // 禁用所有碰撞、物理和导航（极致性能，纯视觉）
+    BackdropMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    BackdropMesh->SetCollisionProfileName(TEXT("NoCollision"));
+    BackdropMesh->SetCanEverAffectNavigation(false);
+
+    // 关闭投影和接收贴花，防止展台灯光在幕布上打出奇怪的影子
+    BackdropMesh->SetCastShadow(false);
+    BackdropMesh->bReceivesDecals = false;
+
+    // 将幕布放置在 4 个角色正后方（摄像机朝 -Y 方向，幕布放在 -Y 方向的极远处）
+    // 横向居中（X=0，覆盖 Slot0~Slot3 的 X 范围），尺寸放大确保填满摄像机 FOV
+    BackdropMesh->SetRelativeLocation(FVector(0.0f, -1000.0f, 0.0f));
+    BackdropMesh->SetRelativeRotation(FRotator(0.0f, 90.0f, 0.0f)); // 面向 +Y（摄像机方向）
+    BackdropMesh->SetRelativeScale3D(FVector(20.0f, 20.0f, 20.0f));
 }
 
 void ATeamSetupStage::InitializeSlots()
@@ -89,8 +109,8 @@ void ATeamSetupStage::InitializeSlots()
         SlotMeshes[i]->SetCollisionEnabled(ECollisionEnabled::NoCollision);
         SlotMeshes[i]->SetSimulatePhysics(false);
         SlotMeshes[i]->SetCollisionProfileName(TEXT("NoCollision"));
-        SlotMeshes[i]->SetComponentTickEnabled(false); // 展台网格体不参与 Tick
-        SlotMeshes[i]->SetVisibility(false); // 默认隐藏，待 RefreshStage 唤醒
+        SlotMeshes[i]->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::OnlyTickPoseWhenRendered;
+        //SlotMeshes[i]->SetVisibility(false); // 默认隐藏，待 RefreshStage 唤醒
     }
 }
 
@@ -190,6 +210,8 @@ void ATeamSetupStage::RefreshStage(const TArray<FGameplayTag>& TeamTags)
             if (LoadedAnimBP)
             {
                 SlotMesh->SetAnimInstanceClass(LoadedAnimBP);
+                // 强制初始化动画实例，确保立即进入待机/站姿状态机，避免 T-Pose 僵住
+                SlotMesh->InitAnim(true);
             }
         }
         else

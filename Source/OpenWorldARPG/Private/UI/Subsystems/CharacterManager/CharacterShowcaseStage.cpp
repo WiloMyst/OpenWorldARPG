@@ -8,6 +8,8 @@
 #include "Components/SpotLightComponent.h"
 #include "Data/CharacterVisualDataAsset.h"
 #include "Animation/AnimInstance.h"
+#include "Engine/StreamableManager.h"
+#include "Engine/AssetManager.h"
 
 ACharacterShowcaseStage::ACharacterShowcaseStage()
 {
@@ -104,17 +106,31 @@ void ACharacterShowcaseStage::SwitchDisplayCharacter(const UCharacterVisualDataA
 {
     if (!VisualData || !DisplayMesh) return;
 
-    // 1. 加载骨骼网格体（从软引用同步加载）
+    // 取消上一个未完成的异步加载请求，避免旧请求覆盖新请求（玩家快速切换角色时）
+    if (MeshStreamingHandle.IsValid())
+    {
+        MeshStreamingHandle->CancelHandle();
+        MeshStreamingHandle.Reset();
+    }
+
+    // 记录当前请求的 VisualData，供异步加载回调使用
+    PendingVisualData = VisualData;
+
+    // 1. 异步加载骨骼网格体（避免同步加载造成的卡顿）
     if (!VisualData->CharacterMesh.IsNull())
     {
-        USkeletalMesh* LoadedMesh = VisualData->CharacterMesh.LoadSynchronous();
-        if (LoadedMesh)
-        {
-            DisplayMesh->SetSkeletalMesh(LoadedMesh);
-        }
+        FStreamableManager& Streamable = UAssetManager::GetStreamableManager();
+        MeshStreamingHandle = Streamable.RequestAsyncLoad(
+            VisualData->CharacterMesh.ToSoftObjectPath(),
+            FStreamableDelegate::CreateUObject(this, &ACharacterShowcaseStage::OnMeshLoaded));
+    }
+    else
+    {
+        DisplayMesh->SetSkeletalMesh(nullptr);
     }
 
     // 2. 优先使用展台专用展示动画蓝图，未配置则回退角色动画蓝图
+    // 动画蓝图是 Class 资源，体积小且有 Class Cache，保持同步加载即可
     const auto& AnimBPPtr =
         VisualData->ShowcaseAnimationBlueprint.IsNull()
             ? VisualData->AnimationBlueprint
@@ -130,12 +146,33 @@ void ACharacterShowcaseStage::SwitchDisplayCharacter(const UCharacterVisualDataA
     }
 }
 
+void ACharacterShowcaseStage::OnMeshLoaded()
+{
+    if (!MeshStreamingHandle.IsValid() || !DisplayMesh) return;
+
+    // 校验 PendingVisualData 仍然有效（角色界面可能已被关闭，Actor 即将销毁）
+    if (!PendingVisualData.IsValid())
+    {
+        MeshStreamingHandle.Reset();
+        return;
+    }
+
+    USkeletalMesh* LoadedMesh = Cast<USkeletalMesh>(MeshStreamingHandle->GetLoadedAsset());
+    if (LoadedMesh)
+    {
+        DisplayMesh->SetSkeletalMesh(LoadedMesh);
+    }
+
+    MeshStreamingHandle.Reset();
+    PendingVisualData = nullptr;
+}
+
 void ACharacterShowcaseStage::RotateCharacter(float DeltaYaw)
 {
     if (!DisplayMesh) return;
 
     // 围绕 Z 轴旋转展示网格体
     const FRotator CurrentRot = DisplayMesh->GetRelativeRotation();
-    const FRotator NewRot = FRotator(CurrentRot.Pitch, CurrentRot.Yaw + DeltaYaw, CurrentRot.Roll);
+    const FRotator NewRot = FRotator(CurrentRot.Pitch, CurrentRot.Yaw - DeltaYaw, CurrentRot.Roll);
     DisplayMesh->SetRelativeRotation(NewRot);
 }

@@ -10,6 +10,7 @@ class UDataTable;
 class UUIDataAsset;
 class UCharacterGeneralDataAsset;
 class ULoadingScreenWidget;
+class UInitialArchiveData;
 
 /**
  * 项目全局资产配置中心。所有资产路径统一在此管理。
@@ -36,6 +37,10 @@ public:
 	// --- 角色通用配置 ---
 	UPROPERTY(Config, EditDefaultsOnly, Category = "Character", meta=(ToolTip="角色通用技能数据资产"))
 	TSoftObjectPtr<UCharacterGeneralDataAsset> PlayerCharacterGeneralAbilityDataAsset;
+
+	// --- 初始队伍 ---
+	UPROPERTY(Config, EditDefaultsOnly, Category = "Initial Archive", meta=(ToolTip="初始存档数据资产。"))
+	TSoftObjectPtr<UInitialArchiveData> InitialArchiveData;
 
 	// --- UI ---
 	UPROPERTY(Config, EditDefaultsOnly, Category = "UI", meta=(ToolTip="UI映射数据资产"))

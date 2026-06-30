@@ -120,7 +120,7 @@ void UCharacterScreenMainWidget::SpawnStageAndTransition()
         PreviousViewTarget = PC->GetViewTarget();
 
         // 3. 平滑切换视角到展台摄像机
-        PC->SetViewTargetWithBlend(SpawnedStage, 0.3f);
+        PC->SetViewTarget(SpawnedStage);
 
         // 4. 设置输入模式为 GameAndUI 并显示鼠标
         FInputModeGameAndUI InputMode;
@@ -144,7 +144,7 @@ void UCharacterScreenMainWidget::DestroyStageAndRestore()
     {
         if (AActor* PrevTarget = PreviousViewTarget.Get())
         {
-            PC->SetViewTargetWithBlend(PrevTarget, 0.3f);
+            PC->SetViewTarget(PrevTarget);
         }
 
         // 2. 恢复大世界输入模式
