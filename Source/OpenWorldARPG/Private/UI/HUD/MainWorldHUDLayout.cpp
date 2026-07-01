@@ -5,7 +5,7 @@
 #include "UI/HUD/GameplayListWidget.h"
 #include "UI/HUD/InteractionListWidget.h"
 #include "Components/HeroUIExtensionComponent.h"
-#include "Characters/PlayerCharacter.h"
+#include "Interfaces/ARPGCharacterInterface.h"
 #include "Core/PlayerStates/GameplayPlayerState.h"
 #include "Managers/UIManagerSubsystem.h"
 #include "Managers/TeamManagerSubsystem.h"
@@ -36,9 +36,9 @@ void UMainWorldHUDLayout::NativeOnInitialized()
     }
 
     // 绑定 UI 扩展组件（MVVM：不再直接依赖 ASC / InteractionComponent）
-    if (APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(GetOwningPlayerPawn()))
+    if (IARPGCharacterInterface* ARPGChar = Cast<IARPGCharacterInterface>(GetOwningPlayerPawn()))
     {
-        if (UHeroUIExtensionComponent* ExtensionComp = PlayerChar->GetHeroUIExtensionComp())
+        if (UHeroUIExtensionComponent* ExtensionComp = ARPGChar->GetHeroUIExtensionComponent())
         {
             BindToExtensionComp(ExtensionComp);
         }
@@ -132,9 +132,9 @@ void UMainWorldHUDLayout::UnbindFromExtensionComp()
 void UMainWorldHUDLayout::OnPossessedPawnChanged(APawn* OldPawn, APawn* NewPawn)
 {
     // 角色切换：重新绑定到新角色的 ExtensionComp
-    if (APlayerCharacter* NewChar = Cast<APlayerCharacter>(NewPawn))
+    if (IARPGCharacterInterface* NewChar = Cast<IARPGCharacterInterface>(NewPawn))
     {
-        if (UHeroUIExtensionComponent* ExtensionComp = NewChar->GetHeroUIExtensionComp())
+        if (UHeroUIExtensionComponent* ExtensionComp = NewChar->GetHeroUIExtensionComponent())
         {
             BindToExtensionComp(ExtensionComp);
         }

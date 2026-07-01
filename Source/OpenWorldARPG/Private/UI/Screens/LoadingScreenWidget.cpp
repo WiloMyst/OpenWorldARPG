@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "UI/Screens/LoadingScreenWidget.h"
 #include "Managers/GameAssetManagerSubsystem.h"
@@ -22,11 +22,9 @@ void ULoadingScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDelta
 
     if (AssetManagerSubsystem)
     {
-        // 1. 对应蓝图：获取子系统的进度并 Set 给本地变量
         LoadingProgress = AssetManagerSubsystem->GetTotalLoadingProgress();
 
-        // 2. 核心优化：直接设置进度条的值！
-        // 这样一来，你就不用在 UMG 蓝图里面搞任何“绑定(Binding)”了
+        // 直接设置进度条的值，无需 UMG 绑定
         if (LoadingProgressBar)
         {
             LoadingProgressBar->SetPercent(LoadingProgress);

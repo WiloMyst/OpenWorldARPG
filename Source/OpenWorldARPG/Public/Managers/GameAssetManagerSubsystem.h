@@ -13,7 +13,6 @@ class UUIDataAsset;
 struct FStreamableManager;
 struct FStreamableHandle;
 
-/** 加载阶段 */
 UENUM(BlueprintType)
 enum class ELoadingPhase : uint8
 {
@@ -23,12 +22,7 @@ enum class ELoadingPhase : uint8
     Complete
 };
 
-// --- 委托 ---
-
-/** 所有加载流程完成时广播 */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnLoadComplete);
-
-/** 关卡预加载完成时广播 */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnLevelAsyncLoaded);
 
 /**
@@ -42,77 +36,51 @@ class OPENWORLDARPG_API UGameAssetManagerSubsystem : public UGameInstanceSubsyst
 public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
-    // --- 中央资产缓存（首次从 Settings 延迟加载，后续直接返回缓存）---
+    // --- 资产缓存访问 ---
 
-    /** 角色信息数据表 */
     UDataTable* GetCharacterInfoTable();
-
-    /** 物品数据库数据表 */
     UDataTable* GetItemDatabaseTable();
-
-    /** 背包分类标签页数据表 */
     UDataTable* GetInventoryCategoryTabDataTable();
-
-    /** 角色通用技能数据资产 */
     UCharacterGeneralDataAsset* GetPlayerCharacterGeneralAbilityDataAsset();
-
-    /** UI 映射数据资产 */
     UUIDataAsset* GetUIMapDataAsset();
 
     // --- 异步加载调度 ---
 
-    /** 获取总加载进度 (0.0 - 1.0)，UI 进度条绑定此函数 */
-    UFUNCTION(BlueprintPure, Category = "Asset Loading")
     float GetTotalLoadingProgress() const;
-
-    /** 启动关卡异步加载流程 */
-    UFUNCTION(BlueprintCallable, Category = "Asset Loading")
     void TryStartAsyncLevelLoading(TSoftObjectPtr<UWorld> LevelToLoad);
-
-    /** 启动队伍角色资源异步加载流程 */
-    UFUNCTION(BlueprintCallable, Category = "Asset Loading")
     void StartTeamAssetLoading(const TArray<FGameplayTag>& TeamCharacterTags);
 
-    /** 加载完成后分帧释放资源句柄，平滑 GC 卡顿 */
-    UFUNCTION(BlueprintCallable, Category = "Asset Loading")
+    // --- 清理 ---
+
     void CleanupAfterLoad();
 
-    // --- 事件 ---
+protected:
+    // --- 加载回调 ---
+
+    void OnSingleTeamAssetLoaded();
+    void OnAllTeamAssetsLoaded();
+    void StartLevelLoading();
+    void OnLevelLoadCompleted();
+
+    // --- 两阶段队伍资产加载 ---
+
+    void StartDataAssetLoading();
+    void OnDataAssetsLoaded();
+    void StartInnerAssetLoading();
+
+    // --- 分帧释放 ---
+
+    void ReleaseHandlesStaggered();
+    void OnStaggeredReleaseComplete();
+
+public:
+    // --- 事件委托 ---
 
     UPROPERTY(BlueprintAssignable, Category = "Asset Loading")
     FOnLoadComplete OnLoadComplete;
 
     UPROPERTY(BlueprintAssignable, Category = "Asset Loading")
     FOnLevelAsyncLoaded OnLevelAsyncLoaded;
-
-protected:
-    // --- 内部加载回调 ---
-
-    void OnSingleTeamAssetLoaded();
-    void OnAllTeamAssetsLoaded();
-    void StartLevelLoading();
-
-    UFUNCTION(BlueprintCallable, Category = "Asset Loading")
-    void OnLevelLoadCompleted();
-
-    // --- 两阶段队伍资产加载 ---
-
-    /** 阶段 2a：异步加载 VisualDataAsset / CombatDataAsset 本身 */
-    void StartDataAssetLoading();
-
-    /** 阶段 2a 完成：收集内部软引用并启动阶段 2b */
-    void OnDataAssetsLoaded();
-
-    /** 阶段 2b：加载具体资源（Mesh、Montage、Icon 等） */
-    void StartInnerAssetLoading();
-
-    // --- 分帧释放 ---
-
-    /** 每帧释放一批 StreamableHandle，避免集中 GC Spike */
-    void ReleaseHandlesStaggered();
-
-    /** 分帧释放完毕后的最终清理 */
-    void OnStaggeredReleaseComplete();
 
 protected:
     // --- 缓存资产 ---
@@ -132,41 +100,36 @@ protected:
     UPROPERTY()
     TObjectPtr<UUIDataAsset> CachedUIMapDataAsset;
 
+    // --- StreamableManager ---
+
     FStreamableManager* StreamableManager;
 
     // --- 加载状态 ---
 
     ELoadingPhase CurrentLoadingPhase = ELoadingPhase::None;
 
-    float LevelLoadWeight = 0.2f;
-    float TeamAssetLoadWeight = 0.8f;
-    /** 阶段 2a（数据资产加载）在队伍资产阶段中的权重 */
-    float DataAssetPhaseWeight = 0.15f;
-    /** 阶段 2b（内部资源加载）在队伍资产阶段中的权重 */
-    float InnerAssetPhaseWeight = 0.85f;
-
     TArray<FGameplayTag> CurrentTeamToLoad;
     TSoftObjectPtr<UWorld> CurrentLevelToLoad;
     FName TargetLevelName;
 
     TArray<TSharedPtr<FStreamableHandle>> TeamAssetLoadHandles;
+    TSharedPtr<FStreamableHandle> DataAssetLoadHandle;
+    TSharedPtr<FStreamableHandle> LevelLoadHandle;
+
     int32 TeamAssetLoadNum = 0;
     int32 CompletedAssetLoads = 0;
     int32 FailedAssetLoads = 0;
 
-    /** 阶段 2a：数据资产（VisualDataAsset/CombatDataAsset）异步加载句柄 */
-    TSharedPtr<FStreamableHandle> DataAssetLoadHandle;
+    // --- 加载权重配置 ---
 
-    TSharedPtr<FStreamableHandle> LevelLoadHandle;
+    float LevelLoadWeight = 0.2f;
+    float TeamAssetLoadWeight = 0.8f;
+    float DataAssetPhaseWeight = 0.15f;
+    float InnerAssetPhaseWeight = 0.85f;
 
     // --- 分帧释放状态 ---
 
-    /** 待释放的句柄队列（从 TeamAssetLoadHandles 移入，分帧消耗） */
     TArray<TSharedPtr<FStreamableHandle>> PendingReleaseHandles;
-
-    /** 每帧释放的句柄数量（可配置，默认 3） */
     int32 HandlesToReleasePerFrame = 3;
-
-    /** 分帧释放的定时器句柄 */
     FTimerHandle StaggeredReleaseTimerHandle;
 };

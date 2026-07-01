@@ -18,14 +18,13 @@ void UGameAssetManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection
 {
     Super::Initialize(Collection);
 
-    // 强制 GAS 初始化全局数据并读取 DefaultGame.ini 里的自定义配置
     UAbilitySystemGlobals::Get().InitGlobalData();
 
     UAssetManager& AssetManager = UAssetManager::Get();
     StreamableManager = &AssetManager.GetStreamableManager();
 }
 
-// --- 中央资产缓存访问接口 ---
+// --- 资产缓存访问 ---
 
 UDataTable* UGameAssetManagerSubsystem::GetCharacterInfoTable()
 {
@@ -35,7 +34,7 @@ UDataTable* UGameAssetManagerSubsystem::GetCharacterInfoTable()
         CachedCharacterInfoTable = Settings.CharacterInfoTable.LoadSynchronous();
         if (!CachedCharacterInfoTable)
         {
-            UE_LOG(LogTemp, Error, TEXT("GameAssetManager: CharacterInfoTable 未配置或加载失败！请在项目设置中检查。"));
+            UE_LOG(LogTemp, Error, TEXT("GameAssetManager: CharacterInfoTable 未配置或加载失败！"));
         }
     }
     return CachedCharacterInfoTable;
@@ -49,7 +48,7 @@ UDataTable* UGameAssetManagerSubsystem::GetItemDatabaseTable()
         CachedItemDatabaseTable = Settings.ItemDatabaseTable.LoadSynchronous();
         if (!CachedItemDatabaseTable)
         {
-            UE_LOG(LogTemp, Error, TEXT("GameAssetManager: ItemDatabaseTable 未配置或加载失败！请在项目设置中检查。"));
+            UE_LOG(LogTemp, Error, TEXT("GameAssetManager: ItemDatabaseTable 未配置或加载失败！"));
         }
     }
     return CachedItemDatabaseTable;
@@ -63,7 +62,7 @@ UDataTable* UGameAssetManagerSubsystem::GetInventoryCategoryTabDataTable()
         CachedInventoryCategoryTabDataTable = Settings.InventoryCategoryTabDataTable.LoadSynchronous();
         if (!CachedInventoryCategoryTabDataTable)
         {
-            UE_LOG(LogTemp, Error, TEXT("GameAssetManager: InventoryCategoryTabDataTable 未配置或加载失败！请在项目设置中检查。"));
+            UE_LOG(LogTemp, Error, TEXT("GameAssetManager: InventoryCategoryTabDataTable 未配置或加载失败！"));
         }
     }
     return CachedInventoryCategoryTabDataTable;
@@ -77,7 +76,7 @@ UCharacterGeneralDataAsset* UGameAssetManagerSubsystem::GetPlayerCharacterGenera
         CachedPlayerCharacterGeneralAbilityDataAsset = Settings.PlayerCharacterGeneralAbilityDataAsset.LoadSynchronous();
         if (!CachedPlayerCharacterGeneralAbilityDataAsset)
         {
-            UE_LOG(LogTemp, Error, TEXT("GameAssetManager: PlayerCharacterGeneralAbilityDataAsset 未配置或加载失败！请在项目设置中检查。"));
+            UE_LOG(LogTemp, Error, TEXT("GameAssetManager: PlayerCharacterGeneralAbilityDataAsset 未配置或加载失败！"));
         }
     }
     return CachedPlayerCharacterGeneralAbilityDataAsset;
@@ -91,7 +90,7 @@ UUIDataAsset* UGameAssetManagerSubsystem::GetUIMapDataAsset()
         CachedUIMapDataAsset = Settings.UIMapDataAsset.LoadSynchronous();
         if (!CachedUIMapDataAsset)
         {
-            UE_LOG(LogTemp, Error, TEXT("GameAssetManager: UIMapDataAsset 未配置或加载失败！请在项目设置中检查。"));
+            UE_LOG(LogTemp, Error, TEXT("GameAssetManager: UIMapDataAsset 未配置或加载失败！"));
         }
     }
     return CachedUIMapDataAsset;
@@ -117,7 +116,6 @@ float UGameAssetManagerSubsystem::GetTotalLoadingProgress() const
     }
     case ELoadingPhase::LoadingTeamAssets:
     {
-        // 两阶段加载：阶段 2a（数据资产）+ 阶段 2b（内部资源）
         float AssetPhaseProgress = 0.0f;
 
         // 阶段 2a：数据资产加载进度
@@ -127,7 +125,6 @@ float UGameAssetManagerSubsystem::GetTotalLoadingProgress() const
         }
         else
         {
-            // 2a 已完成，计入满进度
             AssetPhaseProgress += DataAssetPhaseWeight;
         }
 
@@ -149,11 +146,8 @@ float UGameAssetManagerSubsystem::GetTotalLoadingProgress() const
         break;
     }
     case ELoadingPhase::Complete:
-    {
         Progress = 1.0f;
         break;
-    }
-    case ELoadingPhase::None:
     default:
         Progress = 0.0f;
         break;
@@ -178,13 +172,10 @@ void UGameAssetManagerSubsystem::TryStartAsyncLevelLoading(TSoftObjectPtr<UWorld
     CurrentLevelToLoad = LevelToLoad;
     TargetLevelName = FName(*FPackageName::GetShortName(LevelToLoad.GetLongPackageName()));
 
-    // UI Block 由 GameFlowSubsystem 统筹，AssetManager 只负责资源加载
     StartLevelLoading();
 }
 
-// ####################################################################
-// #                         阶段一：关卡加载                           #
-// ####################################################################
+// --- 阶段一：关卡加载 ---
 
 void UGameAssetManagerSubsystem::StartLevelLoading()
 {
@@ -198,19 +189,16 @@ void UGameAssetManagerSubsystem::StartLevelLoading()
     if (!LevelLoadHandle.IsValid())
     {
         UE_LOG(LogTemp, Error, TEXT("Failed to start async load for level: %s"), *TargetLevelName.ToString());
-        OnLevelLoadCompleted(); // 即使失败也要继续流程
+        OnLevelLoadCompleted();
     }
 }
 
 void UGameAssetManagerSubsystem::OnLevelLoadCompleted()
 {
-    UE_LOG(LogTemp, Log, TEXT("Phase 1 Complete: Level preload finished."));
     OnLevelAsyncLoaded.Broadcast();
 }
 
-// ####################################################################
-// #                      阶段二：队伍资产加载                          #
-// ####################################################################
+// --- 阶段二：队伍资产加载 ---
 
 void UGameAssetManagerSubsystem::StartTeamAssetLoading(const TArray<FGameplayTag>& TeamCharacterTags)
 {
@@ -218,15 +206,9 @@ void UGameAssetManagerSubsystem::StartTeamAssetLoading(const TArray<FGameplayTag
     TeamAssetLoadHandles.Empty();
     CompletedAssetLoads = 0;
     FailedAssetLoads = 0;
-
     CurrentTeamToLoad = TeamCharacterTags;
 
-    // ==========================================
-    // 两阶段加载：阶段 2a — 异步加载 VisualDataAsset / CombatDataAsset 本身
-    // ==========================================
-    // FCharacterRegistryRow 中的 VisualData / CombatData 是 TSoftObjectPtr，
-    // 直接调用 Get() 会触发同步加载（阻塞主线程）。
-    // 必须先将它们异步加载完成，才能在阶段 2b 中安全访问内部字段（AbilityMontages 等）。
+    // 两阶段加载：先异步加载数据资产本身，再加载其内部软引用资源
     StartDataAssetLoading();
 }
 
@@ -237,7 +219,6 @@ void UGameAssetManagerSubsystem::StartDataAssetLoading()
     UDataTable* LoadedTable = GetCharacterInfoTable();
     if (!LoadedTable)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Phase 2a: CharacterInfoTable is null, skipping."));
         OnAllTeamAssetsLoaded();
         return;
     }
@@ -257,39 +238,29 @@ void UGameAssetManagerSubsystem::StartDataAssetLoading()
 
     if (!CharManager)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Phase 2a: CharacterManagerSubsystem is null, skipping."));
         OnAllTeamAssetsLoaded();
         return;
     }
 
-    if (LoadedTable)
+    for (const FGameplayTag& CharTag : CurrentTeamToLoad)
     {
-        for (const FGameplayTag& CharTag : CurrentTeamToLoad)
-        {
-            FName RowName = CharManager->GetRowNameByTag(CharTag);
-            if (RowName == NAME_None) continue;
+        FName RowName = CharManager->GetRowNameByTag(CharTag);
+        if (RowName == NAME_None) continue;
 
-            const FCharacterRegistryRow* Row = LoadedTable->FindRow<FCharacterRegistryRow>(RowName, TEXT(""));
-            if (Row)
-            {
-                // 阶段 2a：收集 VisualDataAsset 和 CombatDataAsset 的路径
-                // 这些是 DataAsset 本身，加载后才能安全访问其内部的 TSoftObjectPtr 字段
-                DataAssetPaths.Add(Row->VisualData.ToSoftObjectPath());
-                DataAssetPaths.Add(Row->CombatData.ToSoftObjectPath());
-            }
+        const FCharacterRegistryRow* Row = LoadedTable->FindRow<FCharacterRegistryRow>(RowName, TEXT(""));
+        if (Row)
+        {
+            DataAssetPaths.Add(Row->VisualData.ToSoftObjectPath());
+            DataAssetPaths.Add(Row->CombatData.ToSoftObjectPath());
         }
     }
 
     if (DataAssetPaths.Num() == 0)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Phase 2a: No data assets to load, skipping to completion."));
         OnAllTeamAssetsLoaded();
         return;
     }
 
-    UE_LOG(LogTemp, Log, TEXT("Phase 2a: Loading %d data assets (VisualDataAsset/CombatDataAsset)..."), DataAssetPaths.Num());
-
-    // 批量异步加载所有数据资产，加载完成后进入阶段 2b
     DataAssetLoadHandle = StreamableManager->RequestAsyncLoad(
         DataAssetPaths,
         FStreamableDelegate::CreateUObject(this, &UGameAssetManagerSubsystem::OnDataAssetsLoaded)
@@ -297,18 +268,13 @@ void UGameAssetManagerSubsystem::StartDataAssetLoading()
 
     if (!DataAssetLoadHandle.IsValid())
     {
-        UE_LOG(LogTemp, Error, TEXT("Phase 2a: Failed to start data asset loading!"));
         OnAllTeamAssetsLoaded();
     }
 }
 
 void UGameAssetManagerSubsystem::OnDataAssetsLoaded()
 {
-    UE_LOG(LogTemp, Log, TEXT("Phase 2a Complete: Data assets loaded. Starting phase 2b (inner assets)..."));
-
-    // 数据资产已加载完成，释放 2a 句柄（资产已被 2b 的引用链持有）
-    // 注意：不能立即释放，因为 2b 还需要访问这些资产的字段
-    // 将 2a 句柄保留到 TeamAssetLoadHandles 中，随 2b 一起分帧释放
+    // 2a 句柄随 2b 一起分帧释放
     if (DataAssetLoadHandle.IsValid())
     {
         TeamAssetLoadHandles.Add(DataAssetLoadHandle);
@@ -325,7 +291,6 @@ void UGameAssetManagerSubsystem::StartInnerAssetLoading()
     UDataTable* LoadedTable = GetCharacterInfoTable();
     if (!LoadedTable)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Phase 2b: CharacterInfoTable is null, skipping."));
         OnAllTeamAssetsLoaded();
         return;
     }
@@ -345,69 +310,44 @@ void UGameAssetManagerSubsystem::StartInnerAssetLoading()
 
     if (!CharManager)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Phase 2b: CharacterManagerSubsystem is null, skipping."));
         OnAllTeamAssetsLoaded();
         return;
     }
 
-    if (LoadedTable)
+    for (const FGameplayTag& CharTag : CurrentTeamToLoad)
     {
-        for (const FGameplayTag& CharTag : CurrentTeamToLoad)
+        FName RowName = CharManager->GetRowNameByTag(CharTag);
+        if (RowName == NAME_None) continue;
+
+        const FCharacterRegistryRow* Row = LoadedTable->FindRow<FCharacterRegistryRow>(RowName, TEXT(""));
+        if (Row)
         {
-            FName RowName = CharManager->GetRowNameByTag(CharTag);
-            if (RowName == NAME_None) continue;
+            // UI 资源
+            AssetPathsToLoad.Add(Row->HeadIcon.ToSoftObjectPath());
+            AssetPathsToLoad.Add(Row->SplashArt.ToSoftObjectPath());
 
-            const FCharacterRegistryRow* Row = LoadedTable->FindRow<FCharacterRegistryRow>(RowName, TEXT(""));
-            if (Row)
+            // 外观资产
+            if (UCharacterVisualDataAsset* VisualData = Row->VisualData.Get())
             {
-                // ==========================================
-                // UI 资产：从 FCharacterRegistryRow (DataTable) 加载
-                // SSOT 原则：UI 展示数据只在此处配置
-                // ==========================================
-                AssetPathsToLoad.Add(Row->HeadIcon.ToSoftObjectPath());
-                AssetPathsToLoad.Add(Row->SplashArt.ToSoftObjectPath());
+                AssetPathsToLoad.Add(VisualData->CharacterMesh.ToSoftObjectPath());
+                AssetPathsToLoad.Add(VisualData->AnimationBlueprint.ToSoftObjectPath());
+                AssetPathsToLoad.Add(VisualData->UpperBodyLayers.ToSoftObjectPath());
+                AssetPathsToLoad.Add(VisualData->WeaponBlueprint.ToSoftObjectPath());
+                AssetPathsToLoad.Add(VisualData->ClimbUpMontage.ToSoftObjectPath());
+                AssetPathsToLoad.Add(VisualData->GrappleMontage.ToSoftObjectPath());
+            }
 
-                // ==========================================
-                // 外观资产：从 UCharacterVisualDataAsset 加载
-                // 三层解耦：VisualData 通过 TSoftObjectPtr 桥梁引用
-                // 包含技能蒙太奇字典（AbilityMontages）的预加载
-                // ==========================================
-                if (UCharacterVisualDataAsset* VisualData = Row->VisualData.Get())
+            // 战斗资产
+            if (UCharacterCombatDataAsset* CombatData = Row->CombatData.Get())
+            {
+                for (const auto& TalentPair : CombatData->CharacterTalents)
                 {
-                    // 骨骼网格体
-                    AssetPathsToLoad.Add(VisualData->CharacterMesh.ToSoftObjectPath());
+                    const FTalentConfig& Talent = TalentPair.Value;
+                    AssetPathsToLoad.Add(Talent.Icon.ToSoftObjectPath());
 
-                    // 动画蓝图（TSoftClassPtr 的路径也是 FSoftObjectPath）
-                    AssetPathsToLoad.Add(VisualData->AnimationBlueprint.ToSoftObjectPath());
-
-                    // 动画层
-                    AssetPathsToLoad.Add(VisualData->UpperBodyLayers.ToSoftObjectPath());
-
-                    // 武器蓝图
-                    AssetPathsToLoad.Add(VisualData->WeaponBlueprint.ToSoftObjectPath());
-
-                    // 非战斗蒙太奇（攀爬、钩索等，直接在 VisualDataAsset 中配置）
-                    AssetPathsToLoad.Add(VisualData->ClimbUpMontage.ToSoftObjectPath());
-                    AssetPathsToLoad.Add(VisualData->GrappleMontage.ToSoftObjectPath());
-                }
-
-                // ==========================================
-                // 战斗资产：从 UCharacterCombatDataAsset 加载
-                // 三层解耦：CombatData 通过 TSoftObjectPtr 桥梁引用
-                // 连招蒙太奇直接在 ComboGraph 节点中配置
-                // ==========================================
-                if (UCharacterCombatDataAsset* CombatData = Row->CombatData.Get())
-                {
-                    for (const auto& TalentPair : CombatData->CharacterTalents)
+                    for (const auto& NodePair : Talent.ComboGraph)
                     {
-                        const FTalentConfig& Talent = TalentPair.Value;
-                        AssetPathsToLoad.Add(Talent.Icon.ToSoftObjectPath());
-
-                        // 预加载连招图中的蒙太奇
-                        for (const auto& NodePair : Talent.ComboGraph)
-                        {
-                            AssetPathsToLoad.Add(NodePair.Value.Montage.ToSoftObjectPath());
-                        }
+                        AssetPathsToLoad.Add(NodePair.Value.Montage.ToSoftObjectPath());
                     }
                 }
             }
@@ -417,12 +357,9 @@ void UGameAssetManagerSubsystem::StartInnerAssetLoading()
     TeamAssetLoadNum = AssetPathsToLoad.Num();
     if (TeamAssetLoadNum == 0)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Phase 2b: No inner assets to load."));
         OnAllTeamAssetsLoaded();
         return;
     }
-
-    UE_LOG(LogTemp, Log, TEXT("Phase 2b: Loading %d inner assets (Mesh/Montage/Icon/AnimBP)..."), TeamAssetLoadNum);
 
     for (const FSoftObjectPath& Path : AssetPathsToLoad)
     {
@@ -440,7 +377,6 @@ void UGameAssetManagerSubsystem::StartInnerAssetLoading()
         }
     }
 
-    // 如果有无效路径，检查是否已经满足完成条件
     if (CompletedAssetLoads + FailedAssetLoads >= TeamAssetLoadNum)
     {
         OnAllTeamAssetsLoaded();
@@ -458,28 +394,21 @@ void UGameAssetManagerSubsystem::OnSingleTeamAssetLoaded()
 
 void UGameAssetManagerSubsystem::OnAllTeamAssetsLoaded()
 {
-    // 注意：不在此时清空 TeamAssetLoadHandles！
-    // 句柄保持持有引用，直到 CleanupAfterLoad 分帧释放，防止资产在 OpenLevel 前被 GC 回收
+    // 句柄保持持有引用，直到 CleanupAfterLoad 分帧释放
     TeamAssetLoadNum = 0;
     CurrentLoadingPhase = ELoadingPhase::Complete;
-    UE_LOG(LogTemp, Log, TEXT("Phase 2 Complete: All team assets loaded."));
 
-    // 广播加载完成事件，由 GameFlowSubsystem 决定何时执行切图
     OnLoadComplete.Broadcast();
 }
 
-// ####################################################################
-// #                         清理辅助函数                              #
-// ####################################################################
+// --- 清理 ---
 
 void UGameAssetManagerSubsystem::CleanupAfterLoad()
 {
-    // UI 隐藏由 GameFlowSubsystem 统筹，AssetManager 只负责资源清理
     CurrentLoadingPhase = ELoadingPhase::None;
     CurrentTeamToLoad.Empty();
     CurrentLevelToLoad.Reset();
 
-    // 将所有待释放的句柄移入分帧释放队列
     PendingReleaseHandles.Append(MoveTemp(TeamAssetLoadHandles));
     TeamAssetLoadHandles.Empty();
 
@@ -489,7 +418,6 @@ void UGameAssetManagerSubsystem::CleanupAfterLoad()
         LevelLoadHandle.Reset();
     }
 
-    // 启动分帧释放定时器（每 0.05s 释放一批，约每秒 20 批）
     if (!PendingReleaseHandles.IsEmpty())
     {
         UWorld* World = GetWorld();
@@ -502,8 +430,8 @@ void UGameAssetManagerSubsystem::CleanupAfterLoad()
             World->GetTimerManager().SetTimer(
                 StaggeredReleaseTimerHandle,
                 FTimerDelegate::CreateUObject(this, &UGameAssetManagerSubsystem::ReleaseHandlesStaggered),
-                0.05f,   // 间隔 50ms
-                true      // 循环
+                0.05f,
+                true
             );
         }
     }
@@ -521,13 +449,11 @@ void UGameAssetManagerSubsystem::ReleaseHandlesStaggered()
         TSharedPtr<FStreamableHandle> Handle = PendingReleaseHandles.Pop();
         if (Handle.IsValid())
         {
-            // 显式取消请求，释放引用计数
             Handle->CancelHandle();
         }
         ReleasedThisFrame++;
     }
 
-    // 全部释放完毕
     if (PendingReleaseHandles.IsEmpty())
     {
         UWorld* World = GetWorld();
@@ -542,5 +468,4 @@ void UGameAssetManagerSubsystem::ReleaseHandlesStaggered()
 void UGameAssetManagerSubsystem::OnStaggeredReleaseComplete()
 {
     PendingReleaseHandles.Empty();
-    UE_LOG(LogTemp, Log, TEXT("GameAssetManagerSubsystem: Staggered release complete. All handles freed."));
 }

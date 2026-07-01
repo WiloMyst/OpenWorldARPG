@@ -3,11 +3,15 @@
 #include "GAS/Abilities/GA_MountVehicleBase.h"
 #include "AbilitySystemComponent.h"
 #include "Abilities/Tasks/AbilityTask_PlayMontageAndWait.h"
+#include "GAS/Tasks/AbilityTask_NavMoveTo.h"
 #include "Characters/PlayerCharacter.h"
 #include "Vehicles/WheeledVehiclePawnBase.h"
 #include "Core/PlayerControllers/OpenWorldPlayerController.h"
 #include "MotionWarpingComponent.h"
 #include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "Components/CapsuleComponent.h"
+#include "Kismet/KismetMathLibrary.h"
 
 UGA_MountVehicleBase::UGA_MountVehicleBase()
 {
@@ -16,6 +20,9 @@ UGA_MountVehicleBase::UGA_MountVehicleBase()
     bHasExecutedMount = false;
 }
 
+// ============================================================================
+// 阶段 1：ActivateAbility — 解析载具，启动 NavMesh 寻路
+// ============================================================================
 void UGA_MountVehicleBase::ActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, const FGameplayEventData* TriggerEventData)
 {
     bHasExecutedMount = false;
@@ -41,14 +48,85 @@ void UGA_MountVehicleBase::ActivateAbility(const FGameplayAbilitySpecHandle Hand
         return;
     }
 
-    // --- Motion Warping：设置吸附目标 ---
-    if (UMotionWarpingComponent* MotionWarping = PlayerChar->GetMotionWarpingComp())
+    // --- 阶段 1：NavMesh 寻路 (Approach) ---
+
+    // 获取车门交互位置
+    const FTransform InteractionTransform = TargetVehicle->GetInteractionTargetTransform_Implementation();
+    const FVector DoorLocation = InteractionTransform.GetLocation();
+
+    // 使用自定义 NavMoveTo Task 沿 NavMesh 寻路避障走向车门
+    NavMoveToTask = UAbilityTask_NavMoveTo::CreateNavMoveToTask(
+        this, DoorLocation, ApproachAcceptanceRadius);
+
+    if (NavMoveToTask)
     {
-        const FTransform InteractionTransform = TargetVehicle->GetInteractionTargetTransform_Implementation();
-        MotionWarping->AddOrUpdateWarpTargetFromLocation(WarpTargetName, InteractionTransform.GetLocation());
+        // 串联回调：到达 → OnApproachReached（阶段 2），失败 → OnApproachFailed（取消）
+        NavMoveToTask->OnTargetReached.AddDynamic(this, &UGA_MountVehicleBase::OnApproachReached);
+        NavMoveToTask->OnFailed.AddDynamic(this, &UGA_MountVehicleBase::OnApproachFailed);
+        NavMoveToTask->ReadyForActivation();
+    }
+    else
+    {
+        EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+    }
+}
+
+// ============================================================================
+// 阶段 1 回调：寻路失败
+// ============================================================================
+void UGA_MountVehicleBase::OnApproachFailed()
+{
+    // 寻路失败（无路径 / 被阻挡 / 超时），取消上车
+    EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);
+}
+
+// ============================================================================
+// 阶段 2：OnApproachReached — 转身对齐 + 物理绑定 + Motion Warping + 播放蒙太奇
+// ============================================================================
+void UGA_MountVehicleBase::OnApproachReached()
+{
+    APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(CurrentActorInfo->AvatarActor.Get());
+    if (!PlayerChar || !TargetVehicle)
+    {
+        EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);
+        return;
     }
 
-    // --- 播放上车蒙太奇 ---
+    // --- 2a：转身对齐 — 角色朝向车辆 ---
+    const FRotator TargetRot = UKismetMathLibrary::FindLookAtRotation(
+        PlayerChar->GetActorLocation(), TargetVehicle->GetActorLocation());
+    PlayerChar->SetActorRotation(FRotator(0.0f, TargetRot.Yaw, 0.0f));
+
+    // --- 2b：物理绑定 — Attach 到载具 Mesh，提前进入载具局部坐标系 ---
+    // 使用 KeepWorldTransform：角色保持当前世界位置（车门处），但后续随车辆移动
+    PlayerChar->AttachToComponent(
+        TargetVehicle->GetMesh(),
+        FAttachmentTransformRules::KeepWorldTransform);
+
+    // 临时关闭胶囊体碰撞，防止挤飞载具
+    PlayerChar->GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+    // 禁用移动组件，防止角色在动画期间受 CMC 干扰
+    if (UCharacterMovementComponent* CMC = PlayerChar->GetCharacterMovement())
+    {
+        CMC->StopMovementImmediately();
+        CMC->SetMovementMode(MOVE_None);
+    }
+
+    // --- 2c：Motion Warping — 动态跟随车门的 Component Warp Target ---
+    if (UMotionWarpingComponent* MotionWarping = PlayerChar->GetMotionWarpingComp())
+    {
+        // 关键：使用 AddOrUpdateWarpTargetFromComponent + bFollowComponent=true
+        // 使 Warp 目标随载具 Mesh 的 InteractionSocket 实时更新，
+        // 角色在动画期间与车门保持相对静止，即使车辆在移动也不会脱节
+        MotionWarping->AddOrUpdateWarpTargetFromComponent(
+            WarpTargetName,
+            TargetVehicle->GetMesh(),
+            TargetVehicle->GetInteractionSocketName(),
+            true /* bFollowComponent */);
+    }
+
+    // --- 2d：播放上车蒙太奇（阶段 3 的前置） ---
     if (MountMontage)
     {
         PlayMontageTask = UAbilityTask_PlayMontageAndWait::CreatePlayMontageAndWaitProxy(
@@ -64,7 +142,7 @@ void UGA_MountVehicleBase::ActivateAbility(const FGameplayAbilitySpecHandle Hand
         }
         else
         {
-            EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
+            EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, false);
         }
     }
     else
@@ -74,6 +152,9 @@ void UGA_MountVehicleBase::ActivateAbility(const FGameplayAbilitySpecHandle Hand
     }
 }
 
+// ============================================================================
+// 阶段 3：ExecuteMount — 交接控制权
+// ============================================================================
 void UGA_MountVehicleBase::OnMontageCompleted()
 {
     ExecuteMount();
@@ -119,10 +200,25 @@ void UGA_MountVehicleBase::OnMontageCancelled()
 
 void UGA_MountVehicleBase::EndAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateEndAbility, bool bWasCancelled)
 {
+    if (NavMoveToTask)
+    {
+        NavMoveToTask->EndTask();
+        NavMoveToTask = nullptr;
+    }
+
     if (PlayMontageTask)
     {
         PlayMontageTask->EndTask();
         PlayMontageTask = nullptr;
+    }
+
+    // 清理 Motion Warping 目标，防止残留
+    if (APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(ActorInfo->AvatarActor.Get()))
+    {
+        if (UMotionWarpingComponent* MotionWarping = PlayerChar->GetMotionWarpingComp())
+        {
+            MotionWarping->RemoveWarpTarget(WarpTargetName);
+        }
     }
 
     TargetVehicle = nullptr;

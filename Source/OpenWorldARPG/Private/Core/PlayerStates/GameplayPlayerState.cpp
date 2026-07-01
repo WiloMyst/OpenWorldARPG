@@ -12,13 +12,9 @@ void AGameplayPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
-	// 队伍角色数组仅同步给拥有此 PlayerState 的客户端
-	// 其他客户端不需要也不应持有别人的非激活角色引用
 	DOREPLIFETIME_CONDITION(AGameplayPlayerState, TeamCharacterActors, COND_OwnerOnly);
 	DOREPLIFETIME(AGameplayPlayerState, ActiveCharacterIndex);
 }
-
-// --- 队伍角色 Actor 管理 ---
 
 APlayerCharacter* AGameplayPlayerState::GetTeamCharacterByIndex(int32 Index) const
 {
@@ -71,13 +67,6 @@ void AGameplayPlayerState::AddTeamCharacter(APlayerCharacter* InCharacter)
 	}
 }
 
-// --- 激活角色索引 ---
-
-APlayerCharacter* AGameplayPlayerState::GetActiveCharacter() const
-{
-	return GetTeamCharacterByIndex(ActiveCharacterIndex);
-}
-
 void AGameplayPlayerState::SetActiveCharacterIndex(int32 NewIndex)
 {
 	if (HasAuthority())
@@ -85,15 +74,12 @@ void AGameplayPlayerState::SetActiveCharacterIndex(int32 NewIndex)
 		int32 OldIndex = ActiveCharacterIndex;
 		ActiveCharacterIndex = NewIndex;
 
-		// 服务器本地立即触发事件（OnRep 只在客户端触发）
 		if (OldIndex != NewIndex)
 		{
 			OnActiveCharacterIndexChanged.Broadcast(OldIndex, NewIndex);
 		}
 	}
 }
-
-// --- OnRep 回调 (客户端收到同步后，驱动本地 UI) ---
 
 void AGameplayPlayerState::OnRep_ActiveCharacterIndex(int32 OldIndex)
 {

@@ -38,7 +38,6 @@ void UGA_JumpBase::ActivateAbility(const FGameplayAbilitySpecHandle Handle, cons
         UE_LOG(LogTemp, Error, TEXT("[Jump] AvatarActor is not a Character! Cannot jump."));
     }
 
-    // 对应蓝图：监听停止跳跃事件
     if (StopJumpEventTag.IsValid())
     {
         WaitEventTask = UAbilityTask_WaitGameplayEvent::WaitGameplayEvent(this, StopJumpEventTag, nullptr, false, true);
@@ -63,7 +62,6 @@ void UGA_JumpBase::EndAbility(const FGameplayAbilitySpecHandle Handle, const FGa
     ACharacter* Character = Cast<ACharacter>(ActorInfo->AvatarActor.Get());
     if (Character)
     {
-        // 对应蓝图：停止跳跃
         Character->StopJumping();
     }
 

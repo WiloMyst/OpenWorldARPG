@@ -11,16 +11,19 @@ class UAnimMontage;
 class AWheeledVehiclePawnBase;
 
 /**
- * 下车能力。由载具 InputExitVehicle 发送 UnmountVehicleEventTag 激活。
+ * 下车能力。由载具 InputExitVehicle → Server_UnPossessVehicle 发送 UnmountVehicleEventTag 激活。
  *
- * 生命周期：
- * 1. 从 EventData.OptionalObject 解析目标载具
- * 2. 调用载具 FindSafeExitLocation 获取安全下车位置
- * 3. 调用 Controller->Server_UnPossessVehicle 执行 Possess 切换
- * 4. Controller 视角切回人后，播放跨出车门蒙太奇
- * 5. EndAbility
+ * 生命周期（延迟物理脱离）：
+ * 1. ActivateAbility：角色此时仍然 Attach 在车座上，在载具局部坐标系中播放下车蒙太奇，
+ *    天然保持与车辆的相对静止（即使车辆在移动）。
+ * 2. OnMontageCompleted / OnMontageInterrupted：
+ *    - 获取角色当前世界坐标（动画已将角色带到车外）
+ *    - 此时才调用 PlayerChar->EndDriving(FinalExitLocation) 执行真正的物理脱离
+ *      （DetachFromActor + 恢复碰撞 + 恢复移动模式）
+ * 3. EndAbility
  *
- * 注意：下车蒙太奇在角色身上播放（Possess 切换后角色已被控制器接管）
+ * 架构原则：控制权移交（Controller）与物理脱离（GA）解耦，
+ *           角色在车内完成下车动画后再解除与车辆的物理 Attach。
  */
 UCLASS(Abstract)
 class OPENWORLDARPG_API UGA_UnmountVehicleBase : public UGameplayAbility
@@ -37,6 +40,9 @@ protected:
     /** 下车蒙太奇（跨出车门） */
     UPROPERTY(EditDefaultsOnly, Category = "UnmountVehicle|Config")
     UAnimMontage* UnmountMontage;
+
+    /** 执行物理脱离：获取角色当前世界坐标，调用 EndDriving */
+    void ExecutePhysicalUnbind();
 
     // --- 蒙太奇回调 ---
 
@@ -55,4 +61,10 @@ protected:
 private:
     UPROPERTY()
     TObjectPtr<UAbilityTask_PlayMontageAndWait> PlayMontageTask;
+
+    /** 缓存目标载具（从角色的 Attachment Parent 获取） */
+    AWheeledVehiclePawnBase* TargetVehicle = nullptr;
+
+    /** 防止重复执行物理脱离 */
+    bool bHasUnbound = false;
 };

@@ -15,30 +15,35 @@ class OPENWORLDARPG_API APickableItemBase : public AActor, public IInteractableI
 
 public:
     APickableItemBase();
-
-    /** 编辑器构造脚本，属性变更时自动刷新模型。 */
     virtual void OnConstruction(const FTransform& Transform) override;
 
-    // --- IInteractableInterface 实现 ---
+    // --- 接口实现 (IInteractableInterface) ---
 
     virtual bool CanInteract_Implementation(ACharacter* InstigatorCharacter) const override;
     virtual void OnInteract_Implementation(ACharacter* InstigatorCharacter) override;
     virtual FTransform GetInteractionTargetTransform_Implementation() const override;
 
-    UFUNCTION(BlueprintCallable, Category = "Item")
+    // --- 公开接口 ---
+
     void InitializeItem(int32 InItemID, int32 InAmount);
+    void ApplyThrowPhysics(FVector Velocity);
+
+private:
+    // --- 内部逻辑 ---
+
+    void RefreshMeshFromID();
+
+public:
+    // --- 组件 ---
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UStaticMeshComponent* ItemMesh;
+
+    // --- 物品数据 ---
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item Data")
     int32 ItemID = 0;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item Data")
     int32 ItemAmount = 1;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    class UStaticMeshComponent* ItemMesh;
-
-    void ApplyThrowPhysics(FVector Velocity);
-
-private:
-    void RefreshMeshFromID();
 };

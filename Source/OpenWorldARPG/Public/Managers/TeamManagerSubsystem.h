@@ -11,16 +11,11 @@ class UCharacterManagerSubsystem;
 class APlayerCharacter;
 class AGameplayPlayerState;
 
-// --- 委托 ---
-
-/** 当前激活角色变化时广播（旧角色 TAG, 新角色 TAG） */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnActiveCharacterChanged, const FGameplayTag&, OldCharacterTag, const FGameplayTag&, NewCharacterTag);
-
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnTeamListUpdatedSignature);
 
 /**
  * 队伍管理子系统。缓存 PlayerState 同步数据，通过广播驱动 UI 刷新。
- * 角色切换经 PlayerController Server RPC 发送到服务器。
  */
 UCLASS()
 class OPENWORLDARPG_API UTeamManagerSubsystem : public ULocalPlayerSubsystem
@@ -33,34 +28,26 @@ public:
 
     // --- 初始化 ---
 
-    UFUNCTION(BlueprintCallable, Category = "Team Management|Initialization")
     void InitializeFromDataObject(UObject* InDataObject);
 
-    UFUNCTION(BlueprintCallable, Category = "Team Management")
+    // --- 队伍设置 ---
+
     bool SetCurrentTeam(const TArray<FGameplayTag>& NewTeamCharacterTags, int32 NewActiveCharacterIndex);
 
-    // --- 角色切换 (内部调用 Controller 的 Server RPC) ---
-    UFUNCTION(BlueprintCallable, Category = "Team Management")
+    // --- 角色切换 ---
+
     void SwitchToCharacterByIndex(int32 TeamIndex);
-
-    UFUNCTION(BlueprintCallable, Category = "Team Management")
     void SwitchToCharacterByTag(const FGameplayTag& CharacterTag);
-
-    UFUNCTION(BlueprintCallable, Category = "Team Management")
     void CycleToNextCharacter();
-
-    UFUNCTION(BlueprintPure, Category = "Team Management")
     bool IsCharacterSwitchable(int32 Index) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Team Management")
     void SetActiveCharacterIndex(int32 Index) { ActiveCharacterIndex = Index; }
 
-    // --- PlayerState OnRep 回调入口 ---
-    UFUNCTION(BlueprintCallable, Category = "Team Management|Network")
-    void OnRep_ActiveCharacterIndexFromServer(int32 NewActiveIndex);
+    // --- 网络回调 ---
 
-    UFUNCTION(BlueprintCallable, Category = "Team Management|Network")
+    void OnRep_ActiveCharacterIndexFromServer(int32 NewActiveIndex);
     void OnRep_TeamCharacterActorsFromServer(const TArray<APlayerCharacter*>& NewTeamActors);
+
+    // --- 事件绑定 ---
 
     void BindToPlayerStateEvents(AGameplayPlayerState* PlayerState);
 
@@ -70,7 +57,14 @@ public:
     UFUNCTION()
     void HandleTeamCharacterActorsChanged();
 
-    // --- 事件 ---
+    // --- 查询 ---
+
+    TArray<FGameplayTag> GetCurrentTeamCharacterTags() const { return CurrentTeamCharacters; }
+    FGameplayTag GetActiveCharacterTag() const { return CurrentTeamCharacters.IsValidIndex(ActiveCharacterIndex) ? CurrentTeamCharacters[ActiveCharacterIndex] : FGameplayTag::EmptyTag; }
+    int32 GetActiveCharacterIndex() const { return ActiveCharacterIndex; }
+
+public:
+    // --- 事件委托 ---
 
     UPROPERTY(BlueprintAssignable, Category = "Team Management|Events")
     FOnActiveCharacterChanged OnActiveCharacterChanged;
@@ -78,25 +72,18 @@ public:
     UPROPERTY(BlueprintAssignable, Category = "Team Management|Events")
     FOnTeamListUpdatedSignature OnTeamListUpdatedDelegate;
 
-    // --- 查询 ---
-
-    UFUNCTION(BlueprintPure, Category = "Team Management")
-    TArray<FGameplayTag> GetCurrentTeamCharacterTags() const { return CurrentTeamCharacters; }
-
-    UFUNCTION(BlueprintPure, Category = "Team Management")
-    FGameplayTag GetActiveCharacterTag() const { return CurrentTeamCharacters.IsValidIndex(ActiveCharacterIndex) ? CurrentTeamCharacters[ActiveCharacterIndex] : FGameplayTag::EmptyTag; }
-
-    UFUNCTION(BlueprintPure, Category = "Team Management")
-    int32 GetActiveCharacterIndex() const { return ActiveCharacterIndex; }
-
 protected:
+    // --- 缓存指针 ---
+
     UPROPERTY(BlueprintReadOnly, Category = "Team Management|Data")
     TObjectPtr<UCharacterManagerSubsystem> CharacterManager;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Team Management|Data")
+    TWeakObjectPtr<AGameplayPlayerState> BoundPlayerState;
+
+    // --- 数据 ---
+
+    UPROPERTY(BlueprintReadOnly, Category = "Team Management|Data")
     TArray<FGameplayTag> CurrentTeamCharacters;
 
     int32 ActiveCharacterIndex = -1;
-
-    TWeakObjectPtr<AGameplayPlayerState> BoundPlayerState;
 };

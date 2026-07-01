@@ -20,19 +20,25 @@ class OPENWORLDARPG_API ASelectableTargetActor : public AActor, public ITargetab
 
 public:
     ASelectableTargetActor();
-
-protected:
-    virtual void BeginPlay() override;
-
-public:
+    
     // --- ITargetableInterface 实现 ---
 
     virtual void OnSetAsTarget_Implementation() override;
     virtual void OnClearAsTarget_Implementation() override;
 
     // --- 视觉辅助 ---
-    UFUNCTION(BlueprintCallable, Category = "Targeting|Visuals")
     void OrientToScreen(USceneComponent* SceneCompToOrient);
+
+protected:
+    virtual void BeginPlay() override;
+    
+    // --- 重叠事件 ---
+    
+    UFUNCTION()
+    virtual void OnDetectSphereBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+
+    UFUNCTION()
+    virtual void OnDetectSphereEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
 
 protected:
     // --- 组件 ---
@@ -43,10 +49,4 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Targeting|Components")
     TObjectPtr<USphereComponent> DetectSphere;
 
-    // --- 重叠事件 ---
-    UFUNCTION()
-    virtual void OnDetectSphereBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
-
-    UFUNCTION()
-    virtual void OnDetectSphereEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
 };

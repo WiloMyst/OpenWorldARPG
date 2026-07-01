@@ -33,7 +33,6 @@ void UCloseGamePanelWidget::HandleCancelClicked()
 
 void UCloseGamePanelWidget::HandleConfirmClicked()
 {
-    // 对应蓝图的 "退出游戏 (Quit Game)" 节点
     APlayerController* SpecificPlayer = GetOwningPlayer();
     UKismetSystemLibrary::QuitGame(
         this,

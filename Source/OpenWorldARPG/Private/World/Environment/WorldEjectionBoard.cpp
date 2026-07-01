@@ -28,7 +28,7 @@ AWorldEjectionBoard::AWorldEjectionBoard()
     TriggerBox->SetCollisionResponseToAllChannels(ECR_Ignore);
     TriggerBox->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
 
-    // 2. 默认参数初始化 (对应蓝图里的硬编码值，但可以被子蓝图随意修改)
+    // 默认参数初始化
     LaunchVelocity = FVector(0.0f, 0.0f, 3000.0f);
     bXYOverride = true;
     bZOverride = true;

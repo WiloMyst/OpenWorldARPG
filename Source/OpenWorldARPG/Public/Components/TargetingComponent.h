@@ -9,12 +9,9 @@
 class ACharacter;
 class APlayerController;
 
-/** 当最优目标发生变化时广播 */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBestTargetChanged, AActor*, OldTarget, AActor*, NewTarget);
 
-/**
- * 视野目标选取组件。维护周围有效目标列表，基于摄像机朝向筛选最优目标。
- */
+/** 视野目标选取组件，基于摄像机朝向筛选最优目标。 */
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class OPENWORLDARPG_API UTargetingComponent : public UActorComponent
 {
@@ -26,18 +23,9 @@ public:
 
     // --- 目标管理 ---
 
-    UFUNCTION(BlueprintCallable, Category = "Targeting")
     void AddTarget(AActor* NewTarget);
-
-    UFUNCTION(BlueprintCallable, Category = "Targeting")
     void RemoveTarget(AActor* TargetToRemove);
-
-    /** 获取当前视野中最优目标 */
-    UFUNCTION(BlueprintPure, Category = "Targeting")
     AActor* GetBestTarget() const { return CurrentBestTarget; }
-
-    UPROPERTY(BlueprintAssignable, Category = "Targeting|Events")
-    FOnBestTargetChanged OnBestTargetChanged;
 
 protected:
     virtual void BeginPlay() override;
@@ -47,12 +35,21 @@ protected:
     float CalculateAngleDot(AActor* Target) const;
     AActor* FindBestTarget() const;
 
+public:
+    // --- 事件委托 ---
+
+    UPROPERTY(BlueprintAssignable, Category = "Targeting|Events")
+    FOnBestTargetChanged OnBestTargetChanged;
+
 protected:
     // --- 配置 ---
+
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Targeting|Config")
     float MinDotThreshold = 0.3f;
 
 private:
+    // --- 运行时状态 ---
+
     UPROPERTY()
     TObjectPtr<ACharacter> OwnerCharacter;
 

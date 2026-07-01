@@ -9,7 +9,7 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/TargetingComponent.h"
 #include "Components/WeaponManagerComponent.h"
-#include "Characters/PlayerCharacter.h"
+#include "Interfaces/ARPGCharacterInterface.h"
 #include "Data/CharacterVisualDataAsset.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "NiagaraFunctionLibrary.h"
@@ -44,11 +44,11 @@ void UGA_GrappleHookBase::ActivateAbility(const FGameplayAbilitySpecHandle Handl
         WeaponComp->WeaponToBack();
     }
 
-    // 1. 对应蓝图图1：获取最优钩索锚点
+    // 获取最优钩索锚点
     UTargetingComponent* GrappleComp = nullptr;
-    if (APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(CachedCharacter))
+    if (IARPGCharacterInterface* ARPGChar = Cast<IARPGCharacterInterface>(CachedCharacter))
     {
-        GrappleComp = PlayerChar->GetTargetingComponent();
+        GrappleComp = ARPGChar->GetTargetingComponent();
     }
     if (GrappleComp)
     {
@@ -63,14 +63,13 @@ void UGA_GrappleHookBase::ActivateAbility(const FGameplayAbilitySpecHandle Handl
 
     // 2. 状态 Tag 由 ActivationOwnedTags 管理，GA 不再通过 GE 重复注入
 
-    // 3. 对应蓝图图5：修正朝向
     OrientToTarget();
 
-    // 4. 对应蓝图图2：播放蒙太奇（从 VisualDataAsset->GrappleMontage 加载）
+    // 播放蒙太奇
     UAnimMontage* GrappleMontage = nullptr;
-    if (APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(CachedCharacter))
+    if (IARPGCharacterInterface* ARPGChar = Cast<IARPGCharacterInterface>(CachedCharacter))
     {
-        if (UCharacterVisualDataAsset* VisualData = PlayerChar->GetVisualDataAsset_Implementation())
+        if (UCharacterVisualDataAsset* VisualData = ARPGChar->GetVisualDataAsset())
         {
             if (!VisualData->GrappleMontage.IsNull())
             {
@@ -88,10 +87,9 @@ void UGA_GrappleHookBase::ActivateAbility(const FGameplayAbilitySpecHandle Handl
         MontageTask->ReadyForActivation();
     }
 
-    // 5. 对应蓝图图2与图3：生成绳索特效
     TriggerGrappleVFX();
 
-    // 6. 对应蓝图图4：触发 Hook Delay 延迟
+    // Hook Delay 延迟
     DelayTask = UAbilityTask_WaitDelay::WaitDelay(this, HookDelay);
     DelayTask->OnFinish.AddDynamic(this, &UGA_GrappleHookBase::OnDelayFinished);
     DelayTask->ReadyForActivation();

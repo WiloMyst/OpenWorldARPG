@@ -23,13 +23,12 @@ void AEnemyController::OnPossess(APawn* InPawn)
 {
     Super::OnPossess(InPawn);
 
-    // 1. 对应蓝图：运行行为树
     if (BehaviorTreeAsset)
     {
         RunBehaviorTree(BehaviorTreeAsset);
     }
 
-    // 2. 对应蓝图：向黑板写入巡逻坐标 (HomeLocation)
+    // 向黑板写入巡逻坐标
     if (AEnemyCharacter* EnemyChar = Cast<AEnemyCharacter>(InPawn))
     {
         if (UBlackboardComponent* BB = GetBlackboardComponent())
@@ -52,10 +51,8 @@ void AEnemyController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stim
     UBlackboardComponent* BB = GetBlackboardComponent();
     if (!BB || !Actor) return;
 
-    // 对应蓝图的分支：Successfully Sensed (是否成功感知)
     if (Stimulus.WasSuccessfullySensed())
     {
-        // 对应蓝图：类型转换为 BP_PlayerCharacter
         if (APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(Actor))
         {
             bool bShouldIgnore = false;
@@ -89,7 +86,6 @@ void AEnemyController::OnTargetPerceptionUpdated(AActor* Actor, FAIStimulus Stim
     }
     else
     {
-        // 对应蓝图 False 分支：清除黑板数值
         BB->ClearValue(TargetActorKeyName);
     }
 }

@@ -7,18 +7,35 @@
 #include "GA_MountVehicleBase.generated.h"
 
 class UAbilityTask_PlayMontageAndWait;
+class UAbilityTask_NavMoveTo;
 class UAnimMontage;
 class AWheeledVehiclePawnBase;
 
 /**
  * 上车能力。由载具 OnInteract 发送 MountVehicleEventTag 激活。
  *
- * 生命周期：
- * 1. 从 EventData.OptionalObject 解析目标载具
- * 2. 获取交互吸附 Transform（车门位置），通过 Motion Warping 将角色平滑移动到车门
- * 3. 播放"拉车门坐下"蒙太奇
- * 4. 蒙太奇结束时，调用 Controller->Server_PossessVehicle 执行 Possess 切换
- * 5. EndAbility
+ * 生命周期（3A 级三阶段流程，基于两个 AbilityTask 串联）：
+ *
+ * 1. Approach（NavMesh 寻路）：
+ *    - 解析目标载具，获取车门 InteractionTargetTransform
+ *    - 使用自定义 UAbilityTask_NavMoveTo 沿 NavMesh 寻路避障走向车门
+ *    - OnTargetReached → 进入阶段 2
+ *    - OnFailed → EndAbility 取消上车
+ *
+ * 2. Bind & Align（物理绑定 + 转身对齐 + Motion Warping）：
+ *    - 角色转身朝向车辆 (FindLookAtRotation)
+ *    - Attach 到载具 Mesh（KeepWorldTransform），提前进入载具局部坐标系
+ *    - 关闭胶囊体碰撞与移动，防止挤飞载具
+ *    - 使用 AddOrUpdateWarpTargetFromComponent + bFollowComponent=true
+ *      使 Motion Warping 动态跟随车门，播放"拉车门坐下"蒙太奇
+ *
+ * 3. Transfer（交接控制权）：
+ *    - 蒙太奇结束后调用 Server_PossessVehicle
+ *
+ * 回调流 (Callback Flow)：
+ *   ActivateAbility → NavMoveTo.OnTargetReached → OnApproachReached
+ *      → AttachToComponent + WarpTarget + PlayMontage
+ *      → Montage.OnCompleted → ExecuteMount → Server_PossessVehicle → EndAbility
  *
  * 架构原则：动画表现由 GA 控制，物理状态切换由 Controller Server RPC 执行
  */
@@ -42,6 +59,22 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "MountVehicle|Config")
     UAnimMontage* MountMontage;
 
+    /** 寻路可接受半径（cm），角色进入此范围即视为到达车门 */
+    UPROPERTY(EditDefaultsOnly, Category = "MountVehicle|Config", meta = (ClampMin = "10.0"))
+    float ApproachAcceptanceRadius = 80.0f;
+
+    // --- 阶段 1：寻路回调 ---
+
+    /** NavMoveTo 到达车门后触发阶段 2 */
+    UFUNCTION()
+    void OnApproachReached();
+
+    /** NavMoveTo 寻路失败，取消上车 */
+    UFUNCTION()
+    void OnApproachFailed();
+
+    // --- 阶段 3：交接控制权 ---
+
     /** 是否已执行过上车操作（防止 BlendOut 和 Completed 重复触发） */
     bool bHasExecutedMount = false;
 
@@ -63,6 +96,11 @@ protected:
     void OnMontageCancelled();
 
 private:
+    /** 阶段 1 NavMesh 寻路 Task */
+    UPROPERTY()
+    TObjectPtr<UAbilityTask_NavMoveTo> NavMoveToTask;
+
+    /** 阶段 2 蒙太奇 Task */
     UPROPERTY()
     TObjectPtr<UAbilityTask_PlayMontageAndWait> PlayMontageTask;
 

@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Weapons/WeaponBase.h"
 #include "Components/StaticMeshComponent.h"
@@ -14,7 +14,7 @@ AWeaponBase::AWeaponBase()
     RootComponent = WeaponMesh;
     WeaponMesh->SetCollisionProfileName(TEXT("NoCollision"));
 
-    // 4 个独立 Timeline，严格对应蓝图中的 4 个时间轴节点
+    // 4 个独立 Timeline
     SpawnMaskTimeline = CreateDefaultSubobject<UTimelineComponent>(TEXT("SpawnMaskTimeline"));
     OverallBrightnessTimeline = CreateDefaultSubobject<UTimelineComponent>(TEXT("OverallBrightnessTimeline"));
     PatternBrightnessTimeline = CreateDefaultSubobject<UTimelineComponent>(TEXT("PatternBrightnessTimeline"));

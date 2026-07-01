@@ -35,7 +35,7 @@ void UGA_MeleeAttackBase::ActivateAbility(const FGameplayAbilitySpecHandle Handl
 
     // 初始化状态：使用连招图入口节点
     // 通过 GA 蓝图中配置的 TalentTag 从 CombatData 字典中查询连招数据
-    const FTalentConfig* TalentConfig = CachedPlayer->FindTalentConfig(TalentTag);
+    const FTalentConfig* TalentConfig = CachedPlayer->GetTalentConfig(TalentTag);
     CurrentNodeName = TalentConfig ? TalentConfig->EntryNodeName : NAME_None;
     CurrentNode = nullptr;
     bComboWindowOpen = false;
@@ -59,7 +59,7 @@ void UGA_MeleeAttackBase::ExecuteAttack(FName NodeName)
     }
 
     // 2. 查找连招节点（通过 TalentTag 从 CombatData 字典中查询连招图）
-    const FTalentConfig* TalentConfig = CachedPlayer->FindTalentConfig(TalentTag);
+    const FTalentConfig* TalentConfig = CachedPlayer->GetTalentConfig(TalentTag);
     if (!TalentConfig)
     {
         EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);

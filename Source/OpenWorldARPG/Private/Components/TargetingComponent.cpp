@@ -22,10 +22,7 @@ void UTargetingComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
     if (!OwnerCharacter) return;
 
-    if (!OwnerCharacter->IsLocallyControlled())
-    {
-        return;
-    }
+    if (!OwnerCharacter->IsLocallyControlled()) return;
 
     AActor* BestTarget = FindBestTarget();
 
@@ -34,13 +31,11 @@ void UTargetingComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
         AActor* OldTarget = CurrentBestTarget;
         CurrentBestTarget = BestTarget;
 
-        // 通过接口调用旧目标的 OnClearAsTarget
         if (OldTarget && OldTarget->Implements<UTargetableInterface>())
         {
             ITargetableInterface::Execute_OnClearAsTarget(OldTarget);
         }
 
-        // 通过接口调用新目标的 OnSetAsTarget
         if (CurrentBestTarget && CurrentBestTarget->Implements<UTargetableInterface>())
         {
             ITargetableInterface::Execute_OnSetAsTarget(CurrentBestTarget);
@@ -67,13 +62,11 @@ void UTargetingComponent::RemoveTarget(AActor* TargetToRemove)
     {
         AvailableTargets.Remove(TargetToRemove);
 
-        // 安全保护
         if (CurrentBestTarget == TargetToRemove)
         {
             AActor* OldTarget = CurrentBestTarget;
             CurrentBestTarget = nullptr;
 
-            // 通过接口调用旧目标的 OnClearAsTarget
             if (OldTarget && OldTarget->Implements<UTargetableInterface>())
             {
                 ITargetableInterface::Execute_OnClearAsTarget(OldTarget);

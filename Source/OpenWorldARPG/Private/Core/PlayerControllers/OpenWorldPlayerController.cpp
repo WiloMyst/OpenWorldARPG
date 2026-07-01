@@ -103,17 +103,20 @@ void AOpenWorldPlayerController::Server_UnPossessVehicle_Implementation(FVector 
 
     FGameplayTag UnmountTag = Vehicle->GetUnmountVehicleEventTag();
 
+    // 1. 清除载具驾驶员引用并重置输入
     Vehicle->Driver = nullptr;
     Vehicle->ResetVehicleInputs();
 
+    // 2. 交接控制权：从载具切回角色（角色仍然 Attach 在车座上，不执行 EndDriving）
+    //    物理脱离（Detach / 恢复碰撞 / 恢复移动）由 GA_UnmountVehicleBase 在下车动画结束后延迟执行
     Client_PrepareForCameraBlend();
     UnPossess();
     Possess(PlayerChar);
 
-    PlayerChar->EndDriving(ExitLocation);
-
+    // 3. 视角平滑切回角色
     Client_BlendCameraToCharacter(PlayerChar, Vehicle);
 
+    // 4. 发送下车事件，激活 GA_UnmountVehicleBase（角色在载具局部坐标系中播放下车蒙太奇）
     if (UnmountTag.IsValid())
     {
         UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(PlayerChar, UnmountTag, FGameplayEventData());

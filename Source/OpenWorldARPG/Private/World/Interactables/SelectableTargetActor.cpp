@@ -5,7 +5,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Components/TargetingComponent.h"
-#include "Characters/PlayerCharacter.h"
+#include "Interfaces/ARPGCharacterInterface.h"
 
 ASelectableTargetActor::ASelectableTargetActor()
 {
@@ -55,9 +55,9 @@ void ASelectableTargetActor::OnDetectSphereBeginOverlap(UPrimitiveComponent* Ove
 {
     if (OtherActor)
     {
-        if (APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(OtherActor))
+        if (IARPGCharacterInterface* ARPGChar = Cast<IARPGCharacterInterface>(OtherActor))
         {
-            if (UTargetingComponent* TargetComp = PlayerChar->GetTargetingComponent())
+            if (UTargetingComponent* TargetComp = ARPGChar->GetTargetingComponent())
             {
                 TargetComp->AddTarget(this);
             }
@@ -69,9 +69,9 @@ void ASelectableTargetActor::OnDetectSphereEndOverlap(UPrimitiveComponent* Overl
 {
     if (OtherActor)
     {
-        if (APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(OtherActor))
+        if (IARPGCharacterInterface* ARPGChar = Cast<IARPGCharacterInterface>(OtherActor))
         {
-            if (UTargetingComponent* TargetComp = PlayerChar->GetTargetingComponent())
+            if (UTargetingComponent* TargetComp = ARPGChar->GetTargetingComponent())
             {
                 TargetComp->RemoveTarget(this);
             }

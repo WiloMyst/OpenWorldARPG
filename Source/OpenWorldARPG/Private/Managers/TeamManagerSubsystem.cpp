@@ -15,11 +15,7 @@ void UTeamManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
     CharacterManager = GetLocalPlayer()->GetSubsystem<UCharacterManagerSubsystem>();
     if (!CharacterManager)
     {
-        UE_LOG(LogTemp, Error, TEXT("TeamManagerSubsystem::Initialize - Failed to get CharacterManagerSubsystem."));
-    }
-    else
-    {
-        UE_LOG(LogTemp, Log, TEXT("TeamManagerSubsystem::Initialize - CharacterManagerSubsystem linked."));
+        UE_LOG(LogTemp, Error, TEXT("TeamManagerSubsystem: Failed to get CharacterManagerSubsystem."));
     }
 
     if (UWorld* World = GetWorld())
@@ -52,33 +48,23 @@ void UTeamManagerSubsystem::Deinitialize()
 void UTeamManagerSubsystem::InitializeFromDataObject(UObject* InDataObject)
 {
     UInitialArchiveData* ConfigData = Cast<UInitialArchiveData>(InDataObject);
-
-    if (!ConfigData)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("TeamManager InitializeFromDataObject: Cast Failed!"));
-        return;
-    }
+    if (!ConfigData) return;
 
     SetCurrentTeam(ConfigData->InitialTeamTags, ConfigData->InitialActiveCharacterIndex);
 }
 
 bool UTeamManagerSubsystem::SetCurrentTeam(const TArray<FGameplayTag>& NewTeamCharacterTags, int32 NewActiveCharacterIndex)
 {
-    if (!CharacterManager) return false;
+    if (!CharacterManager || NewTeamCharacterTags.IsEmpty()) return false;
 
     int32 SafeIndex = NewTeamCharacterTags.IsValidIndex(NewActiveCharacterIndex) ? NewActiveCharacterIndex : 0;
-
-    if (NewTeamCharacterTags.IsEmpty()) return false;
 
     CurrentTeamCharacters = NewTeamCharacterTags;
     SetActiveCharacterIndex(SafeIndex);
 
-    UE_LOG(LogTemp, Log, TEXT("Team set with %d members. Active Index: %d"), CurrentTeamCharacters.Num(), SafeIndex);
     OnTeamListUpdatedDelegate.Broadcast();
     return true;
 }
-
-// --- 角色切换请求 (通过 PlayerController 的 Server RPC) ---
 
 void UTeamManagerSubsystem::SwitchToCharacterByIndex(int32 TeamIndex)
 {
@@ -89,7 +75,6 @@ void UTeamManagerSubsystem::SwitchToCharacterByIndex(int32 TeamIndex)
         if (AGameplayPlayerController* PC = Cast<AGameplayPlayerController>(GetLocalPlayer()->GetPlayerController(World)))
         {
             PC->Server_SwitchCharacter(TeamIndex);
-            UE_LOG(LogTemp, Log, TEXT("TeamManager: 通过 Server RPC 请求切换到索引 %d 的角色"), TeamIndex);
             return;
         }
     }
@@ -126,25 +111,18 @@ bool UTeamManagerSubsystem::IsCharacterSwitchable(int32 Index) const
     if (!CurrentTeamCharacters.IsValidIndex(Index) || Index == ActiveCharacterIndex) return false;
 
     const FGameplayTag& CharacterTag = CurrentTeamCharacters[Index];
-    if (!CharacterTag.IsValid()) return false;
-
-    return true;
+    return CharacterTag.IsValid();
 }
-
-// --- PlayerState OnRep 回调 (由 GameplayPlayerState 调用) ---
 
 void UTeamManagerSubsystem::OnRep_ActiveCharacterIndexFromServer(int32 NewActiveIndex)
 {
     int32 OldIndex = ActiveCharacterIndex;
     ActiveCharacterIndex = NewActiveIndex;
 
-    // 广播激活角色变化事件，驱动本地 UI 刷新
     FGameplayTag OldTag = CurrentTeamCharacters.IsValidIndex(OldIndex) ? CurrentTeamCharacters[OldIndex] : FGameplayTag::EmptyTag;
     FGameplayTag NewTag = CurrentTeamCharacters.IsValidIndex(NewActiveIndex) ? CurrentTeamCharacters[NewActiveIndex] : FGameplayTag::EmptyTag;
 
     OnActiveCharacterChanged.Broadcast(OldTag, NewTag);
-
-    UE_LOG(LogTemp, Log, TEXT("TeamManager: OnRep_ActiveCharacterIndex - 索引 %d -> %d"), OldIndex, NewActiveIndex);
 }
 
 void UTeamManagerSubsystem::OnRep_TeamCharacterActorsFromServer(const TArray<APlayerCharacter*>& NewTeamActors)
@@ -164,8 +142,6 @@ void UTeamManagerSubsystem::OnRep_TeamCharacterActorsFromServer(const TArray<APl
     {
         CurrentTeamCharacters = MoveTemp(UpdatedTags);
         OnTeamListUpdatedDelegate.Broadcast();
-
-        UE_LOG(LogTemp, Log, TEXT("TeamManager: OnRep_TeamCharacterActors - 队伍成员已更新，共 %d 个"), CurrentTeamCharacters.Num());
     }
 }
 
@@ -180,8 +156,6 @@ void UTeamManagerSubsystem::BindToPlayerStateEvents(AGameplayPlayerState* Player
         this, &UTeamManagerSubsystem::HandleTeamCharacterActorsChanged);
 
     BoundPlayerState = PlayerState;
-
-    UE_LOG(LogTemp, Log, TEXT("TeamManager: 已绑定到 PlayerState 事件"));
 }
 
 void UTeamManagerSubsystem::HandleActiveCharacterIndexChanged(int32 OldIndex, int32 NewIndex)

@@ -14,39 +14,32 @@ void UHeroUIExtensionComponent::BindToActor(AActor* InOwner)
 {
     if (!InOwner) return;
 
-    // 先解绑旧委托
     UnbindAll();
 
-    // 绑定 ASC
     if (UAbilitySystemComponent* ASC = InOwner->FindComponentByClass<UAbilitySystemComponent>())
     {
         CachedASC = ASC;
 
-        // 血量属性
         HealthAttrHandle = ASC->GetGameplayAttributeValueChangeDelegate(UAS_Player::GetHealthAttribute())
             .AddUObject(this, &UHeroUIExtensionComponent::OnHealthAttributeChanged);
 
         MaxHealthAttrHandle = ASC->GetGameplayAttributeValueChangeDelegate(UAS_Player::GetMaxHealthAttribute())
             .AddUObject(this, &UHeroUIExtensionComponent::OnMaxHealthAttributeChanged);
 
-        // 瞄准 Tag
         if (AimingStateTag.IsValid())
         {
             AimingTagHandle = ASC->RegisterGameplayTagEvent(AimingStateTag, EGameplayTagEventType::NewOrRemoved)
                 .AddUObject(this, &UHeroUIExtensionComponent::OnAimingTagChanged);
         }
 
-        // 初始化当前血量
         CurrentHealth = ASC->GetNumericAttribute(UAS_Player::GetHealthAttribute());
         CurrentMaxHealth = ASC->GetNumericAttribute(UAS_Player::GetMaxHealthAttribute());
         bIsAiming = ASC->HasMatchingGameplayTag(AimingStateTag);
 
-        // 首次广播
         UpdateHealthBroadcast();
         OnAimingStateChanged.Broadcast(bIsAiming);
     }
 
-    // 绑定交互组件
     if (UInteractionComponent* InteractComp = InOwner->FindComponentByClass<UInteractionComponent>())
     {
         CachedInteractionComp = InteractComp;

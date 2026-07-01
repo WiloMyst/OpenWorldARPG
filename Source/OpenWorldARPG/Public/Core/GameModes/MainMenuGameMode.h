@@ -20,9 +20,8 @@ class OPENWORLDARPG_API AMainMenuGameMode : public AOpenWorldARPGGameModeBase
     GENERATED_BODY()
 
 public:
-    /** 获取目标关卡软引用 */
     UFUNCTION(BlueprintPure, Category = "Game Mode|Config")
-    TSoftObjectPtr<UWorld> GetTargetLevelToLoad() const;
+    TSoftObjectPtr<UWorld> GetTargetLevelToLoad() const { return TargetLevelToLoad; }
 
 protected:
     UPROPERTY(EditDefaultsOnly, Category = "Config")

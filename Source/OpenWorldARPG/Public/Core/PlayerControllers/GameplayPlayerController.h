@@ -46,7 +46,7 @@ protected:
     void Input_JumpStop();
 
     // --- 交互 ---
-    void Input_PickUp();
+    void Input_Interact();
 
     // --- 队伍切换 ---
     void Input_Switch1() { HandleSwitchCharacterInput(0); }
@@ -138,7 +138,7 @@ protected:
     TObjectPtr<UInputAction> IA_Walk;
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
-    TObjectPtr<UInputAction> IA_PickUp;
+    TObjectPtr<UInputAction> IA_Interact;
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
     TObjectPtr<UInputAction> IA_Switch_1;

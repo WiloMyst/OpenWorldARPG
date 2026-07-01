@@ -20,20 +20,25 @@ class AOpenWorldARPGCharacter : public ACharacter, public IGenericTeamAgentInter
 public:
 	AOpenWorldARPGCharacter(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
 
+	// --- 接口实现 (IGenericTeamAgentInterface / ICombatInterface) ---
+
+	virtual FGenericTeamId GetGenericTeamId() const override { return TeamId; }
 	virtual void HandleDeath_Implementation() override;
 	virtual void HandleRevive_Implementation() override;
 	virtual UWeaponManagerComponent* GetWeaponManagerComponent_Implementation() const override { return nullptr; }
 
-	UFUNCTION(BlueprintCallable, Category = "Character|Movement")
+	// --- 移动修正 ---
+
 	void CorrectPawnOrient();
 
-	/** 是否已经执行过死亡处理，防止重入 */
+public:
+	// --- 状态 ---
+
 	bool bIsDead = false;
 
 protected:
+	// --- AI ---
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
 	FGenericTeamId TeamId;
-
-	virtual FGenericTeamId GetGenericTeamId() const override;
 };
-

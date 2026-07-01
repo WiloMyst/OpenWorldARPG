@@ -10,12 +10,15 @@
 #include "Kismet/KismetMathLibrary.h"
 #include "Animation/AnimInstance.h"
 
-// ============================================================================
-// 构造函数 & 初始化
-// ============================================================================
-
 UOpenWorldARPGCharacterMovementComponent::UOpenWorldARPGCharacterMovementComponent()
 {
+}
+
+void UOpenWorldARPGCharacterMovementComponent::BeginPlay()
+{
+	Super::BeginPlay();
+	DefaultGravityScale = GravityScale;
+	DefaultAirControl = AirControl;
 }
 
 void UOpenWorldARPGCharacterMovementComponent::CacheOwnerReferences()
@@ -27,25 +30,8 @@ void UOpenWorldARPGCharacterMovementComponent::CacheOwnerReferences()
 	}
 }
 
-void UOpenWorldARPGCharacterMovementComponent::BeginPlay()
-{
-	Super::BeginPlay();
-
-	// 缓存 GravityScale 和 AirControl 的默认值，供非对称重力逻辑恢复使用
-	DefaultGravityScale = GravityScale;
-	DefaultAirControl = AirControl;
-}
-
 // ============================================================================
-// 引擎重写 - 生命周期
-//
-// 引擎执行管线：
-//   TickComponent
-//     → UpdateCharacterStateBeforeMovement  ← 状态检测（Falling→Climbing 等）
-//     → PerformMovement
-//         → PhysStep → PhysCustom           ← 物理模拟
-//     → UpdateCharacterStateAfterMovement
-//   OnMovementModeChanged                    ← 模式切换回调（Tag/参数恢复）
+// 引擎重写
 // ============================================================================
 
 void UOpenWorldARPGCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float DeltaSeconds)
@@ -55,20 +41,11 @@ void UOpenWorldARPGCharacterMovementComponent::UpdateCharacterStateBeforeMovemen
 	ACharacter* Char = CachedOwnerCharacter.Get();
 	if (!Char) return;
 
-	// ==========================================
-	// 1. Falling 状态：检测前方墙壁，尝试进入攀爬
-	//    条件：有输入方向 + 前方有可攀爬墙壁 + 输入朝向墙壁
-	// ==========================================
+	// Falling：非对称重力 + 攀爬检测
 	if (MovementMode == MOVE_Falling)
 	{
-		// ==========================================
-		// 非对称重力：基于 Velocity.Z 划分上升/下落阶段
-		// 上升阶段：正常重力 + 允许空中控制与转身
-		// 下落阶段：重力倍率增加 + 剥夺空中控制 + 锁死朝向
-		// ==========================================
 		if (Velocity.Z > 0.0f)
 		{
-			// 上升阶段
 			GravityScale = RisingGravityScale;
 			AirControl = RisingAirControl;
 			RotationRate = FRotator(0.0f, RisingRotationRate, 0.0f);
@@ -76,71 +53,45 @@ void UOpenWorldARPGCharacterMovementComponent::UpdateCharacterStateBeforeMovemen
 		}
 		else
 		{
-			// 下落阶段
 			GravityScale = FallingGravityScale;
 			AirControl = FallingAirControl;
 			bOrientRotationToMovement = false;
 		}
-
 		CheckFallingToClimb();
 	}
 
-	// ==========================================
-	// 1b. Walking 状态：地面走墙时检测前方可攀爬墙壁
-	//     与空中检测逻辑相同：检测到可攀爬墙壁 → 发送 TryClimb Event
-	// ==========================================
+	// Walking：走墙攀爬检测
 	if (MovementMode == MOVE_Walking || MovementMode == MOVE_NavWalking)
 	{
 		CheckGroundedToClimb();
 	}
 
-	// ==========================================
-	// 1c. 移动状态 Tag 管理（每帧更新）
-	//     根据玩家输入向量判断移动意愿，排除移动平台和外力影响
-	// ==========================================
+	// 移动状态 Tag（根据输入意愿）
 	if (CachedASC && MovingTag.IsValid())
 	{
-		float InputMagnitude = Acceleration.Size2D();
-		bool bHasMovementInput = InputMagnitude > MovingSpeedThreshold;
-
+		bool bHasMovementInput = Acceleration.Size2D() > MovingSpeedThreshold;
 		if (bHasMovementInput)
-		{
 			CachedASC->AddLooseGameplayTag(MovingTag);
-		}
 		else
-		{
 			CachedASC->RemoveLooseGameplayTag(MovingTag);
-		}
 	}
 
-	// ==========================================
-	// 2. Climbing 状态：执行攀爬期间的持续检测
-	//    顺序：落地检测 > 墙角检测 > 法线更新 > 翻越检测
-	//    每一步都可能改变当前模式，所以需要检查是否仍在 Climbing
-	// ==========================================
+	// Climbing：持续检测（落地 > 墙角 > 法线更新 > 翻越）
 	if (MovementMode == MOVE_Custom && static_cast<ECustomMovementMode>(CustomMovementMode) == ECustomMovementMode::Climbing)
 	{
-		// 2a. 攀爬转地面（优先级最高：已经到地面了就不需要其他检测）
 		CheckClimbToGround();
-
-		// 如果已经切换到 Walking，跳过后续检测
 		if (MovementMode != MOVE_Custom) return;
 
-		// 2b. 墙角过渡检测
 		CheckCornerTransition();
-
-		// 如果已经切换到 CornerTransition，跳过后续检测
 		if (MovementMode != MOVE_Custom
 			|| static_cast<ECustomMovementMode>(CustomMovementMode) != ECustomMovementMode::Climbing) return;
 
-		// 2c. 更新墙面法线（确保角色始终贴合墙壁）
 		FHitResult ChestHit, HeadHit;
 		if (PerformClimbTraces(FVector::ZeroVector, ChestHit, HeadHit))
 		{
 			ClimbWallNormal = ChestHit.Normal;
 		}
 
-		// 2d. 翻越检测（优先级最低：只有其他条件都满足时才检测）
 		CheckAndClimbUp();
 	}
 }
@@ -172,11 +123,7 @@ void UOpenWorldARPGCharacterMovementComponent::PhysCustom(float DeltaTime, int32
 
 void UOpenWorldARPGCharacterMovementComponent::OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode)
 {
-	// ==========================================
 	// 离开自定义模式时恢复物理参数
-	// 无论是因为 GA 调用 Exit，还是因为引擎自动切换（如着地），
-	// 都必须恢复原始物理参数，防止 GravityScale 等永久丢失
-	// ==========================================
 	bool bWasGliding = (PreviousMovementMode == MOVE_Custom && static_cast<ECustomMovementMode>(PreviousCustomMode) == ECustomMovementMode::Gliding);
 	bool bIsStillGliding = (MovementMode == MOVE_Custom && static_cast<ECustomMovementMode>(CustomMovementMode) == ECustomMovementMode::Gliding);
 
@@ -199,42 +146,33 @@ void UOpenWorldARPGCharacterMovementComponent::OnMovementModeChanged(EMovementMo
 		bIsFastSwimming = false;
 	}
 
-	// 非对称重力恢复：如果之前是下落状态，且现在不再是下落状态（比如落地、攀爬等），恢复默认参数
-	bool bWasFalling = (PreviousMovementMode == MOVE_Falling);
-	bool bIsStillFalling = (MovementMode == MOVE_Falling);
-	if (bWasFalling && !bIsStillFalling)
+	// 非对称重力恢复
+	if (PreviousMovementMode == MOVE_Falling && MovementMode != MOVE_Falling)
 	{
 		GravityScale = DefaultGravityScale;
 		AirControl = DefaultAirControl;
 		bOrientRotationToMovement = true;
-		// RotationRate 的恢复由下方 Walking 状态分支覆盖，此处无需重复处理
 	}
 
 	Super::OnMovementModeChanged(PreviousMovementMode, PreviousCustomMode);
 
-	// ==========================================
-	// GAS Tag 映射：CMC 管理被动运动状态 Tag
-	// ==========================================
+	// GAS Tag 映射
 	if (CachedASC)
 	{
-		// 1. 清除被动运动状态 Tags
-		if (AirborneTag.IsValid())  CachedASC->RemoveLooseGameplayTag(AirborneTag);
-		if (FallingTag.IsValid())   CachedASC->RemoveLooseGameplayTag(FallingTag);
-		if (SwimmingTag.IsValid())  CachedASC->RemoveLooseGameplayTag(SwimmingTag);
-		if (FastSwimmingTag.IsValid()) CachedASC->RemoveLooseGameplayTag(FastSwimmingTag);
-		if (MovingTag.IsValid())    CachedASC->RemoveLooseGameplayTag(MovingTag);
+		if (AirborneTag.IsValid())      CachedASC->RemoveLooseGameplayTag(AirborneTag);
+		if (FallingTag.IsValid())       CachedASC->RemoveLooseGameplayTag(FallingTag);
+		if (SwimmingTag.IsValid())      CachedASC->RemoveLooseGameplayTag(SwimmingTag);
+		if (FastSwimmingTag.IsValid())  CachedASC->RemoveLooseGameplayTag(FastSwimmingTag);
+		if (MovingTag.IsValid())        CachedASC->RemoveLooseGameplayTag(MovingTag);
 
-		// 2. 根据 MovementMode 注入当前被动状态 Tag
 		if (MovementMode == MOVE_Walking || MovementMode == MOVE_NavWalking)
 		{
 			AirControl = 0.0f;
 			RotationRate = GroundedRotationRate;
 			bOrientRotationToMovement = true;
 
-			// 落地时记录安全位置
 			UpdateLastSafeLocation();
 
-			// 从空中落地时发送停止滑翔事件
 			if (PreviousMovementMode == MOVE_Falling || PreviousMovementMode == MOVE_Custom)
 			{
 				if (StopGlideEventTag.IsValid() && CachedOwnerCharacter)
@@ -267,39 +205,23 @@ void UOpenWorldARPGCharacterMovementComponent::OnMovementModeChanged(EMovementMo
 		}
 	}
 
-	// 广播事件
 	OnMovementModeChangedDelegate.Broadcast(PreviousMovementMode, MovementMode.GetValue(), PreviousCustomMode, CustomMovementMode);
 }
 
 // ============================================================================
-// 通用状态查询
-// ============================================================================
-
-bool UOpenWorldARPGCharacterMovementComponent::IsFalling() const { return MovementMode == MOVE_Falling; }
-bool UOpenWorldARPGCharacterMovementComponent::IsGrounded() const { return MovementMode == MOVE_Walking || MovementMode == MOVE_NavWalking; }
-
-// ============================================================================
-// 攀爬模块
-//
-// 组织顺序：公开接口 → 状态检测 → 状态转换 → 物理模拟 → 辅助
-// ============================================================================
-
-// ------------------------------------
 // 攀爬 - 公开接口
-// ------------------------------------
+// ============================================================================
 
 void UOpenWorldARPGCharacterMovementComponent::TryClimb()
 {
 	ACharacter* Char = CachedOwnerCharacter.Get();
 	if (!Char) return;
 
-	// 只在地面或下落状态下允许尝试攀爬
 	if (!IsGrounded() && !IsFalling()) return;
 
 	FHitResult ChestHit;
 	if (DetectClimbableWall(ChestHit))
 	{
-		// 检测到可攀爬墙壁，发送 Event 让 GA 决定是否进入攀爬
 		if (TryClimbEventTag.IsValid())
 		{
 			FGameplayEventData Payload;
@@ -310,13 +232,29 @@ void UOpenWorldARPGCharacterMovementComponent::TryClimb()
 	}
 }
 
+void UOpenWorldARPGCharacterMovementComponent::EnterClimb(const FHitResult& WallHit)
+{
+	ACharacter* Char = CachedOwnerCharacter.Get();
+	if (!Char) return;
+
+	ClimbWallNormal = WallHit.Normal;
+
+	Velocity = FVector::ZeroVector;
+	SetMovementMode(MOVE_Custom, static_cast<uint8>(ECustomMovementMode::Climbing));
+	bOrientRotationToMovement = false;
+
+	const FRotator TargetRot = UKismetMathLibrary::MakeRotFromX(-WallHit.Normal);
+	const FRotator FinalRot = FRotator(TargetRot.Pitch, TargetRot.Yaw, 0.0f);
+	const FVector TargetLoc = Char->GetActorLocation() + FVector(0.0f, 0.0f, WallSnapZOffset);
+	SetClimbSnapTarget(TargetLoc, FinalRot, WallSnapTime);
+}
+
 void UOpenWorldARPGCharacterMovementComponent::ExitClimb()
 {
 	ACharacter* Char = CachedOwnerCharacter.Get();
 	if (!Char) return;
 
 	ClearClimbState();
-
 	SetMovementMode(MOVE_Falling);
 	bOrientRotationToMovement = true;
 
@@ -324,30 +262,9 @@ void UOpenWorldARPGCharacterMovementComponent::ExitClimb()
 	Char->SetActorRotation(FRotator(0.0f, CurrentRot.Yaw, 0.0f));
 }
 
-void UOpenWorldARPGCharacterMovementComponent::DoWallEject()
-{
-	if (!IsClimbing()) return;
-
-	// 计算反冲力：沿墙面法线向外 + 向上
-	const FVector EjectVelocity = (ClimbWallNormal * WallEjectHorizontalSpeed) + (FVector::UpVector * WallEjectVerticalSpeed);
-
-	// 退出攀爬状态（会清理攀爬状态并切换到 Falling）
-	ExitClimb();
-
-	// 赋予脱墙速度
-	Velocity = EjectVelocity;
-
-	// 强制更新组件速度
-	UpdateComponentVelocity();
-}
-
 void UOpenWorldARPGCharacterMovementComponent::TryClimbUp()
 {
-	ACharacter* Char = CachedOwnerCharacter.Get();
-	if (!Char) return;
-
-	if (!IsClimbing()) return;
-
+	if (!CachedOwnerCharacter.Get() || !IsClimbing()) return;
 	CheckAndClimbUp();
 }
 
@@ -357,17 +274,57 @@ void UOpenWorldARPGCharacterMovementComponent::FinishClimbUp()
 
 	bIsClimbingUp = false;
 	ClearClimbState();
-
-	// 恢复到下落模式
 	SetMovementMode(MOVE_Falling);
 	bOrientRotationToMovement = true;
 
-	ACharacter* Char = CachedOwnerCharacter.Get();
-	if (Char)
+	if (ACharacter* Char = CachedOwnerCharacter.Get())
 	{
 		FRotator CurrentRot = Char->GetActorRotation();
 		Char->SetActorRotation(FRotator(0.0f, CurrentRot.Yaw, 0.0f));
 	}
+}
+
+void UOpenWorldARPGCharacterMovementComponent::DoWallEject()
+{
+	if (!IsClimbing()) return;
+
+	const FVector EjectVelocity = (ClimbWallNormal * WallEjectHorizontalSpeed) + (FVector::UpVector * WallEjectVerticalSpeed);
+	ExitClimb();
+	Velocity = EjectVelocity;
+	UpdateComponentVelocity();
+}
+
+bool UOpenWorldARPGCharacterMovementComponent::DetectClimbableWall(FHitResult& OutChestHit)
+{
+	ACharacter* Char = CachedOwnerCharacter.Get();
+	if (!Char) return false;
+	if (Acceleration.IsNearlyZero()) return false;
+
+	FHitResult HeadHit;
+	if (PerformClimbTraces(FVector::ZeroVector, OutChestHit, HeadHit))
+	{
+		if (OutChestHit.GetActor() && OutChestHit.GetActor()->ActorHasTag(UnclimbableActorTag)) return false;
+		if (!IsWallClimbable(OutChestHit.Normal)) return false;
+
+		float DotResult = FVector::DotProduct(Acceleration, OutChestHit.Normal);
+		if (DotResult < MinInputDotProduct)
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+FTransform UOpenWorldARPGCharacterMovementComponent::CalculateClimbWarpTarget(const FHitResult& WallHit) const
+{
+	ACharacter* Char = CachedOwnerCharacter.Get();
+	if (!Char || !WallHit.bBlockingHit) return FTransform::Identity;
+
+	const FVector TargetLocation = WallHit.Location + WallHit.Normal * TargetWallDistance;
+	const FRotator TargetRotation = UKismetMathLibrary::MakeRotFromX(-WallHit.Normal);
+
+	return FTransform(TargetRotation, TargetLocation, FVector::OneVector);
 }
 
 bool UOpenWorldARPGCharacterMovementComponent::IsClimbing() const
@@ -383,16 +340,14 @@ bool UOpenWorldARPGCharacterMovementComponent::IsInCornerTransition() const
 		&& static_cast<ECustomMovementMode>(CustomMovementMode) == ECustomMovementMode::ClimbingCornerTransition;
 }
 
-// ------------------------------------
-// 攀爬 - 状态检测 (由 UpdateCharacterStateBeforeMovement 调用)
-// ------------------------------------
+// ============================================================================
+// 攀爬 - 状态检测
+// ============================================================================
 
 void UOpenWorldARPGCharacterMovementComponent::CheckFallingToClimb()
 {
 	ACharacter* Char = CachedOwnerCharacter.Get();
-	if (!Char) return;
-
-	if (!Char->IsLocallyControlled()) return;
+	if (!Char || !Char->IsLocallyControlled()) return;
 
 	if (Acceleration.IsNearlyZero())
 	{
@@ -439,9 +394,7 @@ void UOpenWorldARPGCharacterMovementComponent::CheckFallingToClimb()
 void UOpenWorldARPGCharacterMovementComponent::CheckGroundedToClimb()
 {
 	ACharacter* Char = CachedOwnerCharacter.Get();
-	if (!Char) return;
-
-	if (!Char->IsLocallyControlled()) return;
+	if (!Char || !Char->IsLocallyControlled()) return;
 
 	FHitResult ChestHit;
 	if (DetectClimbableWall(ChestHit))
@@ -480,15 +433,9 @@ void UOpenWorldARPGCharacterMovementComponent::CheckClimbToGround()
 	if (GetWorld()->LineTraceSingleByChannel(HitResult, Start, End, ClimbTraceChannel, Params)
 		&& HitResult.bBlockingHit)
 	{
-		// 计算角色双脚离地高度
 		const float FeetHeightAboveGround = HitResult.Distance - CapsuleHalfHeight;
+		if (FeetHeightAboveGround < MinClimbHeightAboveGround) return;
 
-		// 只有双脚离地超过最小高度时才触发攀爬转地面
-		// 防止在墙根处刚进入攀爬就被判定为"已到地面"而退出，导致鬼畜
-		if (FeetHeightAboveGround < MinClimbHeightAboveGround)
-		{
-			return;
-		}
 		if (ClimbStopEventTag.IsValid())
 		{
 			UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(Char, ClimbStopEventTag, FGameplayEventData());
@@ -500,15 +447,11 @@ void UOpenWorldARPGCharacterMovementComponent::CheckCornerTransition()
 {
 	ACharacter* Char = CachedOwnerCharacter.Get();
 	if (!Char || ClimbWallNormal.IsNearlyZero()) return;
-
-	// 使用 CMC 内部的 Acceleration 获取横向输入方向
 	if (Acceleration.IsNearlyZero()) return;
 
-	// 计算横向输入分量（角色右方向上的投影）
 	const FVector ActorRight = Char->GetActorRightVector();
 	const float LateralInput = FVector::DotProduct(Acceleration, ActorRight);
 	if (FMath::IsNearlyZero(LateralInput)) return;
-
 	if (IsInCornerTransition()) return;
 
 	const FVector ActorLocation = Char->GetActorLocation();
@@ -545,7 +488,6 @@ void UOpenWorldARPGCharacterMovementComponent::CheckAndClimbUp()
 	ACharacter* Char = CachedOwnerCharacter.Get();
 	if (!Char || bIsClimbingUp) return;
 
-	// 翻越空间检测：在角色前方偏上位置检测是否有足够空间
 	const FVector StartLoc = Char->GetActorLocation()
 		+ (Char->GetActorForwardVector() * ClimbPredictOffset)
 		+ FVector(0.0f, 0.0f, ClimbUpCheckHalfHeight);
@@ -558,36 +500,15 @@ void UOpenWorldARPGCharacterMovementComponent::CheckAndClimbUp()
 	const bool bHit = GetWorld()->SweepSingleByChannel(
 		HitResult, StartLoc, StartLoc, FQuat::Identity, ClimbTraceChannel, CapsuleShape, Params);
 
-	// 没有碰撞 = 前方有足够空间可以翻越
 	if (!bHit)
 	{
 		DoClimbUp();
 	}
 }
 
-// ------------------------------------
+// ============================================================================
 // 攀爬 - 状态转换
-// ------------------------------------
-
-void UOpenWorldARPGCharacterMovementComponent::EnterClimb(const FHitResult& WallHit)
-{
-	ACharacter* Char = CachedOwnerCharacter.Get();
-	if (!Char) return;
-
-	ClimbWallNormal = WallHit.Normal;
-
-	// 1. 先清零速度，再切换到攀爬模式
-	//    如果先 SetMovementMode 再清零，OnMovementModeChanged 可能在零速度前被触发
-	Velocity = FVector::ZeroVector;
-	SetMovementMode(MOVE_Custom, static_cast<uint8>(ECustomMovementMode::Climbing));
-	bOrientRotationToMovement = false;
-
-	// 2. 计算吸附目标
-	const FRotator TargetRot = UKismetMathLibrary::MakeRotFromX(-WallHit.Normal);
-	const FRotator FinalRot = FRotator(TargetRot.Pitch, TargetRot.Yaw, 0.0f);
-	const FVector TargetLoc = Char->GetActorLocation() + FVector(0.0f, 0.0f, WallSnapZOffset);
-	SetClimbSnapTarget(TargetLoc, FinalRot, WallSnapTime);
-}
+// ============================================================================
 
 void UOpenWorldARPGCharacterMovementComponent::DoClimbUp()
 {
@@ -596,20 +517,16 @@ void UOpenWorldARPGCharacterMovementComponent::DoClimbUp()
 
 	bIsClimbingUp = true;
 
-	// 计算翻越目标位置（基于角色朝向 + ClimbUpOffset）
 	const FVector TargetLoc = Char->GetActorLocation()
 		+ Char->GetActorForwardVector() * ClimbUpOffset.X
 		+ Char->GetActorRightVector() * ClimbUpOffset.Y
 		+ FVector(0.0f, 0.0f, ClimbUpOffset.Z);
 	const FRotator TargetRot = FRotator(0.0f, Char->GetActorRotation().Yaw, 0.0f);
 
-	// 设置翻越目标并切换到 ClimbUp 模式
 	ClimbUpTargetLocation = TargetLoc;
 	ClimbUpTargetRotation = TargetRot;
 	SetMovementMode(MOVE_Custom, static_cast<uint8>(ECustomMovementMode::ClimbUp));
 
-	// 通过 Delegate 请求 Character 播放翻越蒙太奇
-	// CMC 只管物理位移，动画播放由 Character 负责
 	OnClimbUpMontageRequested.Broadcast(nullptr);
 }
 
@@ -640,9 +557,9 @@ void UOpenWorldARPGCharacterMovementComponent::HandleConcaveCorner(const FHitRes
 	SetMovementMode(MOVE_Custom, static_cast<uint8>(ECustomMovementMode::ClimbingCornerTransition));
 }
 
-// ------------------------------------
+// ============================================================================
 // 攀爬 - 物理模拟
-// ------------------------------------
+// ============================================================================
 
 void UOpenWorldARPGCharacterMovementComponent::PhysClimbing(float DeltaTime, int32 Iterations)
 {
@@ -653,7 +570,7 @@ void UOpenWorldARPGCharacterMovementComponent::PhysClimbing(float DeltaTime, int
 		if (!Char) return;
 	}
 
-	// 墙面吸附阶段：插值到目标位置后结束吸附
+	// 墙面吸附阶段
 	if (bIsSnappingToWall)
 	{
 		Velocity = FVector::ZeroVector;
@@ -673,13 +590,10 @@ void UOpenWorldARPGCharacterMovementComponent::PhysClimbing(float DeltaTime, int
 			SlideAlongSurface(NewLocation - CurrentLocation, 1.0f - Hit.Time, Hit.Normal, Hit, true);
 		}
 
-		// 吸附到达阈值后结束
-		const float DistSq = FVector::DistSquared(Char->GetActorLocation(), SnapTargetLocation);
-		if (DistSq < 4.0f)
+		if (FVector::DistSquared(Char->GetActorLocation(), SnapTargetLocation) < 4.0f)
 		{
 			bIsSnappingToWall = false;
 		}
-
 		return;
 	}
 
@@ -695,11 +609,9 @@ void UOpenWorldARPGCharacterMovementComponent::PhysClimbing(float DeltaTime, int
 			Velocity = FVector::ZeroVector;
 		}
 
-		// 使用 CMC 内部的 Acceleration 获取输入
 		FVector InputVector = Acceleration;
 		if (!InputVector.IsNearlyZero() && !ClimbWallNormal.IsNearlyZero())
 		{
-			// 将世界空间输入向量投影到墙面切平面
 			FVector ProjectedInput = FVector::VectorPlaneProject(InputVector, ClimbWallNormal).GetSafeNormal();
 			if (!ProjectedInput.IsNearlyZero())
 			{
@@ -728,7 +640,7 @@ void UOpenWorldARPGCharacterMovementComponent::PhysClimbing(float DeltaTime, int
 		}
 	}
 
-	// 朝向：始终面向墙壁
+	// 朝向墙壁
 	if (!ClimbWallNormal.IsNearlyZero())
 	{
 		const FRotator TargetRot = FRotationMatrix::MakeFromX(-ClimbWallNormal).Rotator();
@@ -751,21 +663,17 @@ void UOpenWorldARPGCharacterMovementComponent::PhysClimbingCornerTransition(floa
 		if (!Char) return;
 	}
 
-	// 墙角过渡期间：零速度，完全由插值驱动
 	Velocity = FVector::ZeroVector;
 
-	// 位置插值
 	const float PosInterpSpeed = (CornerType == ECornerType::Convex) ? ConvexPositionInterpSpeed : ConcavePositionInterpSpeed;
 	const FVector CurrentLocation = Char->GetActorLocation();
 	const FVector NewLocation = FMath::VInterpTo(CurrentLocation, CornerTargetLocation, DeltaTime, PosInterpSpeed);
 
-	// 旋转插值：面向目标法线的反方向
 	const float RotInterpSpeed = (CornerType == ECornerType::Convex) ? ConvexRotationInterpSpeed : ConcaveRotationInterpSpeed;
 	const FRotator TargetRot = FRotationMatrix::MakeFromX(-CornerTargetNormal).Rotator();
 	const FRotator CurrentRot = Char->GetActorRotation();
 	const FRotator NewRot = FMath::RInterpTo(CurrentRot, TargetRot, DeltaTime, RotInterpSpeed);
 
-	// 应用位移
 	FHitResult Hit;
 	SafeMoveUpdatedComponent(NewLocation - CurrentLocation, NewRot.Quaternion(), true, Hit, ETeleportType::None);
 
@@ -775,17 +683,13 @@ void UOpenWorldARPGCharacterMovementComponent::PhysClimbingCornerTransition(floa
 		SlideAlongSurface(NewLocation - CurrentLocation, 1.0f - Hit.Time, Hit.Normal, Hit, true);
 	}
 
-	// 检测过渡是否完成
-	const float DistSq = FVector::DistSquared(Char->GetActorLocation(), CornerTargetLocation);
-	const bool bRotArrived = NewRot.Equals(TargetRot, CornerRotationArrivalThreshold);
-
-	if (DistSq < FMath::Square(CornerArrivalThreshold) && bRotArrived)
+	if (FVector::DistSquared(Char->GetActorLocation(), CornerTargetLocation) < FMath::Square(CornerArrivalThreshold)
+		&& NewRot.Equals(TargetRot, CornerRotationArrivalThreshold))
 	{
-		// 过渡完成：恢复 Climbing 模式
 		CornerTargetLocation = FVector::ZeroVector;
 		CornerTargetNormal = FVector::ZeroVector;
 		CornerType = ECornerType::None;
-		ClimbWallNormal = CornerTargetNormal; // 使用新墙面法线
+		ClimbWallNormal = CornerTargetNormal;
 		SetMovementMode(MOVE_Custom, static_cast<uint8>(ECustomMovementMode::Climbing));
 	}
 }
@@ -799,18 +703,14 @@ void UOpenWorldARPGCharacterMovementComponent::PhysClimbUp(float DeltaTime, int3
 		if (!Char) return;
 	}
 
-	// 翻越期间：零速度，完全由插值驱动
 	Velocity = FVector::ZeroVector;
 
-	// 位置插值（使用恒速插值，保证翻越时间稳定）
 	const FVector CurrentLocation = Char->GetActorLocation();
 	const FVector NewLocation = FMath::VInterpConstantTo(CurrentLocation, ClimbUpTargetLocation, DeltaTime, ClimbUpPositionInterpSpeed);
 
-	// 旋转插值
 	const FRotator CurrentRot = Char->GetActorRotation();
 	const FRotator NewRot = FMath::RInterpConstantTo(CurrentRot, ClimbUpTargetRotation, DeltaTime, ClimbUpRotationInterpSpeed);
 
-	// 应用位移
 	FHitResult Hit;
 	SafeMoveUpdatedComponent(NewLocation - CurrentLocation, NewRot.Quaternion(), true, Hit, ETeleportType::None);
 
@@ -820,13 +720,12 @@ void UOpenWorldARPGCharacterMovementComponent::PhysClimbUp(float DeltaTime, int3
 		SlideAlongSurface(NewLocation - CurrentLocation, 1.0f - Hit.Time, Hit.Normal, Hit, true);
 	}
 
-	// 翻越到达目标后，等待 Character 的蒙太奇回调来调用 FinishClimbUp
-	// CMC 不主动切换模式，只负责物理位移
+	// 等待 Character 蒙太奇回调调用 FinishClimbUp
 }
 
-// ------------------------------------
+// ============================================================================
 // 攀爬 - 辅助
-// ------------------------------------
+// ============================================================================
 
 bool UOpenWorldARPGCharacterMovementComponent::PerformClimbTraces(const FVector& TraceOffset, FHitResult& OutChestHit, FHitResult& OutHeadHit)
 {
@@ -863,8 +762,7 @@ FVector UOpenWorldARPGCharacterMovementComponent::CalculateConvexTargetLocation(
 	const FVector Bisector = (CurrentNormal + NewNormal).GetSafeNormal();
 	FVector TargetLoc = CornerPoint + Bisector * ConvexArcRadius;
 
-	ACharacter* Char = CachedOwnerCharacter.Get();
-	if (Char)
+	if (ACharacter* Char = CachedOwnerCharacter.Get())
 	{
 		TargetLoc.Z = Char->GetActorLocation().Z;
 	}
@@ -877,53 +775,12 @@ FVector UOpenWorldARPGCharacterMovementComponent::CalculateConcaveTargetLocation
 {
 	FVector TargetLoc = NewWallHitLocation + NewWallNormal * ConcaveSnapDistance;
 
-	ACharacter* Char = CachedOwnerCharacter.Get();
-	if (Char)
+	if (ACharacter* Char = CachedOwnerCharacter.Get())
 	{
 		TargetLoc.Z = Char->GetActorLocation().Z;
 	}
 
 	return TargetLoc;
-}
-
-bool UOpenWorldARPGCharacterMovementComponent::DetectClimbableWall(FHitResult& OutChestHit)
-{
-	ACharacter* Char = CachedOwnerCharacter.Get();
-	if (!Char) return false;
-
-	// 使用 CMC 内部的 Acceleration 判断输入意图
-	if (Acceleration.IsNearlyZero()) return false;
-
-	FHitResult HeadHit;
-	if (PerformClimbTraces(FVector::ZeroVector, OutChestHit, HeadHit))
-	{
-		if (OutChestHit.GetActor() && OutChestHit.GetActor()->ActorHasTag(UnclimbableActorTag)) return false;
-		if (!IsWallClimbable(OutChestHit.Normal)) return false;
-
-		// 检查输入方向是否朝向墙壁
-		float DotResult = FVector::DotProduct(Acceleration, OutChestHit.Normal);
-		if (DotResult < MinInputDotProduct)
-		{
-			return true;
-		}
-	}
-
-	return false;
-}
-
-FTransform UOpenWorldARPGCharacterMovementComponent::CalculateClimbWarpTarget(const FHitResult& WallHit) const
-{
-	ACharacter* Char = CachedOwnerCharacter.Get();
-	if (!Char || !WallHit.bBlockingHit) return FTransform::Identity;
-
-	// 目标位置：墙面击中点沿法线方向偏移 TargetWallDistance，保持与墙面的安全距离
-	// Z 轴保持角色当前高度（上墙动画会自带 Z 位移）
-	const FVector TargetLocation = WallHit.Location + WallHit.Normal * TargetWallDistance;
-
-	// 目标旋转：面朝墙壁反法线方向
-	const FRotator TargetRotation = UKismetMathLibrary::MakeRotFromX(-WallHit.Normal);
-
-	return FTransform(TargetRotation, TargetLocation, FVector::OneVector);
 }
 
 void UOpenWorldARPGCharacterMovementComponent::ClearClimbState()
@@ -939,13 +796,11 @@ void UOpenWorldARPGCharacterMovementComponent::SetClimbSnapTarget(const FVector&
 	bIsSnappingToWall = true;
 	SnapTargetLocation = InTargetLocation;
 	SnapTargetRotation = InTargetRotation;
-	// 从期望吸附时间反算插值速率：VInterpTo 在 time=T 时到达约 63%
-	// 要在 SnapTime 内完成吸附，需要 InterpSpeed ≈ 3/SnapTime
 	SnapInterpSpeed = (InSnapTime > 0.0f) ? (3.0f / InSnapTime) : 30.0f;
 }
 
 // ============================================================================
-// 滑翔模块
+// 滑翔
 // ============================================================================
 
 void UOpenWorldARPGCharacterMovementComponent::EnterGlideMode()
@@ -976,11 +831,6 @@ void UOpenWorldARPGCharacterMovementComponent::ExitGlideMode()
 	SetMovementMode(MOVE_Falling);
 }
 
-bool UOpenWorldARPGCharacterMovementComponent::IsGliding() const
-{
-	return MovementMode == MOVE_Custom && static_cast<ECustomMovementMode>(CustomMovementMode) == ECustomMovementMode::Gliding;
-}
-
 float UOpenWorldARPGCharacterMovementComponent::GetDistanceToGround() const
 {
 	ACharacter* Char = CachedOwnerCharacter.Get();
@@ -990,7 +840,6 @@ float UOpenWorldARPGCharacterMovementComponent::GetDistanceToGround() const
 		if (!Char) return -1.0f;
 	}
 
-	// 从角色脚底向下射线检测地面距离
 	const FVector Start = Char->GetActorLocation();
 	const FVector End = Start - FVector::UpVector * 2000.0f;
 
@@ -1017,7 +866,7 @@ void UOpenWorldARPGCharacterMovementComponent::PhysGliding(float DeltaTime, int3
 
 	if (!HasAnimRootMotion() && !CurrentRootMotion.HasActiveRootMotionSources())
 	{
-		// 重力：即使 GlideGravityScale=0，也需手动施加微量重力模拟滑翔下沉感
+		// 微量重力模拟滑翔下沉
 		Velocity.Z += GetGravityZ() * 0.1f * DeltaTime;
 
 		// 水平速度限制
@@ -1027,24 +876,19 @@ void UOpenWorldARPGCharacterMovementComponent::PhysGliding(float DeltaTime, int3
 			HorizontalVel = HorizontalVel.GetSafeNormal() * GlideMaxHorizontalSpeed;
 		}
 
-		// 垂直速度限制
 		Velocity.Z = FMath::Clamp(Velocity.Z, GlideMinDescentSpeed, GlideMaxDescentSpeed);
-
 		Velocity = FVector(HorizontalVel.X, HorizontalVel.Y, Velocity.Z);
 
-		// 输入处理：使用归一化方向 + 合理加速值
-		// Acceleration 是原始输入向量，模长等于 MaxAcceleration（默认 2048），
-		// 不能直接乘以 AirControl * 100，否则速度暴增。
-		// 正确做法：取方向，用固定加速值叠加。
+		// 输入加速
 		FVector InputVector = Acceleration;
 		if (!InputVector.IsNearlyZero())
 		{
 			const FVector InputDir = InputVector.GetSafeNormal();
-			const float GlideAcceleration = 800.0f; // 滑翔水平加速度 (cm/s²)
+			const float GlideAcceleration = 800.0f;
 			Velocity += FVector(InputDir.X, InputDir.Y, 0.0f) * GlideAcceleration * DeltaTime;
 		}
 
-		// 水平阻力：防止无限加速，模拟空气阻力
+		// 空气阻力
 		HorizontalVel = FVector(Velocity.X, Velocity.Y, 0.0f);
 		if (HorizontalVel.SizeSquared() > FMath::Square(GlideMaxHorizontalSpeed))
 		{
@@ -1073,7 +917,7 @@ void UOpenWorldARPGCharacterMovementComponent::PhysGliding(float DeltaTime, int3
 		Velocity = (UpdatedComponent->GetComponentLocation() - OldLocation) / DeltaTime;
 	}
 
-	// 朝向：面向移动方向
+	// 朝向移动方向
 	FVector HorizontalVel = FVector(Velocity.X, Velocity.Y, 0.0f);
 	if (!HorizontalVel.IsNearlyZero())
 	{
@@ -1092,7 +936,7 @@ void UOpenWorldARPGCharacterMovementComponent::PhysGliding(float DeltaTime, int3
 }
 
 // ============================================================================
-// 游泳模块
+// 游泳
 // ============================================================================
 
 void UOpenWorldARPGCharacterMovementComponent::EnterSwimMode()
@@ -1121,11 +965,6 @@ void UOpenWorldARPGCharacterMovementComponent::ExitSwimMode()
 	SetMovementMode(MOVE_Falling);
 }
 
-bool UOpenWorldARPGCharacterMovementComponent::IsSwimming() const
-{
-	return MovementMode == MOVE_Custom && static_cast<ECustomMovementMode>(CustomMovementMode) == ECustomMovementMode::Swimming;
-}
-
 void UOpenWorldARPGCharacterMovementComponent::EnterFastSwimMode()
 {
 	if (bIsFastSwimming) return;
@@ -1148,8 +987,6 @@ void UOpenWorldARPGCharacterMovementComponent::ExitFastSwimMode()
 	}
 }
 
-bool UOpenWorldARPGCharacterMovementComponent::IsFastSwimming() const { return bIsFastSwimming; }
-
 void UOpenWorldARPGCharacterMovementComponent::PhysSwimming(float DeltaTime, int32 Iterations)
 {
 	ACharacter* Char = CachedOwnerCharacter.Get();
@@ -1159,17 +996,14 @@ void UOpenWorldARPGCharacterMovementComponent::PhysSwimming(float DeltaTime, int
 		if (!Char) return;
 	}
 
-	// 出水检测
 	if (!IsStillInWater())
 	{
 		ExitSwimMode();
 		return;
 	}
 
-	// 水面吸附
 	ApplySurfaceSnapping(DeltaTime);
 
-	// 水平移动处理
 	if (!HasAnimRootMotion() && !CurrentRootMotion.HasActiveRootMotionSources())
 	{
 		Velocity.Z = 0.0f;
@@ -1190,7 +1024,6 @@ void UOpenWorldARPGCharacterMovementComponent::PhysSwimming(float DeltaTime, int
 	}
 
 	ApplyRootMotionToVelocity(DeltaTime);
-
 	Iterations++;
 	bJustTeleported = false;
 
@@ -1223,12 +1056,7 @@ void UOpenWorldARPGCharacterMovementComponent::PhysSwimming(float DeltaTime, int
 
 void UOpenWorldARPGCharacterMovementComponent::ApplySurfaceSnapping(float DeltaTime)
 {
-	// 框架预留：如果项目集成了 Water Plugin，在此处获取精确水面高度
-	// float WaterSurfaceZ = UWaterLibrary::GetWaterSurfaceZ(GetWorld(), Char->GetActorLocation());
-	// float TargetZ = WaterSurfaceZ + SurfaceSnapOffset;
-	// FVector TargetLocation = Char->GetActorLocation();
-	// TargetLocation.Z = FMath::FInterpTo(TargetLocation.Z, TargetZ, DeltaTime, SurfaceSnapInterpSpeed);
-	// Char->SetActorLocation(TargetLocation);
+	// 预留：Water Plugin 集成后实现水面吸附
 }
 
 bool UOpenWorldARPGCharacterMovementComponent::IsStillInWater() const
@@ -1263,7 +1091,7 @@ void UOpenWorldARPGCharacterMovementComponent::UpdateLastSafeLocation()
 }
 
 // ============================================================================
-// 冲刺模块
+// 冲刺
 // ============================================================================
 
 void UOpenWorldARPGCharacterMovementComponent::EnterSprintMode()
@@ -1281,10 +1109,8 @@ void UOpenWorldARPGCharacterMovementComponent::ExitSprintMode()
 	MaxWalkSpeed = OriginalMaxWalkSpeed;
 }
 
-bool UOpenWorldARPGCharacterMovementComponent::IsSprinting() const { return bIsSprinting; }
-
 // ============================================================================
-// 慢走模块
+// 慢走
 // ============================================================================
 
 void UOpenWorldARPGCharacterMovementComponent::EnterWalkMode()
@@ -1302,10 +1128,8 @@ void UOpenWorldARPGCharacterMovementComponent::ExitWalkMode()
 	MaxWalkSpeed = OriginalMaxWalkSpeed;
 }
 
-bool UOpenWorldARPGCharacterMovementComponent::IsWalking() const { return bIsWalking; }
-
 // ============================================================================
-// 瞄准模块
+// 瞄准
 // ============================================================================
 
 void UOpenWorldARPGCharacterMovementComponent::EnterAimMode()
@@ -1347,10 +1171,8 @@ void UOpenWorldARPGCharacterMovementComponent::ExitAimMode()
 	Char->bUseControllerRotationYaw = bOriginalUseControllerRotationYaw;
 }
 
-bool UOpenWorldARPGCharacterMovementComponent::IsAiming() const { return bIsAiming; }
-
 // ============================================================================
-// 下落状态
+// 下落
 // ============================================================================
 
 void UOpenWorldARPGCharacterMovementComponent::SetFallingRotationInterpSpeed(float InSpeed)

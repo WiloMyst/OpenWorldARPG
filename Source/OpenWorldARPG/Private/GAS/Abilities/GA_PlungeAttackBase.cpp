@@ -70,7 +70,7 @@ void UGA_PlungeAttackBase::ExecuteAttack()
     }
 
     // 3. 从 CombatData 获取下落攻击天赋配置（通过 GA 蓝图中配置的 TalentTag 查询连招图）
-    const FTalentConfig* PlungeTalent = CachedPlayer->FindTalentConfig(TalentTag);
+    const FTalentConfig* PlungeTalent = CachedPlayer->GetTalentConfig(TalentTag);
     if (!PlungeTalent || PlungeTalent->ComboGraph.IsEmpty())
     {
         EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);
@@ -155,7 +155,7 @@ void UGA_PlungeAttackBase::OnMovementModeChanged(EMovementMode NewMovementMode)
     //   1. 一个入口节点可配置多条派生路径（落地/被打断/超时），各自用不同 Tag 区分
     //   2. 策划可自由扩展新事件 Tag，无需修改 C++ 代码
     //   3. Tag 本身即语义文档，配置表可读性强
-    const FTalentConfig* PlungeTalent = CachedPlayer->FindTalentConfig(TalentTag);
+    const FTalentConfig* PlungeTalent = CachedPlayer->GetTalentConfig(TalentTag);
     UAnimMontage* LandingMontage = nullptr;
 
     if (PlungeTalent && LandedTransitionTag.IsValid())

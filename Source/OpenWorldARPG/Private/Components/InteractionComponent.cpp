@@ -12,8 +12,6 @@ UInteractionComponent::UInteractionComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
     PrimaryComponentTick.TickInterval = 0.1f;
-
-    // 网络同步：组件需要复制才能让 Server RPC 工作
     SetIsReplicatedByDefault(true);
 }
 
@@ -31,7 +29,6 @@ void UInteractionComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    // 仅在本地控制端执行交互检测（避免服务器为所有客户端角色做检测）
     APawn* OwnerPawn = Cast<APawn>(GetOwner());
     if (OwnerPawn && !OwnerPawn->IsLocallyControlled()) return;
 
@@ -41,7 +38,6 @@ void UInteractionComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
     FVector StartLoc = OwnerActor->GetActorLocation();
     FVector EndLoc = StartLoc;
 
-    // 通用通道：覆盖掉落物(PhysicsBody)、动态物件(WorldDynamic)、载具(Vehicle)、角色(Pawn)
     TArray<TEnumAsByte<EObjectTypeQuery>> ObjectTypes;
     ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_PhysicsBody));
     ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_WorldDynamic));
@@ -51,23 +47,19 @@ void UInteractionComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
     TArray<AActor*> ActorsToIgnore;
     ActorsToIgnore.Add(OwnerActor);
 
-    // 多体检测，支持多个交互对象重叠
     TArray<FHitResult> HitResults;
     UKismetSystemLibrary::SphereTraceMultiForObjects(
         this, StartLoc, EndLoc, InteractionRadius, ObjectTypes,
         false, ActorsToIgnore, EDrawDebugTrace::None, HitResults, true);
 
-    // 遍历命中结果，通过接口筛选可交互对象
     TArray<AActor*> NewInteractableActors;
     for (const FHitResult& Hit : HitResults)
     {
         AActor* HitActor = Hit.GetActor();
         if (!HitActor) continue;
 
-        // 接口化检测：不依赖任何具体类型
         if (HitActor->Implements<UInteractableInterface>())
         {
-            // 调用接口方法确认是否可以交互
             if (IInteractableInterface::Execute_CanInteract(HitActor, Cast<ACharacter>(OwnerPawn)))
             {
                 NewInteractableActors.Add(HitActor);
@@ -75,7 +67,6 @@ void UInteractionComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
         }
     }
 
-    // 比对新旧列表是否发生变化
     bool bChanged = false;
     if (NewInteractableActors.Num() != CurrentInteractableActors.Num())
     {
@@ -93,7 +84,6 @@ void UInteractionComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
         }
     }
 
-    // 仅当可交互对象列表发生改变时才广播
     if (bChanged)
     {
         CurrentInteractableActors.Empty();
@@ -118,8 +108,6 @@ bool UInteractionComponent::IsCharacterInStandby() const
     }
     return false;
 }
-
-// --- 通用交互：多态分发 ---
 
 void UInteractionComponent::Interact()
 {
