@@ -13,6 +13,7 @@
 #include "Managers/GameFlowSubsystem.h"
 #include "GameFramework/PlayerStart.h"
 #include "Engine/GameInstance.h"
+#include "Engine/LocalPlayer.h"
 #include "Kismet/GameplayStatics.h"
 
 AGameplayGameModeBase::AGameplayGameModeBase()
@@ -51,13 +52,28 @@ void AGameplayGameModeBase::PostLogin(APlayerController* NewPlayer)
 
 void AGameplayGameModeBase::GeneratePlayerCharacters(APlayerController* PlayerController)
 {
-    // TODO [联机架构缺陷]: CharacterManagerSubsystem 和 TeamManagerSubsystem 是全局共享的
-    // GameInstanceSubsystem，多玩家连入时数据会互相覆盖。
-    // 联机时需要改为按玩家隔离的数据源（如从 PlayerState 或存档系统按玩家 ID 加载）。
-    // 当前单机/Listen Server 场景下只有 Host 一个玩家，暂时安全。
+    AGameplayPlayerState* PlayerState = PlayerController->GetPlayerState<AGameplayPlayerState>();
+    if (!PlayerState)
+    {
+        UE_LOG(LogTemp, Error, TEXT("GeneratePlayerCharacters: PlayerState 为空或类型不是 AGameplayPlayerState！"));
+        return;
+    }
 
-    UCharacterManagerSubsystem* CharManager = GetGameInstance()->GetSubsystem<UCharacterManagerSubsystem>();
-    UTeamManagerSubsystem* TeamManager = GetGameInstance()->GetSubsystem<UTeamManagerSubsystem>();
+    UCharacterManagerSubsystem* CharManager = nullptr;
+    UTeamManagerSubsystem* TeamManager = nullptr;
+
+    // TODO: [Network Architecture] 真正的联机模式下，这里应当根据 PlayerController 关联的 UniqueNetId
+    // 向专门的 ServerDataManager（或后端数据库）请求当前队伍的 FCharacterSaveData 和 Tags，
+    // 而非向客户端实体索要。
+    // 当前实现：仅在单机/Host 模式下，从拥有当前 PlayerController 的 LocalPlayer 中获取 Subsystem 作为 Mock 数据源
+    if (GetNetMode() == NM_Standalone || GetNetMode() == NM_ListenServer)
+    {
+        if (ULocalPlayer* LocalPlayer = PlayerController->GetLocalPlayer())
+        {
+            CharManager = LocalPlayer->GetSubsystem<UCharacterManagerSubsystem>();
+            TeamManager = LocalPlayer->GetSubsystem<UTeamManagerSubsystem>();
+        }
+    }
 
     if (!CharManager)
     {
@@ -69,14 +85,7 @@ void AGameplayGameModeBase::GeneratePlayerCharacters(APlayerController* PlayerCo
         UE_LOG(LogTemp, Error, TEXT("GeneratePlayerCharacters: TeamManager 为空！"));
         return;
     }
-    AGameplayPlayerState* PlayerState = PlayerController->GetPlayerState<AGameplayPlayerState>();
-    if (!PlayerState)
-    {
-        UE_LOG(LogTemp, Error, TEXT("GeneratePlayerCharacters: PlayerState 为空或类型不是 AGameplayPlayerState！"));
-        return;
-    }
 
-    // 获取当前队伍成员 Tag 列表（仅队伍中的角色才生成实体）
     const TArray<FGameplayTag> TeamTags = TeamManager->GetCurrentTeamCharacterTags();
 
     UE_LOG(LogTemp, Log, TEXT("GeneratePlayerCharacters: 玩家拥有角色数 = %d, 队伍成员数 = %d, 活跃索引 = %d"),
@@ -180,7 +189,6 @@ void AGameplayGameModeBase::GeneratePlayerCharacters(APlayerController* PlayerCo
 
     UE_LOG(LogTemp, Log, TEXT("GeneratePlayerCharacters: 队伍成员 %d 个已存入 PlayerState。"), TeamActors.Num());
 
-    // 5. 激活当前激活索引的角色
     int32 ActiveIndex = TeamManager->GetActiveCharacterIndex();
     if (TeamActors.IsValidIndex(ActiveIndex) && TeamActors[ActiveIndex])
     {
@@ -188,7 +196,6 @@ void AGameplayGameModeBase::GeneratePlayerCharacters(APlayerController* PlayerCo
         ActiveCharacter->SetStandbyMode(false);
         PlayerController->Possess(ActiveCharacter);
 
-        // 设置 PlayerState 的激活索引（触发全网同步）
         PlayerState->SetActiveCharacterIndex(ActiveIndex);
 
         UE_LOG(LogTemp, Log, TEXT("GeneratePlayerCharacters: 激活角色索引 %d 并 Possess。"), ActiveIndex);
@@ -216,7 +223,20 @@ void AGameplayGameModeBase::ApplyPlayerTeamChanges(AGameplayPlayerController* Pl
 {
     if (!HasAuthority() || !PlayerController) return;
 
-    UCharacterManagerSubsystem* CharManager = GetGameInstance() ? GetGameInstance()->GetSubsystem<UCharacterManagerSubsystem>() : nullptr;
+    UCharacterManagerSubsystem* CharManager = nullptr;
+
+    // TODO: [Network Architecture] 真正的联机模式下，这里应当根据 PlayerController 关联的 UniqueNetId
+    // 向专门的 ServerDataManager（或后端数据库）请求角色的 FCharacterSaveData，
+    // 而非向客户端实体索要。
+    // 当前实现：仅在单机/Host 模式下，从拥有当前 PlayerController 的 LocalPlayer 中获取 Subsystem 作为 Mock 数据源
+    if (GetNetMode() == NM_Standalone || GetNetMode() == NM_ListenServer)
+    {
+        if (ULocalPlayer* LocalPlayer = PlayerController->GetLocalPlayer())
+        {
+            CharManager = LocalPlayer->GetSubsystem<UCharacterManagerSubsystem>();
+        }
+    }
+
     if (!CharManager)
     {
         UE_LOG(LogTemp, Error, TEXT("ApplyPlayerTeamChanges: CharacterManagerSubsystem 不可用！"));

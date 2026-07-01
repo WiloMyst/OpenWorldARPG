@@ -18,14 +18,12 @@ class OPENWORLDARPG_API UPlayerCharacterBarWidget : public UUserWidget
     GENERATED_BODY()
 
 public:
-    /** 更新血量表现 */
+    /** 更新血量 */
     UFUNCTION(BlueprintCallable, Category = "UI|PlayerStatus")
     void UpdateHealth(float CurrentHealth, float MaxHealth);
 
 protected:
-    // ==========================================
-    // UI 组件绑定 (变量名必须与蓝图中的对应一致)
-    // ==========================================
+    // --- 控件绑定 ---
     
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
     TObjectPtr<UProgressBar> HealthBar;

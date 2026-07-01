@@ -11,8 +11,7 @@
 
 UWeaponManagerComponent::UWeaponManagerComponent()
 {
-    // 开启 Tick，用于检测移动状态以自动收起武器
-    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.bCanEverTick = false;
 }
 
 void UWeaponManagerComponent::BeginPlay()
@@ -21,6 +20,19 @@ void UWeaponManagerComponent::BeginPlay()
 
     CachedCharacter = Cast<APlayerCharacter>(GetOwner());
     UE_LOG(LogTemp, Warning, TEXT("[WeaponComp] BeginPlay: Owner=%s, CachedCharacter=%s"), *GetNameSafe(GetOwner()), CachedCharacter ? *CachedCharacter->GetName() : TEXT("NULL"));
+}
+
+void UWeaponManagerComponent::UpdateWeaponState()
+{
+    if (!CharacterWeapon || !CachedASC) return;
+
+    bool bIsMoving = MovingTag.IsValid() && CachedASC->HasMatchingGameplayTag(MovingTag);
+    bool bHasPreventStow = CachedASC->HasAnyMatchingGameplayTags(PreventStowTags);
+
+    if (bIsMoving && !bHasPreventStow)
+    {
+        WeaponToBack();
+    }
 }
 
 // --- 核心武器状态机 ---
@@ -70,7 +82,6 @@ void UWeaponManagerComponent::InitializeCharacterWeapon()
     // 4. 将生成的武器挂载到背部
     if (CharacterWeapon)
     {
-        // 挂载到弹簧臂末端，不需要提供 SocketName
         CharacterWeapon->AttachToComponent(RestSocket, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
         bIsWeaponStowed = true;
         UE_LOG(LogTemp, Warning, TEXT("[WeaponComp] InitializeCharacterWeapon: Weapon spawned and attached to back. Weapon=%s, bHidden=%s"),
@@ -80,6 +91,27 @@ void UWeaponManagerComponent::InitializeCharacterWeapon()
     else
     {
         UE_LOG(LogTemp, Error, TEXT("[WeaponComp] InitializeCharacterWeapon: SpawnActor FAILED! WeaponClass=%s"), *WeaponClass->GetName());
+        return;
+    }
+
+    // 5. 注册 GameplayTag 事件监听，改为事件驱动
+    CachedASC = CachedCharacter->GetAbilitySystemComponent();
+    if (CachedASC)
+    {
+        if (MovingTag.IsValid())
+        {
+            CachedASC->RegisterGameplayTagEvent(MovingTag).AddUObject(this, &UWeaponManagerComponent::OnMovementTagChanged);
+        }
+
+        for (const FGameplayTag& Tag : PreventStowTags)
+        {
+            if (Tag.IsValid())
+            {
+                CachedASC->RegisterGameplayTagEvent(Tag).AddUObject(this, &UWeaponManagerComponent::OnPreventStowTagChanged);
+            }
+        }
+
+        UE_LOG(LogTemp, Warning, TEXT("[WeaponComp] InitializeCharacterWeapon: Registered GameplayTag events."));
     }
 }
 
@@ -140,35 +172,16 @@ void UWeaponManagerComponent::DestroyCharacterWeapon()
 void UWeaponManagerComponent::OnComponentDestroyed(bool bDestroyingHierarchy)
 {
     DestroyCharacterWeapon();
+    CachedASC = nullptr;
     Super::OnComponentDestroyed(bDestroyingHierarchy);
 }
 
-// --- 状态轮询 (自动收回逻辑) ---
-
-void UWeaponManagerComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UWeaponManagerComponent::OnMovementTagChanged(const FGameplayTag CallbackTag, int32 NewCount)
 {
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    UpdateWeaponState();
+}
 
-    // 安全检查：如果没有缓存角色、没有武器，或者武器已经在背上，直接跳过 (极低性能消耗)
-    if (!CachedCharacter || !CharacterWeapon || bIsWeaponStowed) return;
-
-    // 获取角色当前的移动输入向量长度平方
-    FVector InputVector = CachedCharacter->GetLastMovementInputVector();
-
-    // 判定：如果角色正在移动 (超过蓝图配置的阈值)
-    if (InputVector.SizeSquared() > MovementInputThreshold)
-    {
-        UAbilitySystemComponent* ASC = CachedCharacter->GetAbilitySystemComponent();
-        if (ASC && PreventStowTags.IsValid())
-        {
-            // 核心判定：只要角色身上含有 PreventStowTags (如攻击、瞄准、施法) 里的任意一个标签，就阻止收起
-            if (ASC->HasAnyMatchingGameplayTags(PreventStowTags))
-            {
-                return;
-            }
-        }
-
-        // 没有任何阻止收起的标签，把武器放回背上
-        WeaponToBack();
-    }
+void UWeaponManagerComponent::OnPreventStowTagChanged(const FGameplayTag CallbackTag, int32 NewCount)
+{
+    UpdateWeaponState();
 }

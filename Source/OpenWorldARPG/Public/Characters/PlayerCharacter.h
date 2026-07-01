@@ -14,6 +14,8 @@
 #include "MotionWarpingComponent.h"
 #include "PlayerCharacter.generated.h"
 
+class AWheeledVehiclePawnBase;
+
 class USpringArmComponent;
 class UCameraComponent;
 class USceneComponent;
@@ -163,6 +165,8 @@ public:
 	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Weapon")
 	USceneComponent* GetWeaponRestSocket() const { return WeaponRestSocket; }
 
+	virtual UWeaponManagerComponent* GetWeaponManagerComponent_Implementation() const override;
+
 	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Targeting")
 	UTargetingComponent* GetTargetingComponent() const { return TargetingComponent; }
 
@@ -185,6 +189,27 @@ public:
 	/** 获取当前移动输入 X（左右方向），供 GA 读取输入意图 */
 	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Input")
 	float GetCurrentInputX() const { return CurrentInputX; }
+
+	// --- 载具驾驶 ---
+
+	/** 当前是否正在驾驶载具 */
+	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|Vehicle")
+	bool IsDriving() const { return bIsDriving; }
+
+	/**
+	 * 上车准备：关闭移动组件、修改碰撞通道忽略载具、Attach 到驾驶座 Socket。
+	 * 由 Controller::Server_PossessVehicle 调用（服务器端）。
+	 * 绝不隐藏模型，保留受击可能。
+	 */
+	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|Vehicle")
+	void PrepareForDriving(AActor* VehicleActor, FName SocketName);
+
+	/**
+	 * 下车恢复：Detach、移动到下车位置、恢复移动组件和默认碰撞。
+	 * 由 Controller::Server_UnPossessVehicle 调用（服务器端）。
+	 */
+	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter|Vehicle")
+	void EndDriving(FVector ExitLocation);
 
 	/** 获取 UI 扩展组件（HUD 唯一数据来源） */
 	UFUNCTION(BlueprintPure, Category = "PlayerCharacter|UI")
@@ -430,6 +455,10 @@ protected:
 	/** 是否正在快速游泳 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlayerCharacter|State")
 	bool bIsFastSwimming = false;
+
+	/** 是否正在驾驶载具 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlayerCharacter|State")
+	bool bIsDriving = false;
 
 	/** 游泳状态 Tag */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Tags")

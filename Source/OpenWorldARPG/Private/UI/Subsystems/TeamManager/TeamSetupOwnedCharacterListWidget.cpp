@@ -17,7 +17,16 @@ void UTeamSetupOwnedCharacterListWidget::RefreshList(const TArray<FGameplayTag>&
 
     CharacterListContainer->ClearChildren();
 
-    UCharacterManagerSubsystem* CharSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UCharacterManagerSubsystem>() : nullptr;
+    UCharacterManagerSubsystem* CharSubsystem = nullptr;
+
+    if (APlayerController* PC = GetOwningPlayer())
+    {
+        if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
+        {
+            CharSubsystem = LocalPlayer->GetSubsystem<UCharacterManagerSubsystem>();
+        }
+    }
+
     if (!CharSubsystem) return;
 
     TArray<FCharacterSaveData> OwnedCharacters = CharSubsystem->GetAllOwnedCharacterSaveData();

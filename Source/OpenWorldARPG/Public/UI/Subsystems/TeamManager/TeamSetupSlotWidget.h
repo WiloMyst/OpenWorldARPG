@@ -12,8 +12,8 @@ class UTextBlock;
 class UButton;
 
 /**
- * 编队界面槽位 / 头像列表项 Widget（对应 WBP_TeamSetupSlot）。
- * 既可作为底部已拥有角色头像列表的 Item，也可作为中部 DropZone 的占位 Widget。
+ * 编队界面槽位 / 头像列表项 (对应 WBP_TeamSetupSlot)。
+ * 可作为已拥有角色头像列表的 Item，也可作为 DropZone 占位 Widget。
  */
 UCLASS()
 class OPENWORLDARPG_API UTeamSetupSlotWidget : public UUserWidget
@@ -25,38 +25,29 @@ public:
 
     virtual void NativeConstruct() override;
 
-    /** 初始化槽位数据 */
     UFUNCTION(BlueprintCallable, Category = "TeamSetupSlot")
     void InitializeSlot(const FGameplayTag& InCharacterTag, const FText& InDisplayName, UTexture2D* InHeadIcon, int32 InSlotIndex = -1);
 
-    /** 获取此 Slot 对应的角色 Tag */
     UFUNCTION(BlueprintPure, Category = "TeamSetupSlot")
     FGameplayTag GetCharacterTag() const { return CharacterTag; }
 
-    /** 获取槽位索引（-1 表示这是头像列表 Item 而非 DropZone） */
+    /** -1 表示头像列表 Item 而非 DropZone */
     UFUNCTION(BlueprintPure, Category = "TeamSetupSlot")
     int32 GetSlotIndex() const { return SlotIndex; }
 
-    /** 是否为空槽位 */
     UFUNCTION(BlueprintPure, Category = "TeamSetupSlot")
     bool IsEmpty() const { return !CharacterTag.IsValid(); }
 
-    /**
-     * 设置选中高亮（纯 C++ 实现，不依赖蓝图）。
-     * 选中时按钮背景变绿，未选中变白。
-     */
     UFUNCTION(BlueprintCallable, Category = "TeamSetupSlot")
     void SetHighlighted(bool bIsHighlighted);
 
 public:
     DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnSlotClickedSignature, const FGameplayTag&, CharacterTag, int32, SlotIndex);
 
-    /** 当此 Slot 被点击时触发 */
     UPROPERTY(BlueprintAssignable, Category = "TeamSetupSlot|Events")
     FOnSlotClickedSignature OnSlotClicked;
 
 protected:
-    /** UButton 原生点击回调（替代 NativeOnMouseButtonDown，避免事件被吞噬） */
     UFUNCTION()
     void OnButtonClicked();
 

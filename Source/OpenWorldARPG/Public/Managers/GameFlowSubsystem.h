@@ -8,27 +8,19 @@
 
 class UUIManagerSubsystem;
 
-/** 游戏全局状态。FlowManager 用它来追踪当前处于哪个阶段 */
+/** 游戏全局状态 */
 UENUM(BlueprintType)
 enum class EGameState : uint8
 {
-    /** 未初始化 / 主菜单空闲态 */
-    Idle,
-    /** 正在切图流转中（Loading 界面已弹出，玩家输入已屏蔽） */
-    Traveling,
-    /** 新关卡已加载完毕，玩家可操控 */
-    Playing
+    Idle,       // 主菜单空闲态
+    Traveling,  // 切图流转中（Loading 已弹出，输入已屏蔽）
+    Playing     // 关卡已就绪，玩家可操控
 };
 
 /**
  * 游戏流程总指挥子系统。
- *
- * - 生命周期贯穿 GameInstance，作为"上帝视角"俯视所有关卡生灭
- * - 统筹 UIManager（Loading 界面）、AssetManager（资源加载）、Travel（切图执行）
- * - GameMode 不再负责切图逻辑，仅在初始化完毕后向 FlowManager "报到"
- *
- * 切图管线：
- *   Request → UI Block → Asset Block → Travel → Handshake → Complete
+ * 统筹 UI Block → Asset Block → Travel → Handshake 全流程，
+ * GameMode 仅在初始化完毕后报到，不负责切图逻辑。
  */
 UCLASS()
 class OPENWORLDARPG_API UGameFlowSubsystem : public UGameInstanceSubsystem
@@ -40,22 +32,13 @@ public:
 
     // --- 流程入口 ---
 
-    /**
-     * 从主菜单发起进入游戏请求。
-     * 总指挥接管流程：初始化队伍数据 → UI Block → Asset Block → Travel
-     * @param TargetLevel 目标关卡软引用
-     *
-     * 注：初始存档数据（UInitialArchiveData）从 UOpenWorldARPGSettings 获取，调用方无需传入。
-     */
+    /** 从主菜单发起进入游戏请求。存档数据从 UOpenWorldARPGSettings 获取 */
     UFUNCTION(BlueprintCallable, Category = "Game Flow")
     void RequestTravelFromMainMenu(TSoftObjectPtr<UWorld> TargetLevel);
 
     // --- 新关卡报到 ---
 
-    /**
-     * 新关卡的 GameMode 在 PostLogin / BeginPlay 中调用此函数报到。
-     * FlowManager 收到报到后执行收尾：触发资源清理、关闭 Loading 屏。
-     */
+    /** 新关卡 GameMode 报到，触发资源清理与关闭 Loading */
     UFUNCTION(BlueprintCallable, Category = "Game Flow")
     void NotifyNewLevelReady();
 
@@ -70,16 +53,9 @@ public:
 protected:
     // --- 管线各阶段 ---
 
-    /** 阶段 1：初始化队伍数据（从 UOpenWorldARPGSettings 配置的 UInitialArchiveData 加载） */
-    void InitializeTeamData();
-
-    /** 阶段 2：UI Block — 弹出 Loading 屏，屏蔽输入 */
-    void BeginUIBlock();
-
-    /** 阶段 3：Asset Block — 启动关卡 + 队伍资源异步加载 */
-    void BeginAssetBlock();
-
-    // --- 回调 ---
+    void InitializeTeamData();  // 阶段 1：初始化队伍数据
+    void BeginUIBlock();         // 阶段 2：弹出 Loading 屏，屏蔽输入
+    void BeginAssetBlock();      // 阶段 3：关卡 + 队伍资源异步加载
 
     UFUNCTION()
     void OnLevelPreloadFinished();
@@ -87,16 +63,10 @@ protected:
     UFUNCTION()
     void OnAllAssetsLoaded();
 
-    /** 阶段 4：执行切图（ServerTravel / OpenLevel） */
-    void ExecuteTravel();
+    void ExecuteTravel();       // 阶段 4：执行切图
 
 private:
-    /** 当前游戏全局状态 */
     EGameState CurrentGameState = EGameState::Idle;
-
-    /** 缓存的目标关卡（Asset Block 阶段使用） */
     TSoftObjectPtr<UWorld> PendingTargetLevel;
-
-    /** 获取第一个本地玩家的 UIManagerSubsystem */
     UUIManagerSubsystem* GetUIManager() const;
 };

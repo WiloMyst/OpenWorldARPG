@@ -19,9 +19,15 @@ void UInventoryWidget::NativeOnInitialized()
     ViewModel = NewObject<UInventoryViewModel>(this);
 
     // 2. 初始化 VM 数据
-    if (UInventoryManagerSubsystem* InventorySubsystem = GetGameInstance()->GetSubsystem<UInventoryManagerSubsystem>())
+    if (APlayerController* PC = GetOwningPlayer())
     {
-        ViewModel->InitializeViewModel(InventorySubsystem);
+        if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
+        {
+            if (UInventoryManagerSubsystem* InventorySubsystem = LocalPlayer->GetSubsystem<UInventoryManagerSubsystem>())
+            {
+                ViewModel->InitializeViewModel(InventorySubsystem);
+            }
+        }
     }
 
     // 3. 将 ViewModel 下发给所有子面板，接通数据流

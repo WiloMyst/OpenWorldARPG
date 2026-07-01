@@ -50,7 +50,7 @@ void UHeroUIExtensionComponent::BindToActor(AActor* InOwner)
     if (UInteractionComponent* InteractComp = InOwner->FindComponentByClass<UInteractionComponent>())
     {
         CachedInteractionComp = InteractComp;
-        InteractComp->OnPickableListChangedDelegate.AddDynamic(this, &UHeroUIExtensionComponent::HandleInteractionListChanged);
+        InteractComp->OnInteractableListChangedDelegate.AddDynamic(this, &UHeroUIExtensionComponent::HandleInteractionListChanged);
     }
 }
 
@@ -78,7 +78,7 @@ void UHeroUIExtensionComponent::UnbindAll()
 
     if (CachedInteractionComp.IsValid())
     {
-        CachedInteractionComp->OnPickableListChangedDelegate.RemoveAll(this);
+        CachedInteractionComp->OnInteractableListChangedDelegate.RemoveAll(this);
         CachedInteractionComp = nullptr;
     }
 }

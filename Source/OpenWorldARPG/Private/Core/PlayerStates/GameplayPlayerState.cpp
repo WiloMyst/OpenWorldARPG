@@ -2,7 +2,6 @@
 
 #include "Core/PlayerStates/GameplayPlayerState.h"
 #include "Characters/PlayerCharacter.h"
-#include "Managers/TeamManagerSubsystem.h"
 #include "Net/UnrealNetwork.h"
 
 AGameplayPlayerState::AGameplayPlayerState()
@@ -98,32 +97,10 @@ void AGameplayPlayerState::SetActiveCharacterIndex(int32 NewIndex)
 
 void AGameplayPlayerState::OnRep_ActiveCharacterIndex(int32 OldIndex)
 {
-	// 客户端收到 ActiveCharacterIndex 同步后：
-	// 1. 广播本地事件，驱动 UI 刷新（使用 UE 提供的旧值参数）
 	OnActiveCharacterIndexChanged.Broadcast(OldIndex, ActiveCharacterIndex);
-
-	// 2. 通知 TeamManagerSubsystem 更新本地缓存
-	if (UGameInstance* GI = GetGameInstance())
-	{
-		if (UTeamManagerSubsystem* TeamManager = GI->GetSubsystem<UTeamManagerSubsystem>())
-		{
-			TeamManager->OnRep_ActiveCharacterIndexFromServer(ActiveCharacterIndex);
-		}
-	}
 }
 
 void AGameplayPlayerState::OnRep_TeamCharacterActors()
 {
-	// 客户端收到队伍角色列表同步后：
-	// 1. 广播本地事件
 	OnTeamCharacterActorsChanged.Broadcast();
-
-	// 2. 通知 TeamManagerSubsystem 更新本地缓存
-	if (UGameInstance* GI = GetGameInstance())
-	{
-		if (UTeamManagerSubsystem* TeamManager = GI->GetSubsystem<UTeamManagerSubsystem>())
-		{
-			TeamManager->OnRep_TeamCharacterActorsFromServer(TeamCharacterActors);
-		}
-	}
 }

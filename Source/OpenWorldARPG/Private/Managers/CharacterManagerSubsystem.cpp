@@ -5,6 +5,7 @@
 #include "Data/CharacterRegistryRow.h"
 #include "Data/InitialArchiveData.h"
 #include "Managers/GameAssetManagerSubsystem.h"
+#include "Engine/LocalPlayer.h"
 
 UCharacterManagerSubsystem::UCharacterManagerSubsystem()
 {
@@ -61,7 +62,7 @@ bool UCharacterManagerSubsystem::GetCharacterRegistryRowByTag(const FGameplayTag
 {
 	EnsureTagMapBuilt();
 
-	UGameAssetManagerSubsystem* AssetManager = GetGameInstance()->GetSubsystem<UGameAssetManagerSubsystem>();
+	UGameAssetManagerSubsystem* AssetManager = GetLocalPlayer()->GetGameInstance()->GetSubsystem<UGameAssetManagerSubsystem>();
 	UDataTable* LoadedTable = AssetManager ? AssetManager->GetCharacterInfoTable() : nullptr;
 	const FName* RowNamePtr = TagToRowNameMap.Find(CharacterTag);
 	if (!RowNamePtr)
@@ -134,7 +135,7 @@ void UCharacterManagerSubsystem::CollectSaveDataFromCharacters(const TArray<APla
 
 void UCharacterManagerSubsystem::PreloadAndProcessCharacterDataTable()
 {
-	UGameAssetManagerSubsystem* AssetManager = GetGameInstance()->GetSubsystem<UGameAssetManagerSubsystem>();
+	UGameAssetManagerSubsystem* AssetManager = GetLocalPlayer()->GetGameInstance()->GetSubsystem<UGameAssetManagerSubsystem>();
 	UDataTable* LoadedTable = AssetManager ? AssetManager->GetCharacterInfoTable() : nullptr;
 	if (!LoadedTable)
 	{

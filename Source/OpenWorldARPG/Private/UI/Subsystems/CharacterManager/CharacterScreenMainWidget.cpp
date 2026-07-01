@@ -45,16 +45,20 @@ void UCharacterScreenMainWidget::NativeConstruct()
     // 生成展台、切换视角、设置输入模式（UI 拥有展台生命周期）
     SpawnStageAndTransition();
 
-    // 【初始选中逻辑：优先选中当前控制角色，保底选中列表第一个】
-    // 延迟一帧触发，确保 Carousel 内部的子 Widget 已全部生成完毕
     GetWorld()->GetTimerManager().SetTimerForNextTick([this]()
     {
         if (!CarouselPanel) return;
 
         FGameplayTag TargetTag;
-        if (UTeamManagerSubsystem* TeamSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UTeamManagerSubsystem>() : nullptr)
+        if (APlayerController* PC = GetOwningPlayer())
         {
-            TargetTag = TeamSubsystem->GetActiveCharacterTag();
+            if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
+            {
+                if (UTeamManagerSubsystem* TeamSubsystem = LocalPlayer->GetSubsystem<UTeamManagerSubsystem>())
+                {
+                    TargetTag = TeamSubsystem->GetActiveCharacterTag();
+                }
+            }
         }
 
         // 【保底机制】：如果没获取到当前控制角色，强制选中列表里的第一个角色
@@ -191,7 +195,16 @@ void UCharacterScreenMainWidget::HandleCharacterSelected(const FGameplayTag& Cha
 
 const UCharacterVisualDataAsset* UCharacterScreenMainWidget::ResolveVisualData(const FGameplayTag& CharacterTag) const
 {
-    UCharacterManagerSubsystem* Subsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UCharacterManagerSubsystem>() : nullptr;
+    UCharacterManagerSubsystem* Subsystem = nullptr;
+
+    if (APlayerController* PC = GetOwningPlayer())
+    {
+        if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
+        {
+            Subsystem = LocalPlayer->GetSubsystem<UCharacterManagerSubsystem>();
+        }
+    }
+
     if (!Subsystem) return nullptr;
 
     FCharacterRegistryRow Row;

@@ -49,10 +49,15 @@ void UTeamSetupScreenWidget::NativeConstruct()
         SlotButton_3->OnClicked.AddDynamic(this, &UTeamSetupScreenWidget::OnSlot3Clicked);
     }
 
-    // 监听 TeamManagerSubsystem 的队伍变化
-    if (UTeamManagerSubsystem* TeamSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UTeamManagerSubsystem>() : nullptr)
+    if (APlayerController* PC = GetOwningPlayer())
     {
-        TeamSubsystem->OnTeamListUpdatedDelegate.AddDynamic(this, &UTeamSetupScreenWidget::HandleTeamListUpdated);
+        if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
+        {
+            if (UTeamManagerSubsystem* TeamSubsystem = LocalPlayer->GetSubsystem<UTeamManagerSubsystem>())
+            {
+                TeamSubsystem->OnTeamListUpdatedDelegate.AddDynamic(this, &UTeamSetupScreenWidget::HandleTeamListUpdated);
+            }
+        }
     }
 
     // 初始化 PendingTeam
@@ -77,10 +82,15 @@ void UTeamSetupScreenWidget::NativeConstruct()
 
 void UTeamSetupScreenWidget::NativeDestruct()
 {
-    // 解绑委托避免悬空指针
-    if (UTeamManagerSubsystem* TeamSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UTeamManagerSubsystem>() : nullptr)
+    if (APlayerController* PC = GetOwningPlayer())
     {
-        TeamSubsystem->OnTeamListUpdatedDelegate.RemoveDynamic(this, &UTeamSetupScreenWidget::HandleTeamListUpdated);
+        if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
+        {
+            if (UTeamManagerSubsystem* TeamSubsystem = LocalPlayer->GetSubsystem<UTeamManagerSubsystem>())
+            {
+                TeamSubsystem->OnTeamListUpdatedDelegate.RemoveDynamic(this, &UTeamSetupScreenWidget::HandleTeamListUpdated);
+            }
+        }
     }
 
     // 销毁展台、恢复视角、恢复输入模式
@@ -187,9 +197,15 @@ void UTeamSetupScreenWidget::InitializePendingTeam()
 {
     PendingTeam.Reset();
 
-    if (UTeamManagerSubsystem* TeamSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UTeamManagerSubsystem>() : nullptr)
+    if (APlayerController* PC = GetOwningPlayer())
     {
-        PendingTeam = TeamSubsystem->GetCurrentTeamCharacterTags();
+        if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
+        {
+            if (UTeamManagerSubsystem* TeamSubsystem = LocalPlayer->GetSubsystem<UTeamManagerSubsystem>())
+            {
+                PendingTeam = TeamSubsystem->GetCurrentTeamCharacterTags();
+            }
+        }
     }
 
     // 保证 PendingTeam 长度为 MaxTeamSize
@@ -261,21 +277,25 @@ void UTeamSetupScreenWidget::ClearSlot(int32 SlotIndex)
 
 void UTeamSetupScreenWidget::SaveAndExit()
 {
-    if (UTeamManagerSubsystem* TeamSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UTeamManagerSubsystem>() : nullptr)
+    if (APlayerController* PC = GetOwningPlayer())
     {
-        // 移除 PendingTeam 末尾的空 Tag，避免空槽位写入 Subsystem
-        TArray<FGameplayTag> FinalTeam;
-        FinalTeam.Reserve(PendingTeam.Num());
-        for (const FGameplayTag& Tag : PendingTeam)
+        if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
         {
-            if (Tag.IsValid())
+            if (UTeamManagerSubsystem* TeamSubsystem = LocalPlayer->GetSubsystem<UTeamManagerSubsystem>())
             {
-                FinalTeam.Add(Tag);
+                TArray<FGameplayTag> FinalTeam;
+                FinalTeam.Reserve(PendingTeam.Num());
+                for (const FGameplayTag& Tag : PendingTeam)
+                {
+                    if (Tag.IsValid())
+                    {
+                        FinalTeam.Add(Tag);
+                    }
+                }
+
+                TeamSubsystem->SetCurrentTeam(FinalTeam, 0);
             }
         }
-
-        // 写入 Subsystem（保留原激活角色索引 0）
-        TeamSubsystem->SetCurrentTeam(FinalTeam, 0);
     }
 
     // 通知服务器在世界中真正刷新角色蓝图实体（销毁旧队伍 → Spawn 新队伍 → Possess）

@@ -1,12 +1,10 @@
 // Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Components/InteractionComponent.h"
-#include "World/Interactables/PickableItemBase.h"
-#include "Managers/InventoryManagerSubsystem.h"
+#include "Interfaces/InteractableInterface.h"
 #include "Characters/PlayerCharacter.h"
 #include "AbilitySystemComponent.h"
 #include "Engine/World.h"
-#include "Engine/OverlapResult.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Net/UnrealNetwork.h"
 
@@ -22,15 +20,6 @@ UInteractionComponent::UInteractionComponent()
 void UInteractionComponent::BeginPlay()
 {
     Super::BeginPlay();
-
-    if (UGameInstance* GI = GetWorld()->GetGameInstance())
-    {
-        InventorySubsystem = GI->GetSubsystem<UInventoryManagerSubsystem>();
-        if (InventorySubsystem)
-        {
-            InventorySubsystem->OnItemDropped.AddDynamic(this, &UInteractionComponent::HandleOnItemDropped);
-        }
-    }
 }
 
 void UInteractionComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -42,7 +31,7 @@ void UInteractionComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    // 仅在本地控制端执行拾取检测（避免服务器为所有客户端角色做检测）
+    // 仅在本地控制端执行交互检测（避免服务器为所有客户端角色做检测）
     APawn* OwnerPawn = Cast<APawn>(GetOwner());
     if (OwnerPawn && !OwnerPawn->IsLocallyControlled()) return;
 
@@ -51,43 +40,52 @@ void UInteractionComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 
     FVector StartLoc = OwnerActor->GetActorLocation();
     FVector EndLoc = StartLoc;
-    float SphereRadius = 150.0f;
 
+    // 通用通道：覆盖掉落物(PhysicsBody)、动态物件(WorldDynamic)、载具(Vehicle)、角色(Pawn)
     TArray<TEnumAsByte<EObjectTypeQuery>> ObjectTypes;
     ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_PhysicsBody));
     ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_WorldDynamic));
+    ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_Vehicle));
+    ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_Pawn));
 
     TArray<AActor*> ActorsToIgnore;
     ActorsToIgnore.Add(OwnerActor);
 
-    // 改为多体检测，支持多个物品重叠
+    // 多体检测，支持多个交互对象重叠
     TArray<FHitResult> HitResults;
     UKismetSystemLibrary::SphereTraceMultiForObjects(
-        this, StartLoc, EndLoc, SphereRadius, ObjectTypes,
+        this, StartLoc, EndLoc, InteractionRadius, ObjectTypes,
         false, ActorsToIgnore, EDrawDebugTrace::None, HitResults, true);
 
-    TArray<AActor*> NewPickableItems;
+    // 遍历命中结果，通过接口筛选可交互对象
+    TArray<AActor*> NewInteractableActors;
     for (const FHitResult& Hit : HitResults)
     {
-        if (APickableItemBase* Item = Cast<APickableItemBase>(Hit.GetActor()))
+        AActor* HitActor = Hit.GetActor();
+        if (!HitActor) continue;
+
+        // 接口化检测：不依赖任何具体类型
+        if (HitActor->Implements<UInteractableInterface>())
         {
-            NewPickableItems.Add(Item);
+            // 调用接口方法确认是否可以交互
+            if (IInteractableInterface::Execute_CanInteract(HitActor, Cast<ACharacter>(OwnerPawn)))
+            {
+                NewInteractableActors.Add(HitActor);
+            }
         }
     }
 
     // 比对新旧列表是否发生变化
     bool bChanged = false;
-    if (NewPickableItems.Num() != CurrentPickableItems.Num())
+    if (NewInteractableActors.Num() != CurrentInteractableActors.Num())
     {
         bChanged = true;
     }
     else
     {
-        for (int32 i = 0; i < NewPickableItems.Num(); ++i)
+        for (int32 i = 0; i < NewInteractableActors.Num(); ++i)
         {
-            // 注意：由于旧列表存的是 TWeakObjectPtr，如果物品被销毁，Get() 会返回 nullptr，
-            // 此时比较必为 false（由于新扫描到的数组不可能包含 nullptr），精准修复了销毁导致 UI 残留的 Bug。
-            if (NewPickableItems[i] != CurrentPickableItems[i].Get())
+            if (NewInteractableActors[i] != CurrentInteractableActors[i].Get())
             {
                 bChanged = true;
                 break;
@@ -98,12 +96,12 @@ void UInteractionComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
     // 仅当可交互对象列表发生改变时才广播
     if (bChanged)
     {
-        CurrentPickableItems.Empty();
-        for (AActor* Item : NewPickableItems)
+        CurrentInteractableActors.Empty();
+        for (AActor* Actor : NewInteractableActors)
         {
-            CurrentPickableItems.Add(Item);
+            CurrentInteractableActors.Add(Actor);
         }
-        OnPickableListChangedDelegate.Broadcast(NewPickableItems);
+        OnInteractableListChangedDelegate.Broadcast(NewInteractableActors);
     }
 }
 
@@ -121,171 +119,35 @@ bool UInteractionComponent::IsCharacterInStandby() const
     return false;
 }
 
-int32 UInteractionComponent::GetOwnerCharacterID() const
+// --- 通用交互：多态分发 ---
+
+void UInteractionComponent::Interact()
 {
+    if (IsCharacterInStandby() || CurrentInteractableActors.IsEmpty()) return;
+
     APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(GetOwner());
-    if (PlayerChar)
+    if (!PlayerChar) return;
+
+    for (TWeakObjectPtr<AActor> WeakActor : CurrentInteractableActors)
     {
-        return PlayerChar->GetCharacterTag().GetTagName().GetNumber();
-    }
-    return -1;
-}
-
-// --- 拾取物品 (Client → Server RPC) ---
-
-void UInteractionComponent::PickUpItem()
-{
-    // 客户端：只发送请求到服务器
-    if (IsCharacterInStandby() || CurrentPickableItems.IsEmpty()) return;
-
-    // 默认拾取列表里第一个有效的物品 (若要做《鸣潮》的一键拾取全部，可去掉这里的 break 循环发送)
-    for (TWeakObjectPtr<AActor> WeakItem : CurrentPickableItems)
-    {
-        if (APickableItemBase* PickableItem = Cast<APickableItemBase>(WeakItem.Get()))
+        AActor* TargetActor = WeakActor.Get();
+        if (TargetActor && TargetActor->Implements<UInteractableInterface>())
         {
-            Server_PickUpItem(PickableItem->ItemID, PickableItem->ItemAmount);
-            break; 
+            IInteractableInterface::Execute_OnInteract(TargetActor, PlayerChar);
+            break;
         }
     }
 }
 
-bool UInteractionComponent::Server_PickUpItem_Validate(int32 ItemID, int32 Amount)
-{
-    return ItemID > 0 && Amount > 0;
-}
-
-void UInteractionComponent::Server_PickUpItem_Implementation(int32 ItemID, int32 Amount)
-{
-    // 服务器端：执行拾取逻辑（权威操作）
-    if (IsCharacterInStandby() || !InventorySubsystem) return;
-
-    InventorySubsystem->AddItem(ItemID, Amount);
-
-    // 服务器端销毁可拾取物品
-    AActor* OwnerActor = GetOwner();
-    if (!OwnerActor) return;
-
-    FVector OwnerLoc = OwnerActor->GetActorLocation();
-    float SearchRadius = 200.0f;
-
-    TArray<FOverlapResult> OverlapResults;
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(OwnerActor);
-
-    GetWorld()->OverlapMultiByObjectType(
-        OverlapResults,
-        OwnerLoc,
-        FQuat::Identity,
-        FCollisionObjectQueryParams(ECollisionChannel::ECC_PhysicsBody),
-        FCollisionShape::MakeSphere(SearchRadius),
-        QueryParams
-    );
-
-    for (const FOverlapResult& Result : OverlapResults)
-    {
-        if (APickableItemBase* Item = Cast<APickableItemBase>(Result.GetActor()))
-        {
-            if (Item->ItemID == ItemID)
-            {
-                Item->Destroy();
-                break;
-            }
-        }
-    }
-}
-
-// --- 丢弃物品 (Client → Server RPC) ---
-
-void UInteractionComponent::DropItemByGUID(FGuid ItemGUID, int32 DropAmount)
-{
-    // 客户端：只发送请求到服务器
-    Server_DropItemByGUID(ItemGUID, DropAmount);
-}
-
-bool UInteractionComponent::Server_DropItemByGUID_Validate(FGuid ItemGUID, int32 DropAmount)
-{
-    return DropAmount > 0;
-}
-
-void UInteractionComponent::Server_DropItemByGUID_Implementation(FGuid ItemGUID, int32 DropAmount)
-{
-    // 服务器端：执行丢弃逻辑（权威操作）
-    if (!InventorySubsystem) return;
-    InventorySubsystem->RemoveItemByGUID(ItemGUID, DropAmount);
-}
-
-void UInteractionComponent::DropItem(int32 DropIndex, int32 DropAmount)
-{
-    if (!InventorySubsystem) return;
-    InventorySubsystem->RemoveItemByIndex(DropIndex, DropAmount);
-}
-
-bool UInteractionComponent::UseItemByGUID(FGuid ItemGUID, int32 UseAmount)
-{
-    if (!InventorySubsystem) return false;
-    return InventorySubsystem->UseItem(ItemGUID, GetOwnerCharacterID(), UseAmount);
-}
-
-bool UInteractionComponent::EquipItemByGUID(FGuid ItemGUID)
-{
-    if (!InventorySubsystem) return false;
-    return InventorySubsystem->EquipItem(ItemGUID, GetOwnerCharacterID());
-}
-
-bool UInteractionComponent::UnequipItemByGUID(FGuid ItemGUID)
-{
-    if (!InventorySubsystem) return false;
-    return InventorySubsystem->UnequipItem(ItemGUID);
-}
-
-TArray<AActor*> UInteractionComponent::GetCurrentPickableItems() const
+TArray<AActor*> UInteractionComponent::GetCurrentInteractableActors() const
 {
     TArray<AActor*> Result;
-    for (TWeakObjectPtr<AActor> WeakItem : CurrentPickableItems)
+    for (TWeakObjectPtr<AActor> WeakActor : CurrentInteractableActors)
     {
-        if (WeakItem.IsValid())
+        if (WeakActor.IsValid())
         {
-            Result.Add(WeakItem.Get());
+            Result.Add(WeakActor.Get());
         }
     }
     return Result;
-}
-
-void UInteractionComponent::HandleOnItemDropped(int32 ItemID, int32 DroppedAmount)
-{
-    // 仅在服务器端生成丢弃物品（服务器权威）
-    if (!GetOwner()->HasAuthority()) return;
-    if (IsCharacterInStandby()) return;
-
-    // 防止队伍中所有角色的 InteractionComponent 都响应同一个 OnItemDropped 广播。
-    // InventoryManagerSubsystem 是 UGameInstanceSubsystem（全队共享），
-    // 其 OnItemDropped 会通知到所有角色的组件。只有当前被玩家控制的（已 Possess 的）
-    // 角色才应该生成丢弃物，其余待机角色不应响应。
-    APawn* OwnerPawn = Cast<APawn>(GetOwner());
-    if (!OwnerPawn || !OwnerPawn->IsPlayerControlled()) return;
-
-    SpawnDroppedItem(ItemID, DroppedAmount);
-}
-
-void UInteractionComponent::SpawnDroppedItem(int32 ItemID, int32 DroppedAmount)
-{
-    AActor* OwnerActor = GetOwner();
-    if (!OwnerActor) return;
-
-    FVector OwnerLoc = OwnerActor->GetActorLocation();
-    FVector OwnerForward = OwnerActor->GetActorForwardVector();
-    FVector SpawnLocation = OwnerLoc + (OwnerForward * 100.0f);
-    FRotator SpawnRotation = FRotator::ZeroRotator;
-
-    FActorSpawnParameters SpawnParams;
-    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
-    SpawnParams.Instigator = Cast<APawn>(OwnerActor);
-
-    APickableItemBase* DroppedItem = GetWorld()->SpawnActor<APickableItemBase>(APickableItemBase::StaticClass(), SpawnLocation, SpawnRotation, SpawnParams);
-    if (DroppedItem)
-    {
-        DroppedItem->InitializeItem(ItemID, DroppedAmount);
-        FVector LinearVelocity = (OwnerForward * 300.0f) + FVector(0.0f, 0.0f, 300.0f);
-        DroppedItem->ApplyThrowPhysics(LinearVelocity);
-    }
 }

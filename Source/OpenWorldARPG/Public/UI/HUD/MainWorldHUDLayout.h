@@ -28,9 +28,7 @@ protected:
     virtual void NativeOnInitialized() override;
     virtual void NativeDestruct() override;
 
-    // ==========================================
-    // 控件绑定 (变量名必须与蓝图中完全一致)
-    // ==========================================
+    // --- 控件绑定 ---
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
     UTeamListWidget* WBP_TeamList;
@@ -51,7 +49,7 @@ protected:
     UWidget* WBP_AimStar;
 
 private:
-    // --- MVVM 回调（监听 ExtensionComponent 的统一事件） ---
+    // --- MVVM 回调 ---
 
     UFUNCTION()
     void OnHealthChanged(float NewHealth, float NewMaxHealth);
@@ -62,15 +60,13 @@ private:
     UFUNCTION()
     void OnInteractionListChanged(const TArray<AActor*>& InteractableActors);
 
-    /** 绑定/解绑 UI 扩展组件（在初始化和 Pawn 切换时复用） */
     void BindToExtensionComp(UHeroUIExtensionComponent* NewExtensionComp);
     void UnbindFromExtensionComp();
 
-    /** Pawn 切换回调（由 PlayerController->OnPossessedPawnChanged 触发） */
     UFUNCTION()
     void OnPossessedPawnChanged(APawn* OldPawn, APawn* NewPawn);
 
-    // --- 缓存指针 ---
+    // --- 缓存 ---
     TWeakObjectPtr<UHeroUIExtensionComponent> CachedExtensionComp;
 
     float CurrentHealth = 0.0f;

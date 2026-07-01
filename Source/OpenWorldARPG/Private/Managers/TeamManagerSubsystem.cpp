@@ -6,14 +6,13 @@
 #include "Core/PlayerControllers/GameplayPlayerController.h"
 #include "Core/PlayerStates/GameplayPlayerState.h"
 #include "Data/InitialArchiveData.h"
-#include "Engine/GameInstance.h"
 #include "Engine/LocalPlayer.h"
 
 void UTeamManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
 
-    CharacterManager = GetGameInstance()->GetSubsystem<UCharacterManagerSubsystem>();
+    CharacterManager = GetLocalPlayer()->GetSubsystem<UCharacterManagerSubsystem>();
     if (!CharacterManager)
     {
         UE_LOG(LogTemp, Error, TEXT("TeamManagerSubsystem::Initialize - Failed to get CharacterManagerSubsystem."));
@@ -22,10 +21,28 @@ void UTeamManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
     {
         UE_LOG(LogTemp, Log, TEXT("TeamManagerSubsystem::Initialize - CharacterManagerSubsystem linked."));
     }
+
+    if (UWorld* World = GetWorld())
+    {
+        if (APlayerController* PC = GetLocalPlayer()->GetPlayerController(World))
+        {
+            if (AGameplayPlayerState* PlayerState = PC->GetPlayerState<AGameplayPlayerState>())
+            {
+                BindToPlayerStateEvents(PlayerState);
+            }
+        }
+    }
 }
 
 void UTeamManagerSubsystem::Deinitialize()
 {
+    if (BoundPlayerState.IsValid())
+    {
+        BoundPlayerState->OnActiveCharacterIndexChanged.RemoveDynamic(this, &UTeamManagerSubsystem::HandleActiveCharacterIndexChanged);
+        BoundPlayerState->OnTeamCharacterActorsChanged.RemoveDynamic(this, &UTeamManagerSubsystem::HandleTeamCharacterActorsChanged);
+        BoundPlayerState = nullptr;
+    }
+
     CharacterManager = nullptr;
     CurrentTeamCharacters.Empty();
 
@@ -67,18 +84,13 @@ void UTeamManagerSubsystem::SwitchToCharacterByIndex(int32 TeamIndex)
 {
     if (!IsCharacterSwitchable(TeamIndex)) return;
 
-    // 获取本地玩家（而非硬编码 Player 0）的 PlayerController
-    // 联机时每个客户端只有自己的 LocalPlayer
     if (UWorld* World = GetWorld())
     {
-        if (ULocalPlayer* LocalPlayer = World->GetFirstLocalPlayerFromController())
+        if (AGameplayPlayerController* PC = Cast<AGameplayPlayerController>(GetLocalPlayer()->GetPlayerController(World)))
         {
-            if (AGameplayPlayerController* PC = Cast<AGameplayPlayerController>(LocalPlayer->GetPlayerController(World)))
-            {
-                PC->Server_SwitchCharacter(TeamIndex);
-                UE_LOG(LogTemp, Log, TEXT("TeamManager: 通过 Server RPC 请求切换到索引 %d 的角色"), TeamIndex);
-                return;
-            }
+            PC->Server_SwitchCharacter(TeamIndex);
+            UE_LOG(LogTemp, Log, TEXT("TeamManager: 通过 Server RPC 请求切换到索引 %d 的角色"), TeamIndex);
+            return;
         }
     }
 
@@ -137,7 +149,6 @@ void UTeamManagerSubsystem::OnRep_ActiveCharacterIndexFromServer(int32 NewActive
 
 void UTeamManagerSubsystem::OnRep_TeamCharacterActorsFromServer(const TArray<APlayerCharacter*>& NewTeamActors)
 {
-    // 从服务器同步来的角色实例中更新本地队伍 Tag 缓存
     TArray<FGameplayTag> UpdatedTags;
     UpdatedTags.Reserve(NewTeamActors.Num());
 
@@ -155,5 +166,39 @@ void UTeamManagerSubsystem::OnRep_TeamCharacterActorsFromServer(const TArray<APl
         OnTeamListUpdatedDelegate.Broadcast();
 
         UE_LOG(LogTemp, Log, TEXT("TeamManager: OnRep_TeamCharacterActors - 队伍成员已更新，共 %d 个"), CurrentTeamCharacters.Num());
+    }
+}
+
+void UTeamManagerSubsystem::BindToPlayerStateEvents(AGameplayPlayerState* PlayerState)
+{
+    if (!IsValid(PlayerState)) return;
+
+    PlayerState->OnActiveCharacterIndexChanged.AddDynamic(
+        this, &UTeamManagerSubsystem::HandleActiveCharacterIndexChanged);
+
+    PlayerState->OnTeamCharacterActorsChanged.AddDynamic(
+        this, &UTeamManagerSubsystem::HandleTeamCharacterActorsChanged);
+
+    BoundPlayerState = PlayerState;
+
+    UE_LOG(LogTemp, Log, TEXT("TeamManager: 已绑定到 PlayerState 事件"));
+}
+
+void UTeamManagerSubsystem::HandleActiveCharacterIndexChanged(int32 OldIndex, int32 NewIndex)
+{
+    OnRep_ActiveCharacterIndexFromServer(NewIndex);
+}
+
+void UTeamManagerSubsystem::HandleTeamCharacterActorsChanged()
+{
+    if (UWorld* World = GetWorld())
+    {
+        if (APlayerController* PC = GetLocalPlayer()->GetPlayerController(World))
+        {
+            if (AGameplayPlayerState* PlayerState = PC->GetPlayerState<AGameplayPlayerState>())
+            {
+                OnRep_TeamCharacterActorsFromServer(PlayerState->GetTeamCharacterActors());
+            }
+        }
     }
 }

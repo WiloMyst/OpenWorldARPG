@@ -486,6 +486,12 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "StateTags")
 	FGameplayTag FastSwimmingTag;
 
+	UPROPERTY(EditDefaultsOnly, Category = "StateTags")
+	FGameplayTag MovingTag;
+
+	UPROPERTY(EditDefaultsOnly, Category = "StateTags")
+	float MovingSpeedThreshold = 50.0f;
+
 protected:
 	// ==========================================
 	// 物理模拟 - 攀爬
@@ -587,6 +593,8 @@ private:
 	FVector ClimbWallNormal = FVector::ZeroVector;
 
 	bool bIsSnappingToWall = false;
+
+	bool bCanTryClimb = false;
 	FVector SnapTargetLocation = FVector::ZeroVector;
 	FRotator SnapTargetRotation = FRotator::ZeroRotator;
 	float SnapInterpSpeed = 10.0f;

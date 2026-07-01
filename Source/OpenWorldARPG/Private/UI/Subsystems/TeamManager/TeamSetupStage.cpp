@@ -10,6 +10,7 @@
 #include "Data/CharacterRegistryRow.h"
 #include "Data/CharacterVisualDataAsset.h"
 #include "Engine/Engine.h"
+#include "Engine/LocalPlayer.h"
 
 ATeamSetupStage::ATeamSetupStage()
 {
@@ -138,7 +139,19 @@ void ATeamSetupStage::RotateCharacters(float DeltaYaw)
 
 void ATeamSetupStage::RefreshStage(const TArray<FGameplayTag>& TeamTags)
 {
-    UCharacterManagerSubsystem* Subsystem = GetWorld() ? GetWorld()->GetGameInstance()->GetSubsystem<UCharacterManagerSubsystem>() : nullptr;
+    UCharacterManagerSubsystem* Subsystem = nullptr;
+
+    if (UWorld* World = GetWorld())
+    {
+        if (APlayerController* PC = World->GetFirstPlayerController())
+        {
+            if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
+            {
+                Subsystem = LocalPlayer->GetSubsystem<UCharacterManagerSubsystem>();
+            }
+        }
+    }
+
     if (!Subsystem)
     {
         UE_LOG(LogTemp, Warning, TEXT("ATeamSetupStage::RefreshStage: CharacterManagerSubsystem 不可用"));

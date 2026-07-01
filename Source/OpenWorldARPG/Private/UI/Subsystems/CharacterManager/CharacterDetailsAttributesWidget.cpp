@@ -15,7 +15,16 @@ void UCharacterDetailsAttributesWidget::RefreshData(const FGameplayTag& Characte
 {
     CurrentCharacterTag = CharacterTag;
 
-    UCharacterManagerSubsystem* Subsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UCharacterManagerSubsystem>() : nullptr;
+    UCharacterManagerSubsystem* Subsystem = nullptr;
+
+    if (APlayerController* PC = GetOwningPlayer())
+    {
+        if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
+        {
+            Subsystem = LocalPlayer->GetSubsystem<UCharacterManagerSubsystem>();
+        }
+    }
+
     if (!Subsystem) return;
 
     // 拉取存档数据

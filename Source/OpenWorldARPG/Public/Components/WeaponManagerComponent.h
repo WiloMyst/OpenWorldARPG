@@ -9,6 +9,7 @@
 
 class APlayerCharacter;
 class AWeaponBase;
+class UAbilitySystemComponent;
 
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class OPENWORLDARPG_API UWeaponManagerComponent : public UActorComponent
@@ -17,7 +18,6 @@ class OPENWORLDARPG_API UWeaponManagerComponent : public UActorComponent
 
 public:
     UWeaponManagerComponent();
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 protected:
     virtual void BeginPlay() override;
@@ -49,15 +49,29 @@ protected:
 
     // --- 配置 ---
 
+    /** 武器在手上的 Socket 名称 */
     UPROPERTY(EditDefaultsOnly, Category = "Weapon System|Config|Sockets")
     FName HandSocketName = FName("HandSocket");
 
+    /** 防止武器自动收起的标签容器 */
     UPROPERTY(EditDefaultsOnly, Category = "Weapon System|Config|Tags")
     FGameplayTagContainer PreventStowTags;
 
-    UPROPERTY(EditDefaultsOnly, Category = "Weapon System|Config|Thresholds")
-    float MovementInputThreshold = 0.01f;
+    /** 移动标签 */
+    UPROPERTY(EditDefaultsOnly, Category = "Weapon System|Config|Tags")
+    FGameplayTag MovingTag;
 
 private:
     bool bIsWeaponStowed = true;
+
+    UPROPERTY()
+    TObjectPtr<UAbilitySystemComponent> CachedASC;
+
+    void UpdateWeaponState();
+
+    UFUNCTION()
+    void OnMovementTagChanged(const FGameplayTag CallbackTag, int32 NewCount);
+
+    UFUNCTION()
+    void OnPreventStowTagChanged(const FGameplayTag CallbackTag, int32 NewCount);
 };

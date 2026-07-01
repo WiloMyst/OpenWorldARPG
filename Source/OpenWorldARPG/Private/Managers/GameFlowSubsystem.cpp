@@ -69,14 +69,24 @@ void UGameFlowSubsystem::InitializeTeamData()
     }
 
     UGameInstance* GI = GetGameInstance();
+    if (!GI) return;
 
-    UCharacterManagerSubsystem* CharManager = GI->GetSubsystem<UCharacterManagerSubsystem>();
-    UTeamManagerSubsystem* TeamManager = GI->GetSubsystem<UTeamManagerSubsystem>();
-
-    if (CharManager && TeamManager)
+    for (int32 i = 0; i < GI->GetNumLocalPlayers(); ++i)
     {
-        CharManager->InitializeFromDataObject(ArchiveData);
-        TeamManager->InitializeFromDataObject(ArchiveData);
+        if (ULocalPlayer* LocalPlayer = GI->GetLocalPlayerByIndex(i))
+        {
+            UCharacterManagerSubsystem* CharManager = LocalPlayer->GetSubsystem<UCharacterManagerSubsystem>();
+            UTeamManagerSubsystem* TeamManager = LocalPlayer->GetSubsystem<UTeamManagerSubsystem>();
+
+            if (CharManager)
+            {
+                CharManager->InitializeFromDataObject(ArchiveData);
+            }
+            if (TeamManager)
+            {
+                TeamManager->InitializeFromDataObject(ArchiveData);
+            }
+        }
     }
 }
 
@@ -118,15 +128,24 @@ void UGameFlowSubsystem::BeginAssetBlock()
 
 void UGameFlowSubsystem::OnLevelPreloadFinished()
 {
-    // 关卡预加载完成 → 启动队伍资源加载
     UGameAssetManagerSubsystem* AssetManager = GetGameInstance()->GetSubsystem<UGameAssetManagerSubsystem>();
-    UTeamManagerSubsystem* TeamManager = GetGameInstance()->GetSubsystem<UTeamManagerSubsystem>();
+    if (!AssetManager) return;
 
-    if (AssetManager && TeamManager)
+    UGameInstance* GI = GetGameInstance();
+    if (!GI) return;
+
+    for (int32 i = 0; i < GI->GetNumLocalPlayers(); ++i)
     {
-        TArray<FGameplayTag> TeamTags = TeamManager->GetCurrentTeamCharacterTags();
-        AssetManager->StartTeamAssetLoading(TeamTags);
-        UE_LOG(LogTemp, Log, TEXT("GameFlow: 关卡预加载完成，已启动队伍资产加载。"));
+        if (ULocalPlayer* LocalPlayer = GI->GetLocalPlayerByIndex(i))
+        {
+            if (UTeamManagerSubsystem* TeamManager = LocalPlayer->GetSubsystem<UTeamManagerSubsystem>())
+            {
+                TArray<FGameplayTag> TeamTags = TeamManager->GetCurrentTeamCharacterTags();
+                AssetManager->StartTeamAssetLoading(TeamTags);
+                UE_LOG(LogTemp, Log, TEXT("GameFlow: 关卡预加载完成，已启动队伍资产加载。"));
+                break;
+            }
+        }
     }
 }
 

@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Interfaces/TargetableInterface.h"
 #include "SelectableTargetActor.generated.h"
 
 class USphereComponent;
@@ -13,7 +14,7 @@ class USceneComponent;
  * 可被视野选中的实体基类 (钩索点、可暗杀敌人、可互动物品等)。
  */
 UCLASS(Abstract)
-class OPENWORLDARPG_API ASelectableTargetActor : public AActor
+class OPENWORLDARPG_API ASelectableTargetActor : public AActor, public ITargetableInterface
 {
     GENERATED_BODY()
 
@@ -24,13 +25,10 @@ protected:
     virtual void BeginPlay() override;
 
 public:
-    // --- 状态响应 ---
+    // --- ITargetableInterface 实现 ---
 
-    UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Targeting|Events")
-    void OnSetAsTarget();
-
-    UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Targeting|Events")
-    void OnClearAsTarget();
+    virtual void OnSetAsTarget_Implementation() override;
+    virtual void OnClearAsTarget_Implementation() override;
 
     // --- 视觉辅助 ---
     UFUNCTION(BlueprintCallable, Category = "Targeting|Visuals")

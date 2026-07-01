@@ -29,7 +29,16 @@ void UCharacterCarouselWidget::RefreshCharacterList()
     CharacterListContainer->ClearChildren();
     SelectedItem = nullptr;
 
-    UCharacterManagerSubsystem* Subsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UCharacterManagerSubsystem>() : nullptr;
+    UCharacterManagerSubsystem* Subsystem = nullptr;
+
+    if (APlayerController* PC = GetOwningPlayer())
+    {
+        if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
+        {
+            Subsystem = LocalPlayer->GetSubsystem<UCharacterManagerSubsystem>();
+        }
+    }
+
     if (!Subsystem) return;
 
     // 拉取所有已拥有角色

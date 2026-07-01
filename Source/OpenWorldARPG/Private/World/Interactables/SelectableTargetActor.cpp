@@ -32,8 +32,13 @@ void ASelectableTargetActor::BeginPlay()
     }
 }
 
-void ASelectableTargetActor::OnSetAsTarget_Implementation() { }
-void ASelectableTargetActor::OnClearAsTarget_Implementation() { }
+void ASelectableTargetActor::OnSetAsTarget_Implementation()
+{
+}
+
+void ASelectableTargetActor::OnClearAsTarget_Implementation()
+{
+}
 
 void ASelectableTargetActor::OrientToScreen(USceneComponent* SceneCompToOrient)
 {

@@ -30,16 +30,15 @@ protected:
     virtual void NativeConstruct() override;
     virtual void NativeDestruct() override;
 
-    // --- Tab 生成 (纯表现层) ---
+    // --- Tab 生成 ---
 
     void RefreshCategoryTabBox();
-
     void HandleSelectFirstCategoryTab();
 
     UFUNCTION()
     void HandleOnTabClicked(UItemCategoryTabWidget* NewCategoryTab, EItemCategory NewTabCategory);
 
-    // --- 按钮响应 (仅调用 VM) ---
+    // --- 按钮回调 ---
 
     UFUNCTION()
     void OnCloseButtonClicked();
@@ -48,7 +47,7 @@ protected:
     void OnDiscardButtonClicked();
 
 protected:
-    // --- UI 组件绑定 ---
+    // --- 控件绑定 ---
 
     UPROPERTY(meta = (BindWidget))
     TObjectPtr<UItemSlotPanelWidget> WBP_ItemSlotPanel;
@@ -74,7 +73,6 @@ protected:
     TSubclassOf<UItemCategoryTabWidget> CategoryTabClass;
 
 private:
-    /** 视图模型 (MVVM 核心中介层) */
     UPROPERTY()
     TObjectPtr<UInventoryViewModel> ViewModel;
 

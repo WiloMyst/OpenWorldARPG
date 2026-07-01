@@ -11,7 +11,7 @@ void UInventoryManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection
 {
     Super::Initialize(Collection);
 
-    UGameAssetManagerSubsystem* AssetManager = GetGameInstance()->GetSubsystem<UGameAssetManagerSubsystem>();
+    UGameAssetManagerSubsystem* AssetManager = GetLocalPlayer()->GetGameInstance()->GetSubsystem<UGameAssetManagerSubsystem>();
     ItemDatabase = AssetManager ? AssetManager->GetItemDatabaseTable() : nullptr;
 
     if (!ItemDatabase)

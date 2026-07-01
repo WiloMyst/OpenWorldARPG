@@ -97,21 +97,13 @@ protected:
 
     // --- 两阶段队伍资产加载 ---
 
-    /**
-     * 阶段 2a：异步加载 VisualDataAsset / CombatDataAsset 本身。
-     * FCharacterRegistryRow 中的 VisualData / CombatData 是 TSoftObjectPtr，
-     * 直接调用 Get() 会触发同步加载（阻塞主线程）。
-     * 必须先将它们异步加载完成，才能安全访问内部字段（AbilityMontages 等）。
-     */
+    /** 阶段 2a：异步加载 VisualDataAsset / CombatDataAsset 本身 */
     void StartDataAssetLoading();
 
-    /** 阶段 2a 完成回调：数据资产加载完毕后，收集内部软引用并启动阶段 2b */
+    /** 阶段 2a 完成：收集内部软引用并启动阶段 2b */
     void OnDataAssetsLoaded();
 
-    /**
-     * 阶段 2b：异步加载所有具体资源（Mesh、Montage、Icon 等）。
-     * 此时 VisualDataAsset / CombatDataAsset 已在内存中，可以安全遍历其字段。
-     */
+    /** 阶段 2b：加载具体资源（Mesh、Montage、Icon 等） */
     void StartInnerAssetLoading();
 
     // --- 分帧释放 ---

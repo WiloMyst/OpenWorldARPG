@@ -12,6 +12,7 @@
 #include "AbilitySystemGlobals.h"
 #include "Engine/StreamableManager.h"
 #include "Engine/AssetManager.h"
+#include "Engine/LocalPlayer.h"
 
 void UGameAssetManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -234,8 +235,34 @@ void UGameAssetManagerSubsystem::StartDataAssetLoading()
     TArray<FSoftObjectPath> DataAssetPaths;
 
     UDataTable* LoadedTable = GetCharacterInfoTable();
-    UCharacterManagerSubsystem* CharManager = GetGameInstance()->GetSubsystem<UCharacterManagerSubsystem>();
-    if (LoadedTable && CharManager)
+    if (!LoadedTable)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Phase 2a: CharacterInfoTable is null, skipping."));
+        OnAllTeamAssetsLoaded();
+        return;
+    }
+
+    UCharacterManagerSubsystem* CharManager = nullptr;
+    if (UGameInstance* GI = GetGameInstance())
+    {
+        for (int32 i = 0; i < GI->GetNumLocalPlayers(); ++i)
+        {
+            if (ULocalPlayer* LocalPlayer = GI->GetLocalPlayerByIndex(i))
+            {
+                CharManager = LocalPlayer->GetSubsystem<UCharacterManagerSubsystem>();
+                if (CharManager) break;
+            }
+        }
+    }
+
+    if (!CharManager)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Phase 2a: CharacterManagerSubsystem is null, skipping."));
+        OnAllTeamAssetsLoaded();
+        return;
+    }
+
+    if (LoadedTable)
     {
         for (const FGameplayTag& CharTag : CurrentTeamToLoad)
         {
@@ -293,16 +320,37 @@ void UGameAssetManagerSubsystem::OnDataAssetsLoaded()
 
 void UGameAssetManagerSubsystem::StartInnerAssetLoading()
 {
-    // ==========================================
-    // 两阶段加载：阶段 2b — 异步加载所有具体资源
-    // ==========================================
-    // 此时 VisualDataAsset / CombatDataAsset 已在内存中，
-    // 可以安全遍历其内部字段收集所有 TSoftObjectPtr 路径。
     TArray<FSoftObjectPath> AssetPathsToLoad;
 
     UDataTable* LoadedTable = GetCharacterInfoTable();
-    UCharacterManagerSubsystem* CharManager = GetGameInstance()->GetSubsystem<UCharacterManagerSubsystem>();
-    if (LoadedTable && CharManager)
+    if (!LoadedTable)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Phase 2b: CharacterInfoTable is null, skipping."));
+        OnAllTeamAssetsLoaded();
+        return;
+    }
+
+    UCharacterManagerSubsystem* CharManager = nullptr;
+    if (UGameInstance* GI = GetGameInstance())
+    {
+        for (int32 i = 0; i < GI->GetNumLocalPlayers(); ++i)
+        {
+            if (ULocalPlayer* LocalPlayer = GI->GetLocalPlayerByIndex(i))
+            {
+                CharManager = LocalPlayer->GetSubsystem<UCharacterManagerSubsystem>();
+                if (CharManager) break;
+            }
+        }
+    }
+
+    if (!CharManager)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Phase 2b: CharacterManagerSubsystem is null, skipping."));
+        OnAllTeamAssetsLoaded();
+        return;
+    }
+
+    if (LoadedTable)
     {
         for (const FGameplayTag& CharTag : CurrentTeamToLoad)
         {

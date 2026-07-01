@@ -95,6 +95,25 @@ void UOpenWorldARPGCharacterMovementComponent::UpdateCharacterStateBeforeMovemen
 	}
 
 	// ==========================================
+	// 1c. 移动状态 Tag 管理（每帧更新）
+	//     根据玩家输入向量判断移动意愿，排除移动平台和外力影响
+	// ==========================================
+	if (CachedASC && MovingTag.IsValid())
+	{
+		float InputMagnitude = Acceleration.Size2D();
+		bool bHasMovementInput = InputMagnitude > MovingSpeedThreshold;
+
+		if (bHasMovementInput)
+		{
+			CachedASC->AddLooseGameplayTag(MovingTag);
+		}
+		else
+		{
+			CachedASC->RemoveLooseGameplayTag(MovingTag);
+		}
+	}
+
+	// ==========================================
 	// 2. Climbing 状态：执行攀爬期间的持续检测
 	//    顺序：落地检测 > 墙角检测 > 法线更新 > 翻越检测
 	//    每一步都可能改变当前模式，所以需要检查是否仍在 Climbing
@@ -203,6 +222,7 @@ void UOpenWorldARPGCharacterMovementComponent::OnMovementModeChanged(EMovementMo
 		if (FallingTag.IsValid())   CachedASC->RemoveLooseGameplayTag(FallingTag);
 		if (SwimmingTag.IsValid())  CachedASC->RemoveLooseGameplayTag(SwimmingTag);
 		if (FastSwimmingTag.IsValid()) CachedASC->RemoveLooseGameplayTag(FastSwimmingTag);
+		if (MovingTag.IsValid())    CachedASC->RemoveLooseGameplayTag(MovingTag);
 
 		// 2. 根据 MovementMode 注入当前被动状态 Tag
 		if (MovementMode == MOVE_Walking || MovementMode == MOVE_NavWalking)
@@ -372,18 +392,64 @@ void UOpenWorldARPGCharacterMovementComponent::CheckFallingToClimb()
 	ACharacter* Char = CachedOwnerCharacter.Get();
 	if (!Char) return;
 
-	// 使用 CMC 内部的 Acceleration 判断输入意图
-	if (Acceleration.IsNearlyZero()) return;
+	if (!Char->IsLocallyControlled()) return;
+
+	if (Acceleration.IsNearlyZero())
+	{
+		bCanTryClimb = false;
+		return;
+	}
 
 	FHitResult ChestHit, HeadHit;
 	if (PerformClimbTraces(FVector::ZeroVector, ChestHit, HeadHit))
 	{
-		if (ChestHit.GetActor() && ChestHit.GetActor()->ActorHasTag(UnclimbableActorTag)) return;
-		if (!IsWallClimbable(ChestHit.Normal)) return;
+		if (ChestHit.GetActor() && ChestHit.GetActor()->ActorHasTag(UnclimbableActorTag))
+		{
+			bCanTryClimb = false;
+			return;
+		}
+		if (!IsWallClimbable(ChestHit.Normal))
+		{
+			bCanTryClimb = false;
+			return;
+		}
 
 		float DotResult = FVector::DotProduct(Acceleration, ChestHit.Normal);
 		if (DotResult < MinInputDotProduct)
 		{
+			if (!bCanTryClimb)
+			{
+				bCanTryClimb = true;
+
+				if (TryClimbEventTag.IsValid())
+				{
+					FGameplayEventData Payload;
+					Payload.EventTag = TryClimbEventTag;
+					Payload.TargetData = UAbilitySystemBlueprintLibrary::AbilityTargetDataFromHitResult(ChestHit);
+					UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(Char, TryClimbEventTag, Payload);
+				}
+			}
+			return;
+		}
+	}
+
+	bCanTryClimb = false;
+}
+
+void UOpenWorldARPGCharacterMovementComponent::CheckGroundedToClimb()
+{
+	ACharacter* Char = CachedOwnerCharacter.Get();
+	if (!Char) return;
+
+	if (!Char->IsLocallyControlled()) return;
+
+	FHitResult ChestHit;
+	if (DetectClimbableWall(ChestHit))
+	{
+		if (!bCanTryClimb)
+		{
+			bCanTryClimb = true;
+
 			if (TryClimbEventTag.IsValid())
 			{
 				FGameplayEventData Payload;
@@ -392,27 +458,10 @@ void UOpenWorldARPGCharacterMovementComponent::CheckFallingToClimb()
 				UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(Char, TryClimbEventTag, Payload);
 			}
 		}
+		return;
 	}
-}
 
-void UOpenWorldARPGCharacterMovementComponent::CheckGroundedToClimb()
-{
-	ACharacter* Char = CachedOwnerCharacter.Get();
-	if (!Char) return;
-
-	// 地面走墙检测：与空中检测逻辑相同，复用 DetectClimbableWall
-	// 检测到可攀爬墙壁 → 发送 TryClimb Event → GA 决定是否进入攀爬
-	FHitResult ChestHit;
-	if (DetectClimbableWall(ChestHit))
-	{
-		if (TryClimbEventTag.IsValid())
-		{
-			FGameplayEventData Payload;
-			Payload.EventTag = TryClimbEventTag;
-			Payload.TargetData = UAbilitySystemBlueprintLibrary::AbilityTargetDataFromHitResult(ChestHit);
-			UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(Char, TryClimbEventTag, Payload);
-		}
-	}
+	bCanTryClimb = false;
 }
 
 void UOpenWorldARPGCharacterMovementComponent::CheckClimbToGround()
@@ -882,6 +931,7 @@ void UOpenWorldARPGCharacterMovementComponent::ClearClimbState()
 	ClimbWallNormal = FVector::ZeroVector;
 	bIsSnappingToWall = false;
 	bIsClimbingUp = false;
+	bCanTryClimb = false;
 }
 
 void UOpenWorldARPGCharacterMovementComponent::SetClimbSnapTarget(const FVector& InTargetLocation, const FRotator& InTargetRotation, float InSnapTime)

@@ -1,16 +1,18 @@
 // Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Core/PlayerControllers/GameplayPlayerController.h"
-#include "Characters/PlayerCharacter.h"
 #include "Core/PlayerStates/GameplayPlayerState.h"
 #include "Core/GameModes/GameplayGameModeBase.h"
+#include "Characters/PlayerCharacter.h"
 #include "Managers/TeamManagerSubsystem.h"
 #include "Managers/UIManagerSubsystem.h"
+#include "UI/Core/WindowWidgetBase.h"
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemBlueprintLibrary.h"
 #include "Blueprint/UserWidget.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "Framework/Application/SlateApplication.h"
 
 AGameplayPlayerController::AGameplayPlayerController()
 {
@@ -33,6 +35,12 @@ void AGameplayPlayerController::BeginPlay()
     {
         MainHUDInstance = CreateWidget<UUserWidget>(this, MainHUDClass);
         if (MainHUDInstance) MainHUDInstance->AddToViewport();
+    }
+
+    // 订阅 UIManager 的 UI 栈变化广播
+    if (UUIManagerSubsystem* UIManager = GetLocalPlayer()->GetSubsystem<UUIManagerSubsystem>())
+    {
+        UIManager->OnUIStackChanged.AddDynamic(this, &AGameplayPlayerController::UpdateInputMode);
     }
 }
 
@@ -97,7 +105,12 @@ void AGameplayPlayerController::SetupInputComponent()
         // 镜头缩放（鼠标滚轮）
         if (IA_CameraZoom) EnhancedInputComponent->BindAction(IA_CameraZoom, ETriggerEvent::Triggered, this, &AGameplayPlayerController::Input_CameraZoom);
 
-        
+        // 显示/隐藏光标（Alt键）
+        if (IA_ShowCursor)
+        {
+            EnhancedInputComponent->BindAction(IA_ShowCursor, ETriggerEvent::Started, this, &AGameplayPlayerController::ShowCursorTemporarily);
+            EnhancedInputComponent->BindAction(IA_ShowCursor, ETriggerEvent::Completed, this, &AGameplayPlayerController::HideCursorTemporarily);
+        }
     }
 }
 
@@ -503,5 +516,79 @@ void AGameplayPlayerController::SetMainHUDVisible(bool bIsVisible)
     if (MainHUDInstance)
     {
         MainHUDInstance->SetVisibility(bIsVisible ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+    }
+}
+
+void AGameplayPlayerController::ShowCursorTemporarily(const FInputActionValue& Value)
+{
+    bIsAltKeyDown = true;
+    UpdateInputMode();
+}
+
+void AGameplayPlayerController::HideCursorTemporarily(const FInputActionValue& Value)
+{
+    bIsAltKeyDown = false;
+    UpdateInputMode();
+}
+
+void AGameplayPlayerController::UpdateInputMode()
+{
+    UUIManagerSubsystem* UIManager = GetLocalPlayer()->GetSubsystem<UUIManagerSubsystem>();
+    
+    UWindowWidgetBase* TopUI = UIManager ? UIManager->GetTopWindowWidget() : nullptr; 
+
+    if (TopUI)
+    {
+        bShowMouseCursor = true;
+        
+        TSharedPtr<SWidget> SlateWidget = TopUI->GetCachedWidget();
+
+        if (TopUI->InputModeWhenOpen == EWidgetInputMode::UIOnly)
+        {
+            FInputModeUIOnly InputMode;
+            if (SlateWidget.IsValid()) InputMode.SetWidgetToFocus(SlateWidget);
+            SetInputMode(InputMode);
+        }
+        else if (TopUI->InputModeWhenOpen == EWidgetInputMode::GameAndUI)
+        {
+            FInputModeGameAndUI InputMode;
+            if (SlateWidget.IsValid()) InputMode.SetWidgetToFocus(SlateWidget);
+            InputMode.SetHideCursorDuringCapture(false);
+            SetInputMode(InputMode);
+        }
+        
+        TopUI->SetFocus();
+
+        if (FSlateApplication::IsInitialized())
+        {
+            FSlateApplication::Get().ReleaseMouseCapture();
+        }
+        return;
+    }
+
+    if (bIsAltKeyDown)
+    {
+        bShowMouseCursor = true;
+        FInputModeGameAndUI InputMode;
+        
+        if (MainHUDInstance && MainHUDInstance->GetCachedWidget().IsValid())
+        {
+            InputMode.SetWidgetToFocus(MainHUDInstance->GetCachedWidget());
+        }
+
+        InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+        InputMode.SetHideCursorDuringCapture(false);
+        SetInputMode(InputMode);
+
+        if (FSlateApplication::IsInitialized())
+        {
+            FSlateApplication::Get().ReleaseMouseCapture();
+        }
+    }
+    else
+    {
+        bShowMouseCursor = false;
+        FInputModeGameOnly InputMode;
+        SetInputMode(InputMode);
     }
 }

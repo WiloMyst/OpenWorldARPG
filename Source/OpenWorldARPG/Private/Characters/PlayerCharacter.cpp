@@ -14,6 +14,7 @@
 #include "Components/InteractionComponent.h"
 #include "Components/TargetingComponent.h"
 #include "Components/HeroUIExtensionComponent.h"
+#include "Vehicles/WheeledVehiclePawnBase.h"
 
 #include "Camera/CameraComponent.h"
 #include "GameFramework/SpringArmComponent.h"
@@ -382,10 +383,15 @@ void APlayerCharacter::SyncAttributesToSaveData()
 	// RuntimeData.CritRate    = PlayerAS->GetCritRate();
 	// RuntimeData.CritDamage  = PlayerAS->GetCritDamage();
 
-	// 2. 同步到 CharacterManagerSubsystem，确保 UI 拉取到最新数据
-	if (UCharacterManagerSubsystem* Subsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UCharacterManagerSubsystem>() : nullptr)
+	if (APlayerController* PC = GetController<APlayerController>())
 	{
-		Subsystem->SetCharacterSaveData(GetCharacterTag(), RuntimeData);
+		if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
+		{
+			if (UCharacterManagerSubsystem* Subsystem = LocalPlayer->GetSubsystem<UCharacterManagerSubsystem>())
+			{
+				Subsystem->SetCharacterSaveData(GetCharacterTag(), RuntimeData);
+			}
+		}
 	}
 }
 
@@ -588,7 +594,7 @@ void APlayerCharacter::HandleInteractInput()
 {
 	if (InteractionComponent)
 	{
-		InteractionComponent->PickUpItem();
+		InteractionComponent->Interact();
 	}
 }
 
@@ -918,17 +924,17 @@ void APlayerCharacter::HandleDeath_Implementation()
 
 void APlayerCharacter::HandleRevive_Implementation()
 {
-	// 调用基类：重置 bIsDead=false、恢复胶囊体碰撞(Pawn)、恢复移动组件(Falling)
 	Super::HandleRevive_Implementation();
 
-	// 恢复玩家输入
 	if (APlayerController* PC = Cast<APlayerController>(GetController()))
 	{
 		EnableInput(PC);
 	}
+}
 
-	// 注意：死亡 Tag 的剥离由 GA_ReviveBase 通过 CancelAbilities(Ability.Death) 自动完成，
-	// 不在此处手动 RemoveLooseGameplayTag。
+UWeaponManagerComponent* APlayerCharacter::GetWeaponManagerComponent_Implementation() const
+{
+	return WeaponManagerComponent;
 }
 
 void APlayerCharacter::NormalMovement(float InputX, float InputY)
@@ -1024,4 +1030,56 @@ void APlayerCharacter::OnClimbUpMontageEnded(UAnimMontage* Montage, bool bInterr
 			UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(this, ClimbStopEventTag, FGameplayEventData());
 		}
 	}
+}
+
+// ============================================================================
+// 载具驾驶：上车准备
+// ============================================================================
+void APlayerCharacter::PrepareForDriving(AActor* VehicleActor, FName SocketName)
+{
+	if (!VehicleActor) return;
+
+	bIsDriving = true;
+
+	// 关闭移动组件
+	if (UCharacterMovementComponent* CMC = GetCharacterMovement())
+	{
+		CMC->StopMovementImmediately();
+		CMC->SetMovementMode(MOVE_None);
+	}
+
+	// 修改 Capsule 碰撞：关闭碰撞，防止干扰 Chaos 载具物理
+	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	// 安全获取载具的 Mesh
+	if (AWheeledVehiclePawnBase* VehiclePawn = Cast<AWheeledVehiclePawnBase>(VehicleActor))
+	{
+		AttachToComponent(
+			VehiclePawn->GetMesh(),
+			FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+			SocketName);
+	}
+}
+
+// ============================================================================
+// 载具驾驶：下车恢复
+// ============================================================================
+void APlayerCharacter::EndDriving(FVector ExitLocation)
+{
+	bIsDriving = false;
+
+	// Detach
+	DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+
+	// 移动到下车位置
+	SetActorLocation(ExitLocation, false, nullptr, ETeleportType::TeleportPhysics);
+
+	// 恢复移动组件
+	if (UCharacterMovementComponent* CMC = GetCharacterMovement())
+	{
+		CMC->SetMovementMode(MOVE_Walking);
+	}
+
+	// 恢复 Capsule 默认碰撞
+	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 }

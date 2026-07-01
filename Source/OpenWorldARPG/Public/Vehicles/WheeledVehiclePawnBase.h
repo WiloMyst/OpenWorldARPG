@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "WheeledVehiclePawn.h"
 #include "InputActionValue.h"
+#include "Interfaces/InteractableInterface.h"
 #include "Data/VehicleConfigDataAsset.h"
 #include "WheeledVehiclePawnBase.generated.h"
 
@@ -17,10 +18,16 @@ class UInputMappingContext;
 // ============================================================================
 // 载具基类 Pawn
 // 基于 Chaos Vehicles 插件的 AWheeledVehiclePawn，采用数据驱动设计。
-// 子类只需在蓝图中指定 VehicleConfig 并设置 SkeletalMesh 即可完成配置。
+//
+// 【架构原则】
+// - 载具基类只管物理：油门刹车输入、Chaos 物理运算、相机弹簧臂
+// - 绝不在载具内部写 PC->Possess()，所有 Possess/UnPossess 由 Controller 发起 Server RPC
+// - 表现与碰撞解耦：玩家上车后不隐藏模型，而是 Attach 到驾驶座 Socket 并关闭移动组件
+// - GAS 驱动生命周期：上下车动作由 GA_MountVehicleBase / GA_UnmountVehicleBase 控制
+// - 实现交互接口，OnInteract 发送 GameplayEvent 触发上车 GA
 // ============================================================================
 UCLASS(Abstract)
-class OPENWORLDARPG_API AWheeledVehiclePawnBase : public AWheeledVehiclePawn
+class OPENWORLDARPG_API AWheeledVehiclePawnBase : public AWheeledVehiclePawn, public IInteractableInterface
 {
     GENERATED_BODY()
 
@@ -45,22 +52,39 @@ public:
         meta = (DisplayName = "载具配置数据"))
     TObjectPtr<UVehicleConfigDataAsset> VehicleConfig;
 
-    // --- 上下车接口（供外部调用） ---
+    // --- 交互接口实现 ---
 
-    /** 驾驶员进入载具 */
-    UFUNCTION(BlueprintCallable, Category = "Vehicle|Possession",
-        meta = (DisplayName = "进入载具"))
-    void EnterVehicle(ACharacter* Driver);
+    virtual bool CanInteract_Implementation(ACharacter* InstigatorCharacter) const override;
+    virtual void OnInteract_Implementation(ACharacter* InstigatorCharacter) override;
+    virtual FTransform GetInteractionTargetTransform_Implementation() const override;
 
-    /** 驾驶员离开载具 */
-    UFUNCTION(BlueprintCallable, Category = "Vehicle|Possession",
-        meta = (DisplayName = "离开载具"))
-    void ExitVehicle();
+    // --- 驾驶员管理 ---
 
     /** 当前驾驶员（网络同步） */
     UPROPERTY(ReplicatedUsing = OnRep_Driver, BlueprintReadOnly, Category = "Vehicle|Possession",
         meta = (DisplayName = "当前驾驶员"))
     ACharacter* Driver = nullptr;
+
+    // --- 供 GA / Controller 调用的公开接口 ---
+
+    /** 查找安全下车位置（供 GA_UnmountVehicleBase 调用） */
+    bool FindSafeExitLocation(FVector& OutLocation) const;
+
+    /** 重置载具输入（供 Controller 在下车时调用） */
+    void ResetVehicleInputs();
+
+    /** 获取驾驶座 Socket 名称 */
+    FName GetDriverSeatSocketName() const { return DriverSeatSocketName; }
+
+    /** 获取下车事件 Tag */
+    FGameplayTag GetUnmountVehicleEventTag() const { return UnmountVehicleEventTag; }
+
+    // --- 动画蓝图数据 ---
+
+    /** 当前方向盘转角（插值后），供双手 IK 使用 */
+    UPROPERTY(BlueprintReadOnly, Category = "Vehicle|Anim",
+        meta = (DisplayName = "当前转向角度"))
+    float CurrentSteeringAngle = 0.0f;
 
     // --- 输入配置 ---
 
@@ -97,6 +121,7 @@ public:
 protected:
 
     virtual void BeginPlay() override;
+    virtual void PawnClientRestart() override;
     virtual void Tick(float DeltaTime) override;
     virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
@@ -122,12 +147,8 @@ protected:
     /** 根据速度动态调整相机 FOV 和臂长 */
     void UpdateDynamicCamera(float DeltaTime);
 
-    // --- 上下车辅助 ---
+    // --- 网络同步回调 ---
 
-    /** 检查下车位置是否安全（无碰撞） */
-    bool FindSafeExitLocation(FVector& OutLocation) const;
-
-    /** 网络同步：驾驶员变化回调 */
     UFUNCTION()
     void OnRep_Driver();
 
@@ -149,6 +170,28 @@ protected:
     UPROPERTY(Transient, BlueprintReadOnly, Category = "Vehicle|State",
         meta = (DisplayName = "当前速度(km/h)"))
     float CurrentSpeedKPH = 0.0f;
+
+    // --- 上下车配置 ---
+
+    /** 驾驶员座位 Socket 名称（角色 Attach 到此 Socket） */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Vehicle|Possession",
+        meta = (DisplayName = "驾驶座 Socket"))
+    FName DriverSeatSocketName = FName("DriverSeat");
+
+    /** 交互吸附点 Socket 名称（Motion Warping 目标位置，如车门外侧） */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Vehicle|Possession",
+        meta = (DisplayName = "交互吸附点 Socket"))
+    FName InteractionSocketName = FName("InteractionPoint");
+
+    // --- GAS 事件 Tags ---
+
+    /** 上车事件 Tag（OnInteract 时发送给角色，激活 GA_MountVehicleBase） */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Vehicle|Tags")
+    FGameplayTag MountVehicleEventTag;
+
+    /** 下车事件 Tag（车内按下车键时发送给角色，激活 GA_UnmountVehicleBase） */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Vehicle|Tags")
+    FGameplayTag UnmountVehicleEventTag;
 
 private:
 

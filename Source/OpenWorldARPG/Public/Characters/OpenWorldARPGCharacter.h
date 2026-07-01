@@ -22,6 +22,7 @@ public:
 
 	virtual void HandleDeath_Implementation() override;
 	virtual void HandleRevive_Implementation() override;
+	virtual UWeaponManagerComponent* GetWeaponManagerComponent_Implementation() const override { return nullptr; }
 
 	UFUNCTION(BlueprintCallable, Category = "Character|Movement")
 	void CorrectPawnOrient();

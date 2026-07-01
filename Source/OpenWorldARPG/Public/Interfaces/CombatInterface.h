@@ -6,6 +6,8 @@
 #include "UObject/Interface.h"
 #include "CombatInterface.generated.h"
 
+class UWeaponManagerComponent;
+
 UINTERFACE(MinimalAPI, Blueprintable)
 class UCombatInterface : public UInterface
 {
@@ -23,7 +25,9 @@ public:
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Combat|State")
 	void HandleDeath();
 
-	/** 复活处理：还原物理碰撞、移动组件与输入控制（与 HandleDeath 对称） */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Combat|State")
 	void HandleRevive();
+
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Combat|Weapon")
+	UWeaponManagerComponent* GetWeaponManagerComponent() const;
 };

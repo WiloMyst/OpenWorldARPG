@@ -6,12 +6,17 @@
 #include "GameFramework/SpringArmComponent.h"
 #include "Camera/CameraComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/PrimitiveComponent.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/PlayerController.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/OverlapResult.h"
 #include "Net/UnrealNetwork.h"
+#include "AbilitySystemBlueprintLibrary.h"
+#include "AbilitySystemInterface.h"
+#include "Core/PlayerControllers/OpenWorldPlayerController.h"
 
 // ============================================================================
 // 构造函数：初始化组件和默认属性
@@ -25,9 +30,21 @@ AWheeledVehiclePawnBase::AWheeledVehiclePawnBase()
     PrimaryActorTick.bCanEverTick = true;
     PrimaryActorTick.TickGroup = TG_PostPhysics;
 
-    // 注意：AWheeledVehiclePawn 已在父类构造函数中创建了
-    // VehicleMovementComponent (UChaosWheeledVehicleMovementComponent) 和 Mesh，
-    // 这里不需要再次 CreateDefaultSubobject
+    // --- 车身物理设置 ---
+    if (USkeletalMeshComponent* VehicleMesh = GetMesh())
+    {
+        // 开启物理模拟，让载具受重力影响、可被碰撞推动
+        VehicleMesh->SetSimulatePhysics(true);
+        VehicleMesh->SetEnableGravity(true);
+        
+        // 设置碰撞预设：Vehicle 通道，物理响应全部开启
+        VehicleMesh->SetCollisionProfileName(UCollisionProfile::Vehicle_ProfileName);
+        
+        
+        
+        // 让车身强制忽略相机射线的防穿模碰撞，防止弹簧臂被压缩为 0
+        VehicleMesh->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+    }
 
     // --- 弹簧臂 ---
     SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
@@ -37,7 +54,7 @@ AWheeledVehiclePawnBase::AWheeledVehiclePawnBase()
     SpringArm->bEnableCameraRotationLag = true;
     SpringArm->CameraLagSpeed = 8.0f;
     SpringArm->CameraRotationLagSpeed = 5.0f;
-    SpringArm->bUsePawnControlRotation = false;
+    SpringArm->bUsePawnControlRotation = true;
     SpringArm->bInheritPitch = true;
     SpringArm->bInheritYaw = true;
     SpringArm->bInheritRoll = false;
@@ -67,7 +84,7 @@ void AWheeledVehiclePawnBase::BeginPlay()
 }
 
 // ============================================================================
-// Tick：更新动态相机
+// Tick：更新动态相机 + 方向盘转角
 // ============================================================================
 void AWheeledVehiclePawnBase::Tick(float DeltaTime)
 {
@@ -81,6 +98,14 @@ void AWheeledVehiclePawnBase::Tick(float DeltaTime)
     }
 
     UpdateDynamicCamera(DeltaTime);
+
+    // --- 方向盘转角插值更新（供动画蓝图双手 IK 使用） ---
+    if (CachedWheeledMovement)
+    {
+        // 读取原始转向输入 [-1, 1]，乘以最大转向角获得目标角度
+        const float TargetAngle = CachedWheeledMovement->GetSteeringInput() * 70.0f;
+        CurrentSteeringAngle = FMath::FInterpTo(CurrentSteeringAngle, TargetAngle, DeltaTime, 10.0f);
+    }
 }
 
 // ============================================================================
@@ -116,25 +141,28 @@ void AWheeledVehiclePawnBase::SetupPlayerInputComponent(UInputComponent* PlayerI
             EnhancedInput->BindAction(IA_Handbrake, ETriggerEvent::Triggered, this, &AWheeledVehiclePawnBase::InputHandbrake);
             EnhancedInput->BindAction(IA_Handbrake, ETriggerEvent::Completed, this, &AWheeledVehiclePawnBase::InputHandbrake);
         }
-        // 下车
+        // 下车：发送 GameplayEvent 给驾驶员角色，由 GA_UnmountVehicleBase 处理
         if (IA_ExitVehicle)
         {
             EnhancedInput->BindAction(IA_ExitVehicle, ETriggerEvent::Started, this, &AWheeledVehiclePawnBase::InputExitVehicle);
         }
     }
+}
 
-    // 添加载具输入映射上下文
+// ============================================================================
+// PawnClientRestart：客户端重新启动时调用，在此注册 IMC（比 SetupPlayerInputComponent 更可靠）
+// ============================================================================
+void AWheeledVehiclePawnBase::PawnClientRestart()
+{
+    Super::PawnClientRestart();
+
     if (VehicleIMC)
     {
         if (APlayerController* PC = Cast<APlayerController>(GetController()))
         {
-            if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
+            if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
             {
-                if (UEnhancedInputLocalPlayerSubsystem* Subsystem =
-                    LocalPlayer->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>())
-                {
-                    Subsystem->AddMappingContext(VehicleIMC, 1);
-                }
+                Subsystem->AddMappingContext(VehicleIMC, 1);
             }
         }
     }
@@ -151,9 +179,61 @@ void AWheeledVehiclePawnBase::GetLifetimeReplicatedProps(TArray<FLifetimePropert
 }
 
 // ============================================================================
+// 交互接口实现
+// ============================================================================
+bool AWheeledVehiclePawnBase::CanInteract_Implementation(ACharacter* InstigatorCharacter) const
+{
+    // 已有驾驶员时不可交互
+    return Driver == nullptr && InstigatorCharacter != nullptr;
+}
+
+void AWheeledVehiclePawnBase::OnInteract_Implementation(ACharacter* InstigatorCharacter)
+{
+    if (!InstigatorCharacter || !MountVehicleEventTag.IsValid()) return;
+
+    // 向角色发送上车事件，激活 GA_MountVehicleBase
+    FGameplayEventData EventData;
+    EventData.Instigator = InstigatorCharacter;
+    EventData.Target = this;
+    EventData.OptionalObject = this; // 目标载具通过 OptionalObject 传递
+
+    UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(
+        InstigatorCharacter, MountVehicleEventTag, EventData);
+}
+
+FTransform AWheeledVehiclePawnBase::GetInteractionTargetTransform_Implementation() const
+{
+    // 优先从 Mesh Socket 获取精确的交互位置
+    if (USkeletalMeshComponent* VehicleMesh = GetMesh())
+    {
+        if (VehicleMesh->DoesSocketExist(InteractionSocketName))
+        {
+            return VehicleMesh->GetSocketTransform(InteractionSocketName);
+        }
+    }
+
+    // 后备：使用载具位置前方偏移
+    FTransform FallbackTransform = GetActorTransform();
+    FallbackTransform.AddToTranslation(GetActorForwardVector() * 200.0f);
+    return FallbackTransform;
+}
+
+// ============================================================================
+// 重置载具输入（供 Controller 在下车时调用）
+// ============================================================================
+void AWheeledVehiclePawnBase::ResetVehicleInputs()
+{
+    if (CachedWheeledMovement)
+    {
+        CachedWheeledMovement->SetThrottleInput(0.0f);
+        CachedWheeledMovement->SetSteeringInput(0.0f);
+        CachedWheeledMovement->SetBrakeInput(0.0f);
+        CachedWheeledMovement->SetHandbrakeInput(false);
+    }
+}
+
+// ============================================================================
 // 从 VehicleConfig 读取参数并应用到移动组件和车轮实例
-// UE5.5 Chaos Vehicles 使用 FVehicleEngineConfig / FVehicleTransmissionConfig /
-// FVehicleSteeringConfig 等结构体，悬挂和轮胎参数在 UChaosVehicleWheel 上
 // ============================================================================
 void AWheeledVehiclePawnBase::ApplyVehicleConfig()
 {
@@ -213,7 +293,6 @@ void AWheeledVehiclePawnBase::ApplyVehicleConfig()
     }
 
     // --- 车轮实例：悬挂 + 轮胎 + 制动 ---
-    // UE5.5 中这些参数在 UChaosVehicleWheel 实例上设置
     const FSuspensionConfig& Susp = VehicleConfig->SuspensionSetup;
     const FTireConfig& Tire = VehicleConfig->TireSetup;
 
@@ -285,7 +364,20 @@ void AWheeledVehiclePawnBase::InputHandbrake(const FInputActionValue& Value)
 
 void AWheeledVehiclePawnBase::InputExitVehicle(const FInputActionValue& Value)
 {
-    ExitVehicle();
+    FVector ExitLocation;
+    if (FindSafeExitLocation(ExitLocation))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[DEBUG] 找到安全下车点！准备调用 RPC..."));
+        if (AOpenWorldPlayerController* PC = Cast<AOpenWorldPlayerController>(GetController()))
+        {
+            PC->Server_UnPossessVehicle(ExitLocation);
+        }
+    }
+    else
+    {
+        // 如果游戏里弹出了这个红色警告，说明下车点检测被挡住了！
+        GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("[BUG] 下车失败：找不到安全下车点！"));
+    }
 }
 
 // ============================================================================
@@ -319,112 +411,6 @@ void AWheeledVehiclePawnBase::UpdateDynamicCamera(float DeltaTime)
 
     // 插值 FOV
     FollowCamera->FieldOfView = FMath::Lerp(VehicleConfig->BaseFOV, VehicleConfig->MaxFOV, CameraAlpha);
-}
-
-// ============================================================================
-// 进入载具
-// ============================================================================
-void AWheeledVehiclePawnBase::EnterVehicle(ACharacter* InDriver)
-{
-    if (!InDriver || Driver) return;
-
-    Driver = InDriver;
-
-    // 隐藏驾驶员 Mesh，挂载到载具骨骼 Socket
-    USkeletalMeshComponent* DriverMesh = InDriver->GetMesh();
-    if (DriverMesh)
-    {
-        DriverMesh->bHiddenInGame = true;
-        DriverMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-        DriverMesh->AttachToComponent(GetMesh(),
-            FAttachmentTransformRules::SnapToTargetNotIncludingScale,
-            VehicleConfig ? VehicleConfig->DriverSocketName : FName("DriverSeat"));
-    }
-
-    // 关闭驾驶员碰撞和移动
-    InDriver->SetActorEnableCollision(false);
-    if (UCharacterMovementComponent* CMC = InDriver->GetCharacterMovement())
-    {
-        CMC->StopMovementImmediately();
-        CMC->SetMovementMode(MOVE_None);
-    }
-
-    // 切换控制器 Possess
-    if (APlayerController* PC = InDriver->GetController<APlayerController>())
-    {
-        PC->Possess(this);
-    }
-}
-
-// ============================================================================
-// 离开载具
-// ============================================================================
-void AWheeledVehiclePawnBase::ExitVehicle()
-{
-    if (!Driver) return;
-
-    ACharacter* PreviousDriver = Driver;
-
-    // 查找安全下车位置
-    FVector ExitLocation;
-    if (!FindSafeExitLocation(ExitLocation))
-    {
-        // 找不到安全位置，不允许下车
-        return;
-    }
-
-    // 恢复驾驶员 Mesh
-    USkeletalMeshComponent* DriverMesh = PreviousDriver->GetMesh();
-    if (DriverMesh)
-    {
-        DriverMesh->bHiddenInGame = false;
-        DriverMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-        DriverMesh->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
-    }
-
-    // 恢复驾驶员碰撞和移动
-    PreviousDriver->SetActorEnableCollision(true);
-    if (UCharacterMovementComponent* CMC = PreviousDriver->GetCharacterMovement())
-    {
-        CMC->SetMovementMode(MOVE_Walking);
-    }
-
-    // 设置下车位置
-    PreviousDriver->SetActorLocation(ExitLocation, false, nullptr, ETeleportType::TeleportPhysics);
-
-    // 切换控制器 Possess 回驾驶员
-    if (APlayerController* PC = GetController<APlayerController>())
-    {
-        PC->Possess(PreviousDriver);
-    }
-
-    // 清除驾驶员引用
-    Driver = nullptr;
-
-    // 重置载具输入
-    if (CachedWheeledMovement)
-    {
-        CachedWheeledMovement->SetThrottleInput(0.0f);
-        CachedWheeledMovement->SetSteeringInput(0.0f);
-        CachedWheeledMovement->SetBrakeInput(0.0f);
-        CachedWheeledMovement->SetHandbrakeInput(false);
-    }
-
-    // 移除载具输入映射上下文
-    if (VehicleIMC)
-    {
-        if (APlayerController* PC = Cast<APlayerController>(GetController()))
-        {
-            if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
-            {
-                if (UEnhancedInputLocalPlayerSubsystem* Subsystem =
-                    LocalPlayer->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>())
-                {
-                    Subsystem->RemoveMappingContext(VehicleIMC);
-                }
-            }
-        }
-    }
 }
 
 // ============================================================================

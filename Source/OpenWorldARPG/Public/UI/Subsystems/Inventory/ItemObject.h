@@ -34,38 +34,22 @@ public:
     UPROPERTY(BlueprintReadOnly, Category = "Inventory|Data")
     bool bIsSelected = false;
 
-    /**
-     * 静态数据缓存指针 (Transient，不参与序列化)。
-     * 由 ViewModel 在创建/复用 UItemObject 时一次性注入。
-     * UI 层直接通过此指针访问 ItemName, ItemIcon, ItemRarity 等配置字段。
-     */
+    /** 静态数据缓存（Transient，由 ViewModel 注入，UI 直接访问配置字段） */
     const FItemData* CachedStaticData = nullptr;
 
-    /** 物品数据变化委托（用于通知 UI 刷新） */
     UPROPERTY(BlueprintAssignable, Category = "Inventory|Events")
     FOnItemDataChanged OnItemDataChanged;
 
-    /** 选中状态变化委托（Slot Widget 绑定此委托自动更新高亮） */
     UPROPERTY(BlueprintAssignable, Category = "Inventory|Events")
     FOnSelectionStateChanged OnSelectionStateChanged;
 
-    /**
-     * 初始化方法：一次性注入动态实例与静态数据。
-     * @param InInstance 物品动态实例数据
-     * @param InStaticData 物品静态配置数据指针 (来自 DataTable，生命周期由 DataTable 管理)
-     */
+    /** 注入动态实例与静态数据 */
     void Initialize(const FItemInstance& InInstance, const FItemData* InStaticData);
 
-    /**
-     * 提供给蓝图 UI (UMG) 绑定的安全接口。
-     * 每次 UI 需要读取配置（如名字、图标）时，调用此节点获取一份安全的数据拷贝。
-     */
+    /** 蓝图安全接口：返回静态数据拷贝 */
     UFUNCTION(BlueprintPure, Category = "Inventory|Data")
     FItemData GetItemStaticData() const;
 
-    /**
-     * 设置选中状态并广播变化。
-     * 仅当状态实际改变时才广播，避免冗余刷新。
-     */
+    /** 设置选中状态并广播（仅状态改变时广播） */
     void SetSelected(bool bNewSelected);
 };

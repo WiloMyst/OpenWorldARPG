@@ -3,7 +3,7 @@
 #include "Components/TargetingComponent.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/PlayerController.h"
-#include "World/Interactables/SelectableTargetActor.h"
+#include "Interfaces/TargetableInterface.h"
 
 UTargetingComponent::UTargetingComponent()
 {
@@ -34,22 +34,16 @@ void UTargetingComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
         AActor* OldTarget = CurrentBestTarget;
         CurrentBestTarget = BestTarget;
 
-        // 直接调用旧目标的 OnClearAsTarget
-        if (OldTarget)
+        // 通过接口调用旧目标的 OnClearAsTarget
+        if (OldTarget && OldTarget->Implements<UTargetableInterface>())
         {
-            if (ASelectableTargetActor* OldSelectable = Cast<ASelectableTargetActor>(OldTarget))
-            {
-                OldSelectable->OnClearAsTarget();
-            }
+            ITargetableInterface::Execute_OnClearAsTarget(OldTarget);
         }
 
-        // 直接调用新目标的 OnSetAsTarget
-        if (CurrentBestTarget)
+        // 通过接口调用新目标的 OnSetAsTarget
+        if (CurrentBestTarget && CurrentBestTarget->Implements<UTargetableInterface>())
         {
-            if (ASelectableTargetActor* NewSelectable = Cast<ASelectableTargetActor>(CurrentBestTarget))
-            {
-                NewSelectable->OnSetAsTarget();
-            }
+            ITargetableInterface::Execute_OnSetAsTarget(CurrentBestTarget);
         }
 
         if (OnBestTargetChanged.IsBound())
@@ -79,10 +73,10 @@ void UTargetingComponent::RemoveTarget(AActor* TargetToRemove)
             AActor* OldTarget = CurrentBestTarget;
             CurrentBestTarget = nullptr;
 
-            // 直接调用旧目标的 OnClearAsTarget
-            if (ASelectableTargetActor* OldSelectable = Cast<ASelectableTargetActor>(OldTarget))
+            // 通过接口调用旧目标的 OnClearAsTarget
+            if (OldTarget && OldTarget->Implements<UTargetableInterface>())
             {
-                OldSelectable->OnClearAsTarget();
+                ITargetableInterface::Execute_OnClearAsTarget(OldTarget);
             }
 
             if (OnBestTargetChanged.IsBound())

@@ -9,19 +9,20 @@
 #include "Core/PlayerStates/GameplayPlayerState.h"
 #include "Characters/PlayerCharacter.h"
 #include "AbilitySystemComponent.h"
-#include "Engine/GameInstance.h"
 #include "TimerManager.h" // 【新增】引入定时器管理器
 
 void UTeamListWidget::NativeOnInitialized()
 {
     Super::NativeOnInitialized();
 
-    // 2. 绑定队伍管理器
-    if (UGameInstance* GI = GetGameInstance())
+    if (APlayerController* PC = GetOwningPlayer())
     {
-        if (UTeamManagerSubsystem* TeamManager = GI->GetSubsystem<UTeamManagerSubsystem>())
+        if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
         {
-            TeamManager->OnTeamListUpdatedDelegate.AddDynamic(this, &UTeamListWidget::UpdateTeamList);
+            if (UTeamManagerSubsystem* TeamManager = LocalPlayer->GetSubsystem<UTeamManagerSubsystem>())
+            {
+                TeamManager->OnTeamListUpdatedDelegate.AddDynamic(this, &UTeamListWidget::UpdateTeamList);
+            }
         }
     }
 }
@@ -48,12 +49,14 @@ void UTeamListWidget::NativeConstruct()
 
 void UTeamListWidget::NativeDestruct()
 {
-    // 解绑委托，防止内存泄漏
-    if (UGameInstance* GI = GetGameInstance())
+    if (APlayerController* PC = GetOwningPlayer())
     {
-        if (UTeamManagerSubsystem* TeamManager = GI->GetSubsystem<UTeamManagerSubsystem>())
+        if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
         {
-            TeamManager->OnTeamListUpdatedDelegate.RemoveAll(this);
+            if (UTeamManagerSubsystem* TeamManager = LocalPlayer->GetSubsystem<UTeamManagerSubsystem>())
+            {
+                TeamManager->OnTeamListUpdatedDelegate.RemoveAll(this);
+            }
         }
     }
 
@@ -107,11 +110,18 @@ void UTeamListWidget::UpdateTeamList()
 {
     if (!TeamList) return;
 
-    UGameInstance* GI = GetGameInstance();
-    if (!GI) return;
+    UTeamManagerSubsystem* TeamManager = nullptr;
+    UCharacterManagerSubsystem* CharManager = nullptr;
 
-    UTeamManagerSubsystem* TeamManager = GI->GetSubsystem<UTeamManagerSubsystem>();
-    UCharacterManagerSubsystem* CharManager = GI->GetSubsystem<UCharacterManagerSubsystem>();
+    if (APlayerController* PC = GetOwningPlayer())
+    {
+        if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
+        {
+            TeamManager = LocalPlayer->GetSubsystem<UTeamManagerSubsystem>();
+            CharManager = LocalPlayer->GetSubsystem<UCharacterManagerSubsystem>();
+        }
+    }
+
     if (!TeamManager || !CharManager) return;
 
     TArray<FGameplayTag> TeamTags = TeamManager->GetCurrentTeamCharacterTags();

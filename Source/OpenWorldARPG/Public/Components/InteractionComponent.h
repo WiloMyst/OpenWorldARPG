@@ -4,15 +4,15 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "GameplayTagContainer.h"
 #include "InteractionComponent.generated.h"
 
-class APickableItemBase;
-class UInventoryManagerSubsystem;
+/** 当附近可交互对象列表发生变化时广播（从无到有、从有到无） */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnInteractableListChangedSignature, const TArray<AActor*>&, InteractableActors);
 
-/** 当附近可交互物品的状态发生改变时广播 (例如从无到有，或从有到无) */
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPickableListChangedSignature, const TArray<AActor*>&, InteractableActors);
-
+/**
+ * 通用交互组件。基于 IInteractableInterface 进行多态检测与调用。
+ * 不依赖任何具体交互对象类型（载具、掉落物、NPC 等均可被扫描到）。
+ */
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class OPENWORLDARPG_API UInteractionComponent : public UActorComponent
 {
@@ -29,51 +29,28 @@ protected:
 public:
     // --- 核心交互接口 ---
 
-    /** 当附近可交互物品列表发生改变时广播 */
+    /** 当附近可交互对象列表发生改变时广播 */
     UPROPERTY(BlueprintAssignable, Category = "Interaction|Events")
-    FOnPickableListChangedSignature OnPickableListChangedDelegate;
+    FOnInteractableListChangedSignature OnInteractableListChangedDelegate;
 
-    UFUNCTION(BlueprintCallable, Category = "Inventory|Action")
-    void PickUpItem();
+    /** 执行交互：对列表中第一个可交互对象调用 OnInteract（多态分发） */
+    UFUNCTION(BlueprintCallable, Category = "Interaction|Action")
+    void Interact();
 
-    UFUNCTION(Server, Reliable, WithValidation)
-    void Server_PickUpItem(int32 ItemID, int32 Amount);
-
-    UFUNCTION(BlueprintCallable, Category = "Inventory|Action")
-    void DropItemByGUID(FGuid ItemGUID, int32 DropAmount);
-
-    UFUNCTION(Server, Reliable, WithValidation)
-    void Server_DropItemByGUID(FGuid ItemGUID, int32 DropAmount);
-
-    UFUNCTION(BlueprintCallable, Category = "Inventory|Action")
-    void DropItem(int32 DropIndex, int32 DropAmount);
-
-    UFUNCTION(BlueprintCallable, Category = "Inventory|Action")
-    bool UseItemByGUID(FGuid ItemGUID, int32 UseAmount = 1);
-
-    UFUNCTION(BlueprintCallable, Category = "Inventory|Equipment")
-    bool EquipItemByGUID(FGuid ItemGUID);
-
-    UFUNCTION(BlueprintCallable, Category = "Inventory|Equipment")
-    bool UnequipItemByGUID(FGuid ItemGUID);
-
-    UFUNCTION(BlueprintPure, Category = "Inventory|State")
-    TArray<AActor*> GetCurrentPickableItems() const;
+    /** 获取当前附近可交互对象列表 */
+    UFUNCTION(BlueprintPure, Category = "Interaction|State")
+    TArray<AActor*> GetCurrentInteractableActors() const;
 
 protected:
-    UFUNCTION()
-    void HandleOnItemDropped(int32 ItemID, int32 DroppedAmount);
-
-    void SpawnDroppedItem(int32 ItemID, int32 DroppedAmount);
-
     bool IsCharacterInStandby() const;
 
-    int32 GetOwnerCharacterID() const;
+    // --- 配置 ---
+
+    /** 交互检测球半径 */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Interaction|Config")
+    float InteractionRadius = 150.0f;
 
 private:
-    /** 缓存的附近所有可拾取物品的弱引用列表 */
-    TArray<TWeakObjectPtr<AActor>> CurrentPickableItems;
-
-    UPROPERTY()
-    UInventoryManagerSubsystem* InventorySubsystem;
+    /** 缓存的附近所有可交互对象的弱引用列表 */
+    TArray<TWeakObjectPtr<AActor>> CurrentInteractableActors;
 };

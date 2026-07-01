@@ -4,11 +4,52 @@
 #include "World/Interactables/PickableItemBase.h"
 #include "Core/OpenWorldARPGSettings.h"
 #include "Managers/GameAssetManagerSubsystem.h"
+#include "Managers/InventoryManagerSubsystem.h"
 #include "Components/StaticMeshComponent.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/PlayerController.h"
 #include "Engine/DataTable.h"
 #include "Engine/GameInstance.h"
 #include "Engine/StreamableManager.h"
 #include "Engine/AssetManager.h"
+
+// ============================================================================
+// IInteractableInterface 实现
+// ============================================================================
+
+bool APickableItemBase::CanInteract_Implementation(ACharacter* InstigatorCharacter) const
+{
+    // 已被销毁或无效时不可交互
+    return IsValid(this) && ItemID > 0;
+}
+
+void APickableItemBase::OnInteract_Implementation(ACharacter* InstigatorCharacter)
+{
+    if (!InstigatorCharacter) return;
+
+    if (InstigatorCharacter->HasAuthority())
+    {
+        if (APlayerController* PC = Cast<APlayerController>(InstigatorCharacter->GetController()))
+        {
+            if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
+            {
+                if (UInventoryManagerSubsystem* InventorySubsystem = LocalPlayer->GetSubsystem<UInventoryManagerSubsystem>())
+                {
+                    InventorySubsystem->AddItem(ItemID, ItemAmount);
+                    Destroy();
+                    return;
+                }
+            }
+        }
+    }
+}
+
+FTransform APickableItemBase::GetInteractionTargetTransform_Implementation() const
+{
+    return GetActorTransform();
+}
+
+// ============================================================================
 
 APickableItemBase::APickableItemBase()
 {

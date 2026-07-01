@@ -12,6 +12,7 @@ class UUserWidget;
 class UInputMappingContext;
 class UInputAction;
 class APlayerCharacter;
+class UWindowWidgetBase;
 
 /**
  * 通用玩法控制器。只接收输入并向下派发，不微操 Character 组件。
@@ -99,6 +100,23 @@ public:
     void OnSwapOutCompleted(APlayerCharacter* SwappedOutCharacter, FTransform SwapTransform);
 
 protected:
+    void ShowCursorTemporarily(const FInputActionValue& Value);
+    void HideCursorTemporarily(const FInputActionValue& Value);
+
+    UFUNCTION(BlueprintCallable, Category = "Input")
+    void UpdateInputMode();
+
+protected:
+    // --- 配置：UI ---
+
+    UPROPERTY(EditDefaultsOnly, Category = "Config|UI")
+    TSubclassOf<UUserWidget> MainHUDClass;
+
+    UPROPERTY()
+    TObjectPtr<UUserWidget> MainHUDInstance;
+
+    bool bIsAltKeyDown = false;
+
     // --- 输入资产 ---
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
@@ -151,6 +169,9 @@ protected:
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
     TObjectPtr<UInputAction> IA_CameraZoom;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Config|Input")
+    TObjectPtr<UInputAction> IA_ShowCursor;
 
     // --- Tags ---
 

@@ -3,28 +3,27 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/GameInstanceSubsystem.h"
+#include "Subsystems/LocalPlayerSubsystem.h"
 #include "GameplayTagContainer.h"
 #include "TeamManagerSubsystem.generated.h"
 
 class UCharacterManagerSubsystem;
 class APlayerCharacter;
+class AGameplayPlayerState;
 
 // --- 委托 ---
 
-/** 当前激活角色变化时广播（参数：旧角色 TAG, 新角色 TAG） */
+/** 当前激活角色变化时广播（旧角色 TAG, 新角色 TAG） */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnActiveCharacterChanged, const FGameplayTag&, OldCharacterTag, const FGameplayTag&, NewCharacterTag);
 
-/** 队伍成员变化时广播 */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnTeamListUpdatedSignature);
 
-
 /**
- * 队伍数据管理子系统。本地缓存 PlayerState 同步数据，通过广播驱动 UI 刷新。
- * 角色切换请求通过 PlayerController 的 Server RPC 发送到服务器。
+ * 队伍管理子系统。缓存 PlayerState 同步数据，通过广播驱动 UI 刷新。
+ * 角色切换经 PlayerController Server RPC 发送到服务器。
  */
 UCLASS()
-class OPENWORLDARPG_API UTeamManagerSubsystem : public UGameInstanceSubsystem
+class OPENWORLDARPG_API UTeamManagerSubsystem : public ULocalPlayerSubsystem
 {
     GENERATED_BODY()
 
@@ -63,6 +62,14 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Team Management|Network")
     void OnRep_TeamCharacterActorsFromServer(const TArray<APlayerCharacter*>& NewTeamActors);
 
+    void BindToPlayerStateEvents(AGameplayPlayerState* PlayerState);
+
+    UFUNCTION()
+    void HandleActiveCharacterIndexChanged(int32 OldIndex, int32 NewIndex);
+
+    UFUNCTION()
+    void HandleTeamCharacterActorsChanged();
+
     // --- 事件 ---
 
     UPROPERTY(BlueprintAssignable, Category = "Team Management|Events")
@@ -90,4 +97,6 @@ protected:
     TArray<FGameplayTag> CurrentTeamCharacters;
 
     int32 ActiveCharacterIndex = -1;
+
+    TWeakObjectPtr<AGameplayPlayerState> BoundPlayerState;
 };
