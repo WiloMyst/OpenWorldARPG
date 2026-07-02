@@ -43,10 +43,11 @@ void UItemSlotWidget::NativeDestruct()
 
 void UItemSlotWidget::NativeOnListItemObjectSet(UObject* ListItemObject)
 {
-    // 解绑旧 UItemObject 的委托 (防泄漏)
+    // 解绑旧 UItemObject 的所有委托 (防重复绑定导致崩溃)
     if (BoundItemObject)
     {
         BoundItemObject->OnSelectionStateChanged.RemoveDynamic(this, &UItemSlotWidget::OnItemSelectionStateChanged);
+        BoundItemObject->OnItemDataChanged.RemoveDynamic(this, &UItemSlotWidget::UpdateSlotInfo);
     }
 
     UItemObject* ItemObj = Cast<UItemObject>(ListItemObject);

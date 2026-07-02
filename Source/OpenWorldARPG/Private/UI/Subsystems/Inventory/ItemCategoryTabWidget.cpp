@@ -70,6 +70,14 @@ void UItemCategoryTabWidget::OnCategoryIconLoaded(TSoftObjectPtr<UTexture2D> Sof
     }
 }
 
+void UItemCategoryTabWidget::SetSelected(bool bIsSelected)
+{
+    if (TabButton)
+    {
+        TabButton->SetIsEnabled(!bIsSelected);
+    }
+}
+
 void UItemCategoryTabWidget::OnTabButtonClicked()
 {
     if (OnTabClicked.IsBound())

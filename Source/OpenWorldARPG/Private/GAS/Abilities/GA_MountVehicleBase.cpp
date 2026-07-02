@@ -1,16 +1,15 @@
 // Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "GAS/Abilities/GA_MountVehicleBase.h"
+#include "Characters/PlayerCharacter.h"
+#include "Core/PlayerControllers/OpenWorldPlayerController.h"
+#include "Components/WeaponManagerComponent.h"
+#include "Vehicles/WheeledVehiclePawnBase.h"
 #include "AbilitySystemComponent.h"
 #include "Abilities/Tasks/AbilityTask_PlayMontageAndWait.h"
 #include "GAS/Tasks/AbilityTask_NavMoveTo.h"
-#include "Characters/PlayerCharacter.h"
-#include "Vehicles/WheeledVehiclePawnBase.h"
-#include "Core/PlayerControllers/OpenWorldPlayerController.h"
-#include "MotionWarpingComponent.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/CharacterMovementComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "MotionWarpingComponent.h"
 #include "Kismet/KismetMathLibrary.h"
 
 UGA_MountVehicleBase::UGA_MountVehicleBase()
@@ -53,6 +52,14 @@ void UGA_MountVehicleBase::ActivateAbility(const FGameplayAbilitySpecHandle Hand
     // 获取车门交互位置
     const FTransform InteractionTransform = TargetVehicle->GetInteractionTargetTransform_Implementation();
     const FVector DoorLocation = InteractionTransform.GetLocation();
+
+    // 如果角色已经在车门附近，直接跳过寻路，进入转身绑定阶段，防止 NavMesh 寻路原地报错卡死
+    const float DistToDoor2D = FVector::Dist2D(PlayerChar->GetActorLocation(), DoorLocation);
+    if (DistToDoor2D <= ApproachAcceptanceRadius)
+    {
+        OnApproachReached();
+        return; // 直接返回，后续逻辑在 OnApproachReached 中继续
+    }
 
     // 使用自定义 NavMoveTo Task 沿 NavMesh 寻路避障走向车门
     NavMoveToTask = UAbilityTask_NavMoveTo::CreateNavMoveToTask(
@@ -97,21 +104,9 @@ void UGA_MountVehicleBase::OnApproachReached()
         PlayerChar->GetActorLocation(), TargetVehicle->GetActorLocation());
     PlayerChar->SetActorRotation(FRotator(0.0f, TargetRot.Yaw, 0.0f));
 
-    // --- 2b：物理绑定 — Attach 到载具 Mesh，提前进入载具局部坐标系 ---
-    // 使用 KeepWorldTransform：角色保持当前世界位置（车门处），但后续随车辆移动
-    PlayerChar->AttachToComponent(
-        TargetVehicle->GetMesh(),
-        FAttachmentTransformRules::KeepWorldTransform);
-
-    // 临时关闭胶囊体碰撞，防止挤飞载具
-    PlayerChar->GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-
-    // 禁用移动组件，防止角色在动画期间受 CMC 干扰
-    if (UCharacterMovementComponent* CMC = PlayerChar->GetCharacterMovement())
-    {
-        CMC->StopMovementImmediately();
-        CMC->SetMovementMode(MOVE_None);
-    }
+    // --- 2b：物理绑定 (高内聚重构) ---
+    // 直接调用 Character 内部封装好的准备函数，GAS 客户端预测会自动在本地和 Server 同步执行
+    PlayerChar->PrepareForDriving(TargetVehicle, TargetVehicle->GetDriverSeatSocketName());
 
     // --- 2c：Motion Warping — 动态跟随车门的 Component Warp Target ---
     if (UMotionWarpingComponent* MotionWarping = PlayerChar->GetMotionWarpingComp())
@@ -123,7 +118,8 @@ void UGA_MountVehicleBase::OnApproachReached()
             WarpTargetName,
             TargetVehicle->GetMesh(),
             TargetVehicle->GetInteractionSocketName(),
-            true /* bFollowComponent */);
+            true // bFollowComponent
+        );
     }
 
     // --- 2d：播放上车蒙太奇（阶段 3 的前置） ---
@@ -173,9 +169,13 @@ void UGA_MountVehicleBase::ExecuteMount()
     APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(CurrentActorInfo->AvatarActor.Get());
     if (PlayerChar && TargetVehicle)
     {
-        APlayerController* BasePC = Cast<APlayerController>(PlayerChar->GetController());
+        PlayerChar->SetActorHiddenInGame(true);
+        if (UWeaponManagerComponent* WeaponMgr = PlayerChar->GetWeaponManagerComponent_Implementation())
+        {
+            WeaponMgr->SetWeaponHidden(true);
+        }
 
-        if (AOpenWorldPlayerController* OW_PC = Cast<AOpenWorldPlayerController>(BasePC))
+        if (AOpenWorldPlayerController* OW_PC = Cast<AOpenWorldPlayerController>(PlayerChar->GetController()))
         {
             OW_PC->Server_PossessVehicle(TargetVehicle);
         }

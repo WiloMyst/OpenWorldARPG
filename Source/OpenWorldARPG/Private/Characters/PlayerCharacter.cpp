@@ -81,7 +81,7 @@ void APlayerCharacter::InitializeCharacter(const FCharacterSaveData& InSaveData,
 {
 	if (!InVisualData || !InCombatData) return;
 
-	if (UOpenWorldARPGCharacterMovementComponent* CustomMC = GetCustomMovementComponent())
+	if (UOpenWorldARPGCharacterMovementComponent* CustomMC = Cast<UOpenWorldARPGCharacterMovementComponent>(GetCharacterMovement()))
 	{
 		CustomMC->CacheOwnerReferences();
 		CustomMC->OnClimbUpMontageRequested.AddDynamic(this, &APlayerCharacter::OnClimbUpMontageRequested);
@@ -474,7 +474,7 @@ void APlayerCharacter::HandleMovementInput(float InputX, float InputY)
 		return;
 	}
 
-	if (UOpenWorldARPGCharacterMovementComponent* CustomMoveComp = GetCustomMovementComponent())
+	if (UOpenWorldARPGCharacterMovementComponent* CustomMoveComp = Cast<UOpenWorldARPGCharacterMovementComponent>(GetCharacterMovement()))
 	{
 		if (CustomMoveComp->IsClimbing())
 		{
@@ -505,7 +505,7 @@ void APlayerCharacter::HandleInteractInput()
 
 void APlayerCharacter::HandleSpacebarInput()
 {
-    UOpenWorldARPGCharacterMovementComponent* CustomMoveComp = GetCustomMovementComponent();
+    UOpenWorldARPGCharacterMovementComponent* CustomMoveComp = Cast<UOpenWorldARPGCharacterMovementComponent>(GetCharacterMovement());
     if (!CustomMoveComp) return;
 
     // 攀爬中：发送攀爬跳跃事件
@@ -577,7 +577,7 @@ void APlayerCharacter::ToggleGlide()
 	{
 		if (!MoveComp->IsFalling()) return;
 
-		if (UOpenWorldARPGCharacterMovementComponent* CustomMoveComp = GetCustomMovementComponent())
+		if (UOpenWorldARPGCharacterMovementComponent* CustomMoveComp = Cast<UOpenWorldARPGCharacterMovementComponent>(GetCharacterMovement()))
 		{
 			float DistanceToGround = CustomMoveComp->GetDistanceToGround();
 			if (DistanceToGround >= 0.0f && DistanceToGround < CustomMoveComp->MinGlideStartHeight)
@@ -863,7 +863,7 @@ void APlayerCharacter::OnClimbUpMontageEnded(UAnimMontage* Montage, bool bInterr
 			}
 		}
 
-		if (UOpenWorldARPGCharacterMovementComponent* CustomMC = GetCustomMovementComponent())
+		if (UOpenWorldARPGCharacterMovementComponent* CustomMC = Cast<UOpenWorldARPGCharacterMovementComponent>(GetCharacterMovement()))
 		{
 			CustomMC->FinishClimbUp();
 		}
@@ -887,15 +887,20 @@ void APlayerCharacter::PrepareForDriving(AActor* VehicleActor, FName SocketName)
 	{
 		CMC->StopMovementImmediately();
 		CMC->SetMovementMode(MOVE_None);
+		CMC->GravityScale = 0.0f;
 	}
 
 	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
+	// 双重保险：关闭 SkeletalMesh 碰撞，彻底消除 Chaos Vehicle 物理干涉
+	GetMesh()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
 	if (AWheeledVehiclePawnBase* VehiclePawn = Cast<AWheeledVehiclePawnBase>(VehicleActor))
 	{
+		// 【核心修改】使用 KeepWorldTransform，角色保持在车门外，由 Motion Warping 处理后续位移
 		AttachToComponent(
 			VehiclePawn->GetMesh(),
-			FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+			FAttachmentTransformRules::KeepWorldTransform,
 			SocketName);
 	}
 }
@@ -910,7 +915,11 @@ void APlayerCharacter::EndDriving(FVector ExitLocation)
 	if (UCharacterMovementComponent* CMC = GetCharacterMovement())
 	{
 		CMC->SetMovementMode(MOVE_Walking);
+		CMC->GravityScale = 1.0f;
 	}
 
 	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+
+	// 恢复 SkeletalMesh 碰撞为 QueryOnly（角色 Mesh 不参与物理模拟，仅做查询）
+	GetMesh()->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 }

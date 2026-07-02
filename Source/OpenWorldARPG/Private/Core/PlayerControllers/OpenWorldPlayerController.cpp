@@ -68,10 +68,8 @@ void AOpenWorldPlayerController::Server_PossessVehicle_Implementation(AWheeledVe
     APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(GetPawn());
     if (!PlayerChar || TargetVehicle->Driver != nullptr) return;
 
-    // 1. 角色执行上车准备：关闭移动、切换碰撞通道、Attach 到驾驶座 Socket
-    PlayerChar->PrepareForDriving(TargetVehicle, TargetVehicle->GetDriverSeatSocketName());
+    // GA_MountVehicleBase 已在播放动画前调用过 PrepareForDriving，此处不再重复
 
-    // 2. 设置载具的驾驶员引用
     TargetVehicle->Driver = PlayerChar;
 
     // 3. UnPossess 角色，Possess 载具
@@ -156,14 +154,20 @@ void AOpenWorldPlayerController::Client_BlendCameraToCharacter_Implementation(AP
         bAutoManageActiveCameraTarget = true;
     }, CharacterCameraBlendTime, false);
 
-    if (OldVehicle && OldVehicle->VehicleIMC)
+    if (OldVehicle)
     {
-        if (ULocalPlayer* LocalPlayer = GetLocalPlayer())
+        // 在客户端本地显式清空载具输入，防止 InputComponent 剥离导致 Completed 事件丢失 (Sticky Input)
+        OldVehicle->ResetVehicleInputs();
+
+        if (OldVehicle->VehicleIMC)
         {
-            if (UEnhancedInputLocalPlayerSubsystem* Subsystem =
-                LocalPlayer->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>())
+            if (ULocalPlayer* LocalPlayer = GetLocalPlayer())
             {
-                Subsystem->RemoveMappingContext(OldVehicle->VehicleIMC);
+                if (UEnhancedInputLocalPlayerSubsystem* Subsystem =
+                    LocalPlayer->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>())
+                {
+                    Subsystem->RemoveMappingContext(OldVehicle->VehicleIMC);
+                }
             }
         }
     }

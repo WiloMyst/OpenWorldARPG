@@ -10,6 +10,7 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/GameModeBase.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/OverlapResult.h"
@@ -24,7 +25,6 @@ AWheeledVehiclePawnBase::AWheeledVehiclePawnBase()
     SetReplicatingMovement(true);
 
     PrimaryActorTick.bCanEverTick = true;
-    PrimaryActorTick.TickGroup = TG_PostPhysics;
 
     if (USkeletalMeshComponent* VehicleMesh = GetMesh())
     {
@@ -37,9 +37,8 @@ AWheeledVehiclePawnBase::AWheeledVehiclePawnBase()
     SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
     SpringArm->SetupAttachment(GetMesh());
     SpringArm->TargetArmLength = 600.0f;
-    SpringArm->bEnableCameraLag = true;
+    SpringArm->bEnableCameraLag = false;
     SpringArm->bEnableCameraRotationLag = true;
-    SpringArm->CameraLagSpeed = 8.0f;
     SpringArm->CameraRotationLagSpeed = 5.0f;
     SpringArm->bUsePawnControlRotation = true;
     SpringArm->bInheritPitch = true;
@@ -276,30 +275,32 @@ void AWheeledVehiclePawnBase::InitCameraDefaults()
 
 void AWheeledVehiclePawnBase::InputThrottle(const FInputActionValue& Value)
 {
-    if (!CachedWheeledMovement) return;
+    if (!GetController() || !CachedWheeledMovement) return;
     CachedWheeledMovement->SetThrottleInput(Value.Get<float>());
 }
 
 void AWheeledVehiclePawnBase::InputBrake(const FInputActionValue& Value)
 {
-    if (!CachedWheeledMovement) return;
+    if (!GetController() || !CachedWheeledMovement) return;
     CachedWheeledMovement->SetBrakeInput(Value.Get<float>());
 }
 
 void AWheeledVehiclePawnBase::InputSteering(const FInputActionValue& Value)
 {
-    if (!CachedWheeledMovement) return;
+    if (!GetController() || !CachedWheeledMovement) return;
     CachedWheeledMovement->SetSteeringInput(Value.Get<float>());
 }
 
 void AWheeledVehiclePawnBase::InputHandbrake(const FInputActionValue& Value)
 {
-    if (!CachedWheeledMovement) return;
+    if (!GetController() || !CachedWheeledMovement) return;
     CachedWheeledMovement->SetHandbrakeInput(Value.Get<bool>());
 }
 
 void AWheeledVehiclePawnBase::InputExitVehicle(const FInputActionValue& Value)
 {
+    if (!GetController()) return;
+
     FVector ExitLocation;
     if (FindSafeExitLocation(ExitLocation))
     {
@@ -376,6 +377,73 @@ bool AWheeledVehiclePawnBase::FindSafeExitLocation(FVector& OutLocation) const
     }
 
     return false;
+}
+
+void AWheeledVehiclePawnBase::FellOutOfWorld(const class UDamageType& dmgType)
+{
+    // 1. 传送逻辑必须只在服务器执行
+    if (!HasAuthority()) return;
+
+    // 2. 清除载具输入
+    ResetVehicleInputs();
+
+    // 3. 彻底清除 Chaos 载具的物理动量
+    // 如果不清除线速度和角速度，载具传送后会带着下坠的惯性砸向地面并弹飞
+    if (USkeletalMeshComponent* VehicleMesh = GetMesh())
+    {
+        VehicleMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
+        VehicleMesh->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+    }
+
+    // 4. 寻找出生点
+    AActor* StartSpot = nullptr;
+    if (AGameModeBase* GM = GetWorld()->GetAuthGameMode())
+    {
+        // 如果有驾驶员，使用驾驶员的 Controller 寻找出生点；如果没有，尝试获取默认 Controller
+        AController* VehController = GetController();
+        if (!VehController)
+        {
+            VehController = GetWorld()->GetFirstPlayerController();
+        }
+        StartSpot = GM->FindPlayerStart(VehController);
+    }
+
+    // 5. 执行传送
+    if (StartSpot)
+    {
+        FRotator SpawnRotation = StartSpot->GetActorRotation();
+
+        // 物理传送（如果有驾驶员 Attach 在车上，会被带着一起传送）
+        SetActorLocationAndRotation(
+            StartSpot->GetActorLocation(),
+            SpawnRotation,
+            false,
+            nullptr,
+            ETeleportType::TeleportPhysics
+        );
+
+        // 6. 重置控制器朝向
+        if (GetController())
+        {
+            if (APlayerController* PC = Cast<APlayerController>(GetController()))
+            {
+                PC->SetControlRotation(SpawnRotation);
+            }
+            Client_ResetCameraAndPhysics(SpawnRotation);
+        }
+    }
+    else
+    {
+        Super::FellOutOfWorld(dmgType);
+    }
+}
+
+void AWheeledVehiclePawnBase::Client_ResetCameraAndPhysics_Implementation(FRotator TargetRotation)
+{
+    if (Controller && IsLocallyControlled())
+    {
+        Controller->SetControlRotation(TargetRotation);
+    }
 }
 
 // --- 网络同步回调 ---

@@ -48,7 +48,7 @@ void UGA_GrappleHookBase::ActivateAbility(const FGameplayAbilitySpecHandle Handl
     UTargetingComponent* GrappleComp = nullptr;
     if (IARPGCharacterInterface* ARPGChar = Cast<IARPGCharacterInterface>(CachedCharacter))
     {
-        GrappleComp = ARPGChar->GetTargetingComponent();
+        GrappleComp = IARPGCharacterInterface::Execute_GetTargetingComponent(Cast<UObject>(ARPGChar));
     }
     if (GrappleComp)
     {

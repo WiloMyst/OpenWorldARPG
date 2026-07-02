@@ -38,7 +38,7 @@ void UMainWorldHUDLayout::NativeOnInitialized()
     // 绑定 UI 扩展组件（MVVM：不再直接依赖 ASC / InteractionComponent）
     if (IARPGCharacterInterface* ARPGChar = Cast<IARPGCharacterInterface>(GetOwningPlayerPawn()))
     {
-        if (UHeroUIExtensionComponent* ExtensionComp = ARPGChar->GetHeroUIExtensionComponent())
+        if (UHeroUIExtensionComponent* ExtensionComp = IARPGCharacterInterface::Execute_GetHeroUIExtensionComponent(Cast<UObject>(ARPGChar)))
         {
             BindToExtensionComp(ExtensionComp);
         }
@@ -134,7 +134,7 @@ void UMainWorldHUDLayout::OnPossessedPawnChanged(APawn* OldPawn, APawn* NewPawn)
     // 角色切换：重新绑定到新角色的 ExtensionComp
     if (IARPGCharacterInterface* NewChar = Cast<IARPGCharacterInterface>(NewPawn))
     {
-        if (UHeroUIExtensionComponent* ExtensionComp = NewChar->GetHeroUIExtensionComponent())
+        if (UHeroUIExtensionComponent* ExtensionComp = IARPGCharacterInterface::Execute_GetHeroUIExtensionComponent(Cast<UObject>(NewChar)))
         {
             BindToExtensionComp(ExtensionComp);
         }

@@ -27,6 +27,11 @@ public:
     virtual void OnClearAsTarget_Implementation() override;
 
     // --- 视觉辅助 ---
+    UFUNCTION(BlueprintCallable, Category = "SelectableTargetActor")
+    /**
+     * 将指定的场景组件面向屏幕。
+     * @param SceneCompToOrient 要面向屏幕的场景组件。
+     */ 
     void OrientToScreen(USceneComponent* SceneCompToOrient);
 
 protected:

@@ -50,6 +50,7 @@ protected:
     virtual void Tick(float DeltaTime) override;
     virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+    virtual void FellOutOfWorld(const class UDamageType& dmgType) override;
 
     // --- 初始化 ---
 
@@ -67,6 +68,9 @@ protected:
     // --- 动态相机 ---
 
     void UpdateDynamicCamera(float DeltaTime);
+
+    UFUNCTION(Client, Reliable)
+    void Client_ResetCameraAndPhysics(FRotator TargetRotation);
 
     // --- 网络同步回调 ---
 

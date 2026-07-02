@@ -77,6 +77,14 @@ void UInventoryWidget::RefreshCategoryTabBox()
 {
     if (!CategoryBox || !CategoryDataTable || !CategoryTabClass) return;
 
+    // 保存当前选中的分类，用于刷新后恢复
+    bool bHadSelectedCategory = SelectedCategoryTab != nullptr;
+    EItemCategory LastSelectedCategory = EItemCategory::Weapon;
+    if (SelectedCategoryTab)
+    {
+        LastSelectedCategory = SelectedCategoryTab->CategoryTabData.TabCategory;
+    }
+
     // 清除旧子项
     CategoryBox->ClearChildren();
     SelectedCategoryTab = nullptr;
@@ -94,6 +102,13 @@ void UInventoryWidget::RefreshCategoryTabBox()
                 NewTab->UpdateTabInfo();
                 NewTab->OnTabClicked.AddDynamic(this, &UInventoryWidget::HandleOnTabClicked);
                 CategoryBox->AddChild(NewTab);
+
+                // 如果这个 Tab 是之前选中的，恢复选中状态
+                if (bHadSelectedCategory && RowData->TabCategory == LastSelectedCategory)
+                {
+                    SelectedCategoryTab = NewTab;
+                    SelectedCategoryTab->SetSelected(true);
+                }
             }
         }
     }
@@ -113,6 +128,19 @@ void UInventoryWidget::HandleSelectFirstCategoryTab()
 
 void UInventoryWidget::HandleOnTabClicked(UItemCategoryTabWidget* NewCategoryTab, EItemCategory NewTabCategory)
 {
+    // 取消旧选中 Tab 的视觉状态
+    if (SelectedCategoryTab && SelectedCategoryTab != NewCategoryTab)
+    {
+        SelectedCategoryTab->SetSelected(false);
+    }
+
+    // 更新选中状态并设置新 Tab 的视觉反馈
+    SelectedCategoryTab = NewCategoryTab;
+    if (SelectedCategoryTab)
+    {
+        SelectedCategoryTab->SetSelected(true);
+    }
+
     // 委托给 ViewModel 处理分类切换 (VM 负责过滤数据并广播)
     if (ViewModel)
     {

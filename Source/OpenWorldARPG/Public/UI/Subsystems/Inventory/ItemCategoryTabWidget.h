@@ -31,6 +31,9 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Inventory|CategoryTab")
     void UpdateTabInfo();
 
+    UFUNCTION(BlueprintCallable, Category = "Inventory|CategoryTab")
+    void SetSelected(bool bIsSelected);
+
     UPROPERTY(BlueprintAssignable, Category = "Inventory|Events")
     FOnCategoryTabClicked OnTabClicked;
 

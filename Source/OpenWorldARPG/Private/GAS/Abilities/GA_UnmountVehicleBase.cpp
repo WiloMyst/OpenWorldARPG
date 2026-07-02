@@ -1,11 +1,12 @@
 // Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "GAS/Abilities/GA_UnmountVehicleBase.h"
+#include "Characters/PlayerCharacter.h"
+#include "Components/WeaponManagerComponent.h"
+#include "Vehicles/WheeledVehiclePawnBase.h"
+#include "Components/CapsuleComponent.h"
 #include "AbilitySystemComponent.h"
 #include "Abilities/Tasks/AbilityTask_PlayMontageAndWait.h"
-#include "Characters/PlayerCharacter.h"
-#include "Vehicles/WheeledVehiclePawnBase.h"
-#include "GameFramework/Character.h"
 
 UGA_UnmountVehicleBase::UGA_UnmountVehicleBase()
 {
@@ -29,6 +30,12 @@ void UGA_UnmountVehicleBase::ActivateAbility(const FGameplayAbilitySpecHandle Ha
     {
         EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
         return;
+    }
+    
+    PlayerChar->SetActorHiddenInGame(false);
+    if (UWeaponManagerComponent* WeaponMgr = PlayerChar->GetWeaponManagerComponent_Implementation())
+    {
+        WeaponMgr->SetWeaponHidden(false);
     }
 
     // 从角色的 Attachment Parent 获取载具引用
@@ -75,8 +82,20 @@ void UGA_UnmountVehicleBase::ExecutePhysicalUnbind()
     APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(CurrentActorInfo->AvatarActor.Get());
     if (!PlayerChar) return;
 
-    // 获取角色当前世界坐标（动画已将角色带到车外）
-    const FVector FinalExitLocation = PlayerChar->GetActorLocation();
+    FVector FinalExitLocation = PlayerChar->GetActorLocation(); // 默认兜底
+
+    // 强制向载具索要左前门的绝对安全位置
+    if (TargetVehicle)
+    {
+        FVector SafeLocation;
+        if (TargetVehicle->FindSafeExitLocation(SafeLocation))
+        {
+            // 拿到车门位置后，强制把 Z 轴拔高一个胶囊体半高，确保双脚落地不穿模
+            const float CapsuleHalfHeight = PlayerChar->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+            SafeLocation.Z += CapsuleHalfHeight;
+            FinalExitLocation = SafeLocation;
+        }
+    }
 
     // 执行真正的物理脱离：DetachFromActor + 恢复碰撞 + 恢复移动模式
     PlayerChar->EndDriving(FinalExitLocation);

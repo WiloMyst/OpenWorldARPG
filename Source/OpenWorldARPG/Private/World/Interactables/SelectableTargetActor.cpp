@@ -57,7 +57,7 @@ void ASelectableTargetActor::OnDetectSphereBeginOverlap(UPrimitiveComponent* Ove
     {
         if (IARPGCharacterInterface* ARPGChar = Cast<IARPGCharacterInterface>(OtherActor))
         {
-            if (UTargetingComponent* TargetComp = ARPGChar->GetTargetingComponent())
+            if (UTargetingComponent* TargetComp = IARPGCharacterInterface::Execute_GetTargetingComponent(Cast<UObject>(ARPGChar)))
             {
                 TargetComp->AddTarget(this);
             }
@@ -71,7 +71,7 @@ void ASelectableTargetActor::OnDetectSphereEndOverlap(UPrimitiveComponent* Overl
     {
         if (IARPGCharacterInterface* ARPGChar = Cast<IARPGCharacterInterface>(OtherActor))
         {
-            if (UTargetingComponent* TargetComp = ARPGChar->GetTargetingComponent())
+            if (UTargetingComponent* TargetComp = IARPGCharacterInterface::Execute_GetTargetingComponent(Cast<UObject>(ARPGChar)))
             {
                 TargetComp->RemoveTarget(this);
             }
