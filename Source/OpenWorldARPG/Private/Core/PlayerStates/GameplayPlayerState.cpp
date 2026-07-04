@@ -1,7 +1,7 @@
 // Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Core/PlayerStates/GameplayPlayerState.h"
-#include "Characters/PlayerCharacter.h"
+#include "Characters/PlayerCharacter/PlayerCharacter.h"
 #include "Net/UnrealNetwork.h"
 
 AGameplayPlayerState::AGameplayPlayerState()

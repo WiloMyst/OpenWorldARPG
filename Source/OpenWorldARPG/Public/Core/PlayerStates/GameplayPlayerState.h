@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Core/OpenWorldARPGPlayerState.h"
+#include "Core/PlayerStates/OpenWorldARPGPlayerState.h"
 #include "GameplayTagContainer.h"
 #include "GameplayPlayerState.generated.h"
 

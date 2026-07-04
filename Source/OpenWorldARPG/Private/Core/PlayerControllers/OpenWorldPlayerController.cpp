@@ -1,8 +1,8 @@
 // Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Core/PlayerControllers/OpenWorldPlayerController.h"
-#include "Characters/PlayerCharacter.h"
-#include "Vehicles/WheeledVehiclePawnBase.h"
+#include "Characters/PlayerCharacter/PlayerCharacter.h"
+#include "Systems/VehicleSystem/Pawns/WheeledVehiclePawnBase.h"
 #include "AbilitySystemBlueprintLibrary.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"

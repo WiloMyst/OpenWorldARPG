@@ -4,13 +4,13 @@
 #include "UI/HUD/PlayerCharacterBarWidget.h"
 #include "UI/HUD/GameplayListWidget.h"
 #include "UI/HUD/InteractionListWidget.h"
-#include "Components/HeroUIExtensionComponent.h"
-#include "Interfaces/ARPGCharacterInterface.h"
+#include "UI/Extension/PlayerUIExtensionComponent.h"
+#include "Characters/PlayerCharacter/Interfaces/ARPGCharacterInterface.h"
 #include "Core/PlayerStates/GameplayPlayerState.h"
-#include "Managers/UIManagerSubsystem.h"
-#include "Managers/TeamManagerSubsystem.h"
-#include "Managers/CharacterManagerSubsystem.h"
-#include "Data/CharacterRegistryRow.h"
+#include "UI/Core/UIManagerSubsystem.h"
+#include "Systems/TeamManager/TeamManagerSubsystem.h"
+#include "Systems/CharacterManager/CharacterManagerSubsystem.h"
+#include "Characters/PlayerCharacter/Data/CharacterRegistryRow.h"
 #include "AbilitySystemComponent.h"
 
 void UMainWorldHUDLayout::NativeOnInitialized()
@@ -38,7 +38,7 @@ void UMainWorldHUDLayout::NativeOnInitialized()
     // 绑定 UI 扩展组件（MVVM：不再直接依赖 ASC / InteractionComponent）
     if (IARPGCharacterInterface* ARPGChar = Cast<IARPGCharacterInterface>(GetOwningPlayerPawn()))
     {
-        if (UHeroUIExtensionComponent* ExtensionComp = IARPGCharacterInterface::Execute_GetHeroUIExtensionComponent(Cast<UObject>(ARPGChar)))
+        if (UPlayerUIExtensionComponent* ExtensionComp = IARPGCharacterInterface::Execute_GetPlayerUIExtensionComponent(Cast<UObject>(ARPGChar)))
         {
             BindToExtensionComp(ExtensionComp);
         }
@@ -96,7 +96,7 @@ void UMainWorldHUDLayout::OnInteractionListChanged(const TArray<AActor*>& Intera
 // ExtensionComponent 绑定/解绑
 // ==========================================
 
-void UMainWorldHUDLayout::BindToExtensionComp(UHeroUIExtensionComponent* NewExtensionComp)
+void UMainWorldHUDLayout::BindToExtensionComp(UPlayerUIExtensionComponent* NewExtensionComp)
 {
     if (!NewExtensionComp) return;
 
@@ -134,7 +134,7 @@ void UMainWorldHUDLayout::OnPossessedPawnChanged(APawn* OldPawn, APawn* NewPawn)
     // 角色切换：重新绑定到新角色的 ExtensionComp
     if (IARPGCharacterInterface* NewChar = Cast<IARPGCharacterInterface>(NewPawn))
     {
-        if (UHeroUIExtensionComponent* ExtensionComp = IARPGCharacterInterface::Execute_GetHeroUIExtensionComponent(Cast<UObject>(NewChar)))
+        if (UPlayerUIExtensionComponent* ExtensionComp = IARPGCharacterInterface::Execute_GetPlayerUIExtensionComponent(Cast<UObject>(NewChar)))
         {
             BindToExtensionComp(ExtensionComp);
         }

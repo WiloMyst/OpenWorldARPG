@@ -2,7 +2,7 @@
 
 #include "UI/Screens/CloseGamePanelWidget.h"
 #include "Components/Button.h"
-#include "Managers/UIManagerSubsystem.h"
+#include "UI/Core/UIManagerSubsystem.h"
 #include "Kismet/KismetSystemLibrary.h" // 包含退出游戏的静态库
 
 void UCloseGamePanelWidget::NativeConstruct()

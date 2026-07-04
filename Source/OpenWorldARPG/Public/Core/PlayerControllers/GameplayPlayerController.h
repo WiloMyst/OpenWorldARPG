@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Core/OpenWorldARPGPlayerController.h"
+#include "Core/PlayerControllers/OpenWorldARPGPlayerController.h"
 #include "GameplayTagContainer.h"
 #include "InputActionValue.h"
 #include "GameplayPlayerController.generated.h"

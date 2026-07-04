@@ -5,8 +5,8 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
 #include "GenericTeamAgentInterface.h"
-#include "Interfaces/CombatInterface.h"
-#include "Types/CustomMovementModeTypes.h"
+#include "Systems/CombatSystem/Interfaces/CombatInterface.h"
+#include "Systems/MovementSystem/Types/CustomMovementModeTypes.h"
 #include "OpenWorldARPGCharacter.generated.h"
 
 /**

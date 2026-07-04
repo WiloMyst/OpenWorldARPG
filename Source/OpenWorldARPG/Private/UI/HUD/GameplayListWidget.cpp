@@ -2,7 +2,7 @@
 
 #include "UI/HUD/GameplayListWidget.h"
 #include "Components/Button.h"
-#include "Managers/UIManagerSubsystem.h"
+#include "UI/Core/UIManagerSubsystem.h"
 #include "Engine/GameInstance.h"
 
 void UGameplayListWidget::NativeOnInitialized()

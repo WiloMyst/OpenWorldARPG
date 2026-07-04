@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Core/OpenWorldARPGGameModeBase.h"
+#include "Core/GameModes/OpenWorldARPGGameModeBase.h"
 #include "MainMenuGameMode.generated.h"
 
 /**

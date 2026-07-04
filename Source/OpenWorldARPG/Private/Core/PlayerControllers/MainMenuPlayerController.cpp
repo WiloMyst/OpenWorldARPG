@@ -1,8 +1,8 @@
 // Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Core/PlayerControllers/MainMenuPlayerController.h"
-#include "Managers/UIManagerSubsystem.h"
-#include "Managers/GameFlowSubsystem.h"
+#include "UI/Core/UIManagerSubsystem.h"
+#include "Systems/GameFlowManager/GameFlowSubsystem.h"
 #include "Core/GameModes/MainMenuGameMode.h"
 #include "UI/Screens/LoginScreenWidget.h"
 #include "UI/Screens/StartGameScreenWidget.h"

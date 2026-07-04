@@ -3,11 +3,11 @@
 #include "UI/HUD/TeamListWidget.h"
 #include "UI/HUD/TeamListSlotWidget.h"
 #include "Components/VerticalBox.h"
-#include "Managers/TeamManagerSubsystem.h"
-#include "Managers/CharacterManagerSubsystem.h"
-#include "Data/CharacterRegistryRow.h"
+#include "Systems/TeamManager/TeamManagerSubsystem.h"
+#include "Systems/CharacterManager/CharacterManagerSubsystem.h"
+#include "Characters/PlayerCharacter/Data/CharacterRegistryRow.h"
 #include "Core/PlayerStates/GameplayPlayerState.h"
-#include "Characters/PlayerCharacter.h"
+#include "Characters/PlayerCharacter/PlayerCharacter.h"
 #include "AbilitySystemComponent.h"
 #include "TimerManager.h" // 【新增】引入定时器管理器
 

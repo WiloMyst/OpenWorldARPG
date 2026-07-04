@@ -1,4 +1,4 @@
-﻿// Copyright 2025 WiloMyst. All Rights Reserved.
+// Copyright 2025 WiloMyst. All Rights Reserved.
 
 #pragma once
 
@@ -8,7 +8,7 @@
 #include "MainWorldHUDLayout.generated.h"
 
 class UBorder;
-class UHeroUIExtensionComponent;
+class UPlayerUIExtensionComponent;
 class UTeamListWidget;
 class UPlayerCharacterBarWidget;
 class UGameplayListWidget; 
@@ -60,14 +60,14 @@ private:
     UFUNCTION()
     void OnInteractionListChanged(const TArray<AActor*>& InteractableActors);
 
-    void BindToExtensionComp(UHeroUIExtensionComponent* NewExtensionComp);
+    void BindToExtensionComp(UPlayerUIExtensionComponent* NewExtensionComp);
     void UnbindFromExtensionComp();
 
     UFUNCTION()
     void OnPossessedPawnChanged(APawn* OldPawn, APawn* NewPawn);
 
     // --- 缓存 ---
-    TWeakObjectPtr<UHeroUIExtensionComponent> CachedExtensionComp;
+    TWeakObjectPtr<UPlayerUIExtensionComponent> CachedExtensionComp;
 
     float CurrentHealth = 0.0f;
     float CurrentMaxHealth = 1.0f; // 避免除以 0
