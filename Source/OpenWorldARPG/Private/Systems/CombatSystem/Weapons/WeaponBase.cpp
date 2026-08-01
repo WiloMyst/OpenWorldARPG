@@ -10,6 +10,9 @@ AWeaponBase::AWeaponBase()
 {
     PrimaryActorTick.bCanEverTick = false;
 
+    // 武器由服务器生成并复制到客户端，避免各端各自 Spawn 产生不同步的武器实例
+    bReplicates = true;
+
     WeaponMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WeaponMesh"));
     RootComponent = WeaponMesh;
     WeaponMesh->SetCollisionProfileName(TEXT("NoCollision"));

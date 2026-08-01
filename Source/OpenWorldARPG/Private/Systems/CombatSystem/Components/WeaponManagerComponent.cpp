@@ -6,10 +6,12 @@
 #include "AbilitySystemComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/SceneComponent.h"
+#include "Net/UnrealNetwork.h"
 
 UWeaponManagerComponent::UWeaponManagerComponent()
 {
     PrimaryComponentTick.bCanEverTick = false;
+    SetIsReplicatedByDefault(true);
 }
 
 void UWeaponManagerComponent::BeginPlay()
@@ -28,6 +30,14 @@ void UWeaponManagerComponent::OnComponentDestroyed(bool bDestroyingHierarchy)
     Super::OnComponentDestroyed(bDestroyingHierarchy);
 }
 
+void UWeaponManagerComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+    DOREPLIFETIME(ThisClass, CharacterWeapon);
+    DOREPLIFETIME(ThisClass, bIsWeaponStowed);
+}
+
 // --- 武器管理 ---
 
 void UWeaponManagerComponent::InitializeCharacterWeapon()
@@ -37,6 +47,9 @@ void UWeaponManagerComponent::InitializeCharacterWeapon()
         CachedCharacter = Cast<APlayerCharacter>(GetOwner());
     }
     if (!CachedCharacter) return;
+
+    // 武器 Spawn 与 Tag 监听仅在服务器执行；客户端通过复制的 CharacterWeapon/bIsWeaponStowed 同步表现
+    if (!GetOwner()->HasAuthority()) return;
 
     TSubclassOf<AWeaponBase> WeaponClass = CachedCharacter->GetWeaponBlueprint();
     if (!WeaponClass) return;
@@ -113,6 +126,39 @@ void UWeaponManagerComponent::SetWeaponHidden(bool bHidden)
 }
 
 // --- 内部逻辑 ---
+
+void UWeaponManagerComponent::ApplyWeaponAttachState()
+{
+    if (!CharacterWeapon || !CachedCharacter) return;
+
+    if (bIsWeaponStowed)
+    {
+        USceneComponent* RestSocket = CachedCharacter->GetWeaponRestSocket();
+        if (RestSocket)
+        {
+            CharacterWeapon->AttachToComponent(RestSocket, FAttachmentTransformRules::KeepRelativeTransform);
+        }
+    }
+    else if (CachedCharacter->GetMesh())
+    {
+        CharacterWeapon->AttachToComponent(CachedCharacter->GetMesh(), FAttachmentTransformRules::KeepRelativeTransform, HandSocketName);
+    }
+}
+
+void UWeaponManagerComponent::OnRep_CharacterWeapon()
+{
+    // 客户端首次收到服务器复制的武器引用，按当前收/拔状态挂载
+    if (CharacterWeapon && CachedCharacter)
+    {
+        ApplyWeaponAttachState();
+    }
+}
+
+void UWeaponManagerComponent::OnRep_IsWeaponStowed()
+{
+    // 服务器收/拔状态变化后，客户端重新挂载武器到对应 Socket
+    ApplyWeaponAttachState();
+}
 
 void UWeaponManagerComponent::UpdateWeaponState()
 {

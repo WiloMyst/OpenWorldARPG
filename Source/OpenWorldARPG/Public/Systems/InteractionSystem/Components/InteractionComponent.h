@@ -20,6 +20,7 @@ public:
 
     // --- 核心交互 ---
 
+    /** 本地选取交互目标并请求服务器权威执行交互。 */
     void Interact();
     TArray<AActor*> GetCurrentInteractableActors() const;
 
@@ -30,6 +31,11 @@ protected:
     // --- 内部辅助 ---
 
     bool IsCharacterInStandby() const;
+
+    // --- 服务器权威交互 ---
+
+    UFUNCTION(Server, Reliable, WithValidation)
+    void Server_Interact(AActor* TargetActor);
 
 public:
     // --- 事件委托 ---

@@ -6,11 +6,12 @@
 #include "Components/StaticMeshComponent.h"
 #include "Camera/CameraComponent.h"
 #include "Components/SpotLightComponent.h"
-#include "Systems/CharacterManager/CharacterManagerSubsystem.h"
+#include "Systems/CharacterManager/CharacterRegistrySubsystem.h"
 #include "Characters/PlayerCharacter/Data/CharacterRegistryRow.h"
 #include "Characters/PlayerCharacter/Data/CharacterVisualDataAsset.h"
 #include "Engine/Engine.h"
 #include "Engine/LocalPlayer.h"
+#include "Engine/GameInstance.h"
 
 ATeamSetupStage::ATeamSetupStage()
 {
@@ -139,22 +140,19 @@ void ATeamSetupStage::RotateCharacters(float DeltaYaw)
 
 void ATeamSetupStage::RefreshStage(const TArray<FGameplayTag>& TeamTags)
 {
-    UCharacterManagerSubsystem* Subsystem = nullptr;
+    UCharacterRegistrySubsystem* Subsystem = nullptr;
 
     if (UWorld* World = GetWorld())
     {
-        if (APlayerController* PC = World->GetFirstPlayerController())
+        if (UGameInstance* GI = World->GetGameInstance())
         {
-            if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
-            {
-                Subsystem = LocalPlayer->GetSubsystem<UCharacterManagerSubsystem>();
-            }
+            Subsystem = GI->GetSubsystem<UCharacterRegistrySubsystem>();
         }
     }
 
     if (!Subsystem)
     {
-        UE_LOG(LogTemp, Warning, TEXT("ATeamSetupStage::RefreshStage: CharacterManagerSubsystem 不可用"));
+        UE_LOG(LogTemp, Warning, TEXT("ATeamSetupStage::RefreshStage: CharacterRegistrySubsystem 不可用"));
         return;
     }
 

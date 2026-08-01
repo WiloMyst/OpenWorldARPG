@@ -5,7 +5,7 @@
 #include "Systems/CharacterManager/UI/CharacterCarouselWidget.h"
 #include "Systems/CharacterManager/UI/CharacterNavMenuWidget.h"
 #include "Systems/CharacterManager/UI/CharacterDetailsAttributesWidget.h"
-#include "Systems/CharacterManager/CharacterManagerSubsystem.h"
+#include "Systems/CharacterManager/CharacterRegistrySubsystem.h"
 #include "UI/Core/UIManagerSubsystem.h"
 #include "Systems/TeamManager/TeamManagerSubsystem.h"
 #include "Characters/PlayerCharacter/Data/CharacterRegistryRow.h"
@@ -195,13 +195,13 @@ void UCharacterScreenMainWidget::HandleCharacterSelected(const FGameplayTag& Cha
 
 const UCharacterVisualDataAsset* UCharacterScreenMainWidget::ResolveVisualData(const FGameplayTag& CharacterTag) const
 {
-    UCharacterManagerSubsystem* Subsystem = nullptr;
+    UCharacterRegistrySubsystem* Subsystem = nullptr;
 
     if (APlayerController* PC = GetOwningPlayer())
     {
-        if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
+        if (UGameInstance* GI = PC->GetGameInstance())
         {
-            Subsystem = LocalPlayer->GetSubsystem<UCharacterManagerSubsystem>();
+            Subsystem = GI->GetSubsystem<UCharacterRegistrySubsystem>();
         }
     }
 

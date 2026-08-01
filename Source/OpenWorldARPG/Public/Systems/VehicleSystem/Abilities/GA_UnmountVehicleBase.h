@@ -8,7 +8,7 @@
 
 class UAbilityTask_PlayMontageAndWait;
 class UAnimMontage;
-class AWheeledVehiclePawnBase;
+class AVehiclePawnBase;
 
 /**
  * 下车能力。由载具 InputExitVehicle → Server_UnPossessVehicle 发送 UnmountVehicleEventTag 激活。
@@ -63,7 +63,7 @@ private:
     TObjectPtr<UAbilityTask_PlayMontageAndWait> PlayMontageTask;
 
     /** 缓存目标载具（从角色的 Attachment Parent 获取） */
-    AWheeledVehiclePawnBase* TargetVehicle = nullptr;
+    AVehiclePawnBase* TargetVehicle = nullptr;
 
     /** 防止重复执行物理脱离 */
     bool bHasUnbound = false;

@@ -2,7 +2,7 @@
 
 #include "Core/PlayerControllers/OpenWorldPlayerController.h"
 #include "Characters/PlayerCharacter/PlayerCharacter.h"
-#include "Systems/VehicleSystem/Pawns/WheeledVehiclePawnBase.h"
+#include "Systems/VehicleSystem/Pawns/VehiclePawnBase.h"
 #include "AbilitySystemBlueprintLibrary.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -56,21 +56,33 @@ void AOpenWorldPlayerController::Client_PrepareForCameraBlend_Implementation()
 // ============================================================================
 // 载具驾驶：Server RPC - 上车
 // ============================================================================
-bool AOpenWorldPlayerController::Server_PossessVehicle_Validate(AWheeledVehiclePawnBase* TargetVehicle)
+bool AOpenWorldPlayerController::Server_PossessVehicle_Validate(AVehiclePawnBase* TargetVehicle)
 {
-    return TargetVehicle != nullptr;
+    if (!TargetVehicle) return false;
+
+    // 防瞬移上车作弊：玩家与载具距离不得超过 MaxEnterVehicleDistance
+    APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(GetPawn());
+    if (!PlayerChar) return false;
+
+    const float Dist = FVector::Dist(PlayerChar->GetActorLocation(), TargetVehicle->GetActorLocation());
+    if (Dist > MaxEnterVehicleDistance) return false;
+
+    // 载具不能已被其他玩家驾驶
+    if (TargetVehicle->GetDriver() != nullptr) return false;
+
+    return true;
 }
 
-void AOpenWorldPlayerController::Server_PossessVehicle_Implementation(AWheeledVehiclePawnBase* TargetVehicle)
+void AOpenWorldPlayerController::Server_PossessVehicle_Implementation(AVehiclePawnBase* TargetVehicle)
 {
     if (!HasAuthority() || !TargetVehicle) return;
 
     APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(GetPawn());
-    if (!PlayerChar || TargetVehicle->Driver != nullptr) return;
+    if (!PlayerChar || TargetVehicle->GetDriver() != nullptr) return;
 
     // GA_MountVehicleBase 已在播放动画前调用过 PrepareForDriving，此处不再重复
 
-    TargetVehicle->Driver = PlayerChar;
+    TargetVehicle->SetDriver(PlayerChar);
 
     // 3. UnPossess 角色，Possess 载具
     Client_PrepareForCameraBlend();
@@ -86,6 +98,13 @@ void AOpenWorldPlayerController::Server_PossessVehicle_Implementation(AWheeledVe
 // ============================================================================
 bool AOpenWorldPlayerController::Server_UnPossessVehicle_Validate(FVector ExitLocation)
 {
+    // 必须正在驾驶载具才能下车
+    AVehiclePawnBase* Vehicle = Cast<AVehiclePawnBase>(GetPawn());
+    if (!Vehicle) return false;
+
+    // 防劫持：当前载具必须有驾驶员（即本 Controller 之前 Possess 的角色）
+    if (Vehicle->GetDriver() == nullptr) return false;
+
     return true;
 }
 
@@ -93,16 +112,16 @@ void AOpenWorldPlayerController::Server_UnPossessVehicle_Implementation(FVector 
 {
     if (!HasAuthority()) return;
 
-    AWheeledVehiclePawnBase* Vehicle = Cast<AWheeledVehiclePawnBase>(GetPawn());
+    AVehiclePawnBase* Vehicle = Cast<AVehiclePawnBase>(GetPawn());
     if (!Vehicle) return;
 
-    APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(Vehicle->Driver);
+    APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(Vehicle->GetDriver());
     if (!PlayerChar) return;
 
     FGameplayTag UnmountTag = Vehicle->GetUnmountVehicleEventTag();
 
     // 1. 清除载具驾驶员引用并重置输入
-    Vehicle->Driver = nullptr;
+    Vehicle->SetDriver(nullptr);
     Vehicle->ResetVehicleInputs();
 
     // 2. 交接控制权：从载具切回角色（角色仍然 Attach 在车座上，不执行 EndDriving）
@@ -124,7 +143,7 @@ void AOpenWorldPlayerController::Server_UnPossessVehicle_Implementation(FVector 
 // ============================================================================
 // 载具驾驶：Client RPC - 相机过渡到载具
 // ============================================================================
-void AOpenWorldPlayerController::Client_BlendCameraToVehicle_Implementation(AWheeledVehiclePawnBase* TargetVehicle)
+void AOpenWorldPlayerController::Client_BlendCameraToVehicle_Implementation(AVehiclePawnBase* TargetVehicle)
 {
     if (!TargetVehicle) return;
 
@@ -142,7 +161,7 @@ void AOpenWorldPlayerController::Client_BlendCameraToVehicle_Implementation(AWhe
 // ============================================================================
 // 载具驾驶：Client RPC - 相机过渡回角色，清理载具 IMC
 // ============================================================================
-void AOpenWorldPlayerController::Client_BlendCameraToCharacter_Implementation(APlayerCharacter* InCharacter, AWheeledVehiclePawnBase* OldVehicle)
+void AOpenWorldPlayerController::Client_BlendCameraToCharacter_Implementation(APlayerCharacter* InCharacter, AVehiclePawnBase* OldVehicle)
 {
     if (!InCharacter) return;
 
@@ -159,14 +178,14 @@ void AOpenWorldPlayerController::Client_BlendCameraToCharacter_Implementation(AP
         // 在客户端本地显式清空载具输入，防止 InputComponent 剥离导致 Completed 事件丢失 (Sticky Input)
         OldVehicle->ResetVehicleInputs();
 
-        if (OldVehicle->VehicleIMC)
+        if (OldVehicle->GetVehicleIMC())
         {
             if (ULocalPlayer* LocalPlayer = GetLocalPlayer())
             {
                 if (UEnhancedInputLocalPlayerSubsystem* Subsystem =
                     LocalPlayer->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>())
                 {
-                    Subsystem->RemoveMappingContext(OldVehicle->VehicleIMC);
+                    Subsystem->RemoveMappingContext(OldVehicle->GetVehicleIMC());
                 }
             }
         }

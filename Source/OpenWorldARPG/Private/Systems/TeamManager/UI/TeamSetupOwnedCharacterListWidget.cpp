@@ -3,8 +3,10 @@
 #include "Systems/TeamManager/UI/TeamSetupOwnedCharacterListWidget.h"
 #include "Systems/TeamManager/UI/TeamSetupSlotWidget.h"
 #include "Systems/CharacterManager/CharacterManagerSubsystem.h"
+#include "Systems/CharacterManager/CharacterRegistrySubsystem.h"
 #include "Characters/PlayerCharacter/Data/CharacterRegistryRow.h"
 #include "Components/PanelWidget.h"
+#include "Engine/GameInstance.h"
 
 UTeamSetupOwnedCharacterListWidget::UTeamSetupOwnedCharacterListWidget(const FObjectInitializer& ObjectInitializer)
     : Super(ObjectInitializer)
@@ -18,12 +20,17 @@ void UTeamSetupOwnedCharacterListWidget::RefreshList(const TArray<FGameplayTag>&
     CharacterListContainer->ClearChildren();
 
     UCharacterManagerSubsystem* CharSubsystem = nullptr;
+    UCharacterRegistrySubsystem* Registry = nullptr;
 
     if (APlayerController* PC = GetOwningPlayer())
     {
         if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
         {
             CharSubsystem = LocalPlayer->GetSubsystem<UCharacterManagerSubsystem>();
+        }
+        if (UGameInstance* GI = PC->GetGameInstance())
+        {
+            Registry = GI->GetSubsystem<UCharacterRegistrySubsystem>();
         }
     }
 
@@ -36,7 +43,7 @@ void UTeamSetupOwnedCharacterListWidget::RefreshList(const TArray<FGameplayTag>&
         if (!SaveData.CharacterTag.IsValid()) continue;
 
         FCharacterRegistryRow Row;
-        const bool bHasRow = CharSubsystem->GetCharacterRegistryRowByTag(SaveData.CharacterTag, Row);
+        const bool bHasRow = Registry ? Registry->GetCharacterRegistryRowByTag(SaveData.CharacterTag, Row) : false;
 
         UTeamSetupSlotWidget* Item = CreateWidget<UTeamSetupSlotWidget>(this, SlotItemClass);
         if (!Item) continue;

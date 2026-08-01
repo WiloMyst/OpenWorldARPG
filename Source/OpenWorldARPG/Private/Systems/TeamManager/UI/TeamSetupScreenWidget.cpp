@@ -5,7 +5,6 @@
 #include "Systems/TeamManager/UI/TeamSetupSlotWidget.h"
 #include "Systems/TeamManager/UI/TeamSetupOwnedCharacterListWidget.h"
 #include "Systems/TeamManager/TeamManagerSubsystem.h"
-#include "Systems/CharacterManager/CharacterManagerSubsystem.h"
 #include "UI/Core/UIManagerSubsystem.h"
 #include "Characters/PlayerCharacter/Data/CharacterRegistryRow.h"
 #include "Core/PlayerControllers/GameplayPlayerController.h"

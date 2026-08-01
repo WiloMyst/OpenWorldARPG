@@ -74,21 +74,16 @@ Intermediate/*
 DerivedDataCache/*
 
 # Can be generated
-Binaries
-Intermediate
-Saved
-Build
-DerivedDataCache
+Binaries/
+Intermediate/
+Saved/
+Build/
+DerivedDataCache/
 /UE5Project/.idea
 
 # Plugins
 *.uplugin
-Plugins/**/Binaries/*
-Plugins/**/Config/*
-Plugins/**/Content/*
-Plugins/**/Intermediate/*
-Plugins/**/Resources/*
-Plugins/**/Source/*
+Plugins/
 
 # Do not commit
 *.uasset

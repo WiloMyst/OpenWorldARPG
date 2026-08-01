@@ -19,6 +19,8 @@ class OPENWORLDARPG_API UWeaponManagerComponent : public UActorComponent
 public:
     UWeaponManagerComponent();
 
+    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
     // --- 武器管理 ---
 
     void InitializeCharacterWeapon();
@@ -36,6 +38,17 @@ private:
 
     void UpdateWeaponState();
 
+    // 客户端根据复制状态重新挂载武器到对应 Socket
+    void ApplyWeaponAttachState();
+
+    // --- 复制回调 ---
+
+    UFUNCTION()
+    void OnRep_CharacterWeapon();
+
+    UFUNCTION()
+    void OnRep_IsWeaponStowed();
+
     // --- Tag 回调 ---
 
     UFUNCTION()
@@ -47,7 +60,7 @@ private:
 public:
     // --- 武器引用 ---
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Weapon System|State")
+    UPROPERTY(VisibleAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_CharacterWeapon, Category = "Weapon System|State")
     TObjectPtr<AWeaponBase> CharacterWeapon;
 
 protected:
@@ -70,6 +83,8 @@ protected:
 private:
     // --- 运行时状态 ---
 
+    // 武器收/拔状态由服务器权威设置并复制，客户端通过 OnRep 重新挂载
+    UPROPERTY(ReplicatedUsing = OnRep_IsWeaponStowed)
     bool bIsWeaponStowed = true;
 
     // --- 缓存 ---

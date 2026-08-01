@@ -9,7 +9,7 @@
 class UAbilityTask_PlayMontageAndWait;
 class UAbilityTask_NavMoveTo;
 class UAnimMontage;
-class AWheeledVehiclePawnBase;
+class AVehiclePawnBase;
 
 /**
  * 上车能力。由载具 OnInteract 发送 MountVehicleEventTag 激活。
@@ -105,5 +105,5 @@ private:
     TObjectPtr<UAbilityTask_PlayMontageAndWait> PlayMontageTask;
 
     /** 缓存的目标载具（Transient，GA 生命周期短不需要弱引用追踪） */
-    AWheeledVehiclePawnBase* TargetVehicle = nullptr;
+    AVehiclePawnBase* TargetVehicle = nullptr;
 };

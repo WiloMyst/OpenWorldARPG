@@ -2,9 +2,11 @@
 
 #include "Systems/CharacterManager/UI/CharacterDetailsAttributesWidget.h"
 #include "Systems/CharacterManager/CharacterManagerSubsystem.h"
+#include "Systems/CharacterManager/CharacterRegistrySubsystem.h"
 #include "Characters/PlayerCharacter/Data/CharacterRegistryRow.h"
 #include "Components/TextBlock.h"
 #include "Components/ProgressBar.h"
+#include "Engine/GameInstance.h"
 
 UCharacterDetailsAttributesWidget::UCharacterDetailsAttributesWidget(const FObjectInitializer& ObjectInitializer)
     : Super(ObjectInitializer)
@@ -15,20 +17,25 @@ void UCharacterDetailsAttributesWidget::RefreshData(const FGameplayTag& Characte
 {
     CurrentCharacterTag = CharacterTag;
 
-    UCharacterManagerSubsystem* Subsystem = nullptr;
+    UCharacterManagerSubsystem* SaveDataManager = nullptr;
+    UCharacterRegistrySubsystem* Registry = nullptr;
 
     if (APlayerController* PC = GetOwningPlayer())
     {
         if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
         {
-            Subsystem = LocalPlayer->GetSubsystem<UCharacterManagerSubsystem>();
+            SaveDataManager = LocalPlayer->GetSubsystem<UCharacterManagerSubsystem>();
+        }
+        if (UGameInstance* GI = PC->GetGameInstance())
+        {
+            Registry = GI->GetSubsystem<UCharacterRegistrySubsystem>();
         }
     }
 
-    if (!Subsystem) return;
+    if (!SaveDataManager) return;
 
     // 拉取存档数据
-    const FCharacterSaveData* SaveDataPtr = Subsystem->GetCharacterSaveData(CharacterTag);
+    const FCharacterSaveData* SaveDataPtr = SaveDataManager->GetCharacterSaveData(CharacterTag);
     if (!SaveDataPtr)
     {
         return;
@@ -43,7 +50,7 @@ void UCharacterDetailsAttributesWidget::RefreshData(const FGameplayTag& Characte
 
     // 查询 RegistryRow 获取角色名称
     FCharacterRegistryRow Row;
-    if (Subsystem->GetCharacterRegistryRowByTag(CharacterTag, Row))
+    if (Registry && Registry->GetCharacterRegistryRowByTag(CharacterTag, Row))
     {
         if (CharacterNameText)
         {

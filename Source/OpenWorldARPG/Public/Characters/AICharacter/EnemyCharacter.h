@@ -28,11 +28,13 @@ public:
     virtual void PostInitializeComponents() override;
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
+    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
     // --- 接口实现 (IAbilitySystemInterface / ICombatInterface) ---
 
     virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override { return AbilitySystemComponent; }
     virtual void HandleDeath_Implementation() override;
+    virtual void OnRep_IsDead(bool bOldIsDead) override;
 
     // --- 动画 ---
 
@@ -62,6 +64,11 @@ protected:
 
     UFUNCTION()
     void OnMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+
+    // --- 武器复制回调 ---
+
+    UFUNCTION()
+    void OnRep_EnemyWeapon();
 
     // --- 死亡辅助 ---
 
@@ -135,7 +142,7 @@ protected:
 private:
     // --- 运行时状态 ---
 
-    UPROPERTY()
+    UPROPERTY(ReplicatedUsing = OnRep_EnemyWeapon)
     TObjectPtr<AActor> EnemyWeapon;
 
     FTimerHandle DeathDestroyTimerHandle;

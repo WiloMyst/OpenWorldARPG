@@ -3,6 +3,7 @@
 #include "Characters/OpenWorldARPGCharacter.h"
 #include "Components/CapsuleComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Net/UnrealNetwork.h"
 
 AOpenWorldARPGCharacter::AOpenWorldARPGCharacter(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
@@ -20,11 +21,41 @@ AOpenWorldARPGCharacter::AOpenWorldARPGCharacter(const FObjectInitializer& Objec
 	TeamId = FGenericTeamId(10);
 }
 
+void AOpenWorldARPGCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	DOREPLIFETIME(ThisClass, bIsDead);
+}
+
 void AOpenWorldARPGCharacter::HandleDeath_Implementation()
 {
 	if (bIsDead) return;
 	bIsDead = true;
+	ApplyDeathState();
+}
 
+void AOpenWorldARPGCharacter::HandleRevive_Implementation()
+{
+	bIsDead = false;
+	ApplyReviveState();
+}
+
+void AOpenWorldARPGCharacter::OnRep_IsDead(bool bOldIsDead)
+{
+	// 客户端收到服务器复制的死亡状态后应用对应视觉（模拟代理上看不到死亡 GA，由此兜底）
+	if (bIsDead)
+	{
+		ApplyDeathState();
+	}
+	else
+	{
+		ApplyReviveState();
+	}
+}
+
+void AOpenWorldARPGCharacter::ApplyDeathState()
+{
 	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
 	{
 		Capsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -38,10 +69,8 @@ void AOpenWorldARPGCharacter::HandleDeath_Implementation()
 	}
 }
 
-void AOpenWorldARPGCharacter::HandleRevive_Implementation()
+void AOpenWorldARPGCharacter::ApplyReviveState()
 {
-	bIsDead = false;
-
 	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
 	{
 		Capsule->SetCollisionProfileName(TEXT("Pawn"));

@@ -2,6 +2,7 @@
 
 
 #include "Systems/AbilitySystem/AttributeSets/AS_Enemy.h"
+#include "Net/UnrealNetwork.h"
 
 UAS_Enemy::UAS_Enemy()
 {
@@ -18,4 +19,22 @@ void UAS_Enemy::PreAttributeChange(const FGameplayAttribute& Attribute, float& N
     {
         NewValue = FMath::Clamp(NewValue, 0.f, GetMaxHealth());
     }
+}
+
+void UAS_Enemy::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+    DOREPLIFETIME(ThisClass, Health);
+    DOREPLIFETIME(ThisClass, MaxHealth);
+}
+
+void UAS_Enemy::OnRep_Health(const FGameplayAttributeData& OldHealth)
+{
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UAS_Enemy, Health, OldHealth);
+}
+
+void UAS_Enemy::OnRep_MaxHealth(const FGameplayAttributeData& OldMaxHealth)
+{
+    GAMEPLAYATTRIBUTE_REPNOTIFY(UAS_Enemy, MaxHealth, OldMaxHealth);
 }

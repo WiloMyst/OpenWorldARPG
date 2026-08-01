@@ -3,10 +3,12 @@
 #include "Systems/CharacterManager/UI/CharacterCarouselWidget.h"
 #include "Systems/CharacterManager/UI/CharacterCarouselItemWidget.h"
 #include "Systems/CharacterManager/CharacterManagerSubsystem.h"
+#include "Systems/CharacterManager/CharacterRegistrySubsystem.h"
 #include "Characters/PlayerCharacter/Data/CharacterRegistryRow.h"
 #include "Components/HorizontalBox.h"
 #include "Components/WrapBox.h"
 #include "Components/PanelWidget.h"
+#include "Engine/GameInstance.h"
 
 UCharacterCarouselWidget::UCharacterCarouselWidget(const FObjectInitializer& ObjectInitializer)
     : Super(ObjectInitializer)
@@ -29,20 +31,25 @@ void UCharacterCarouselWidget::RefreshCharacterList()
     CharacterListContainer->ClearChildren();
     SelectedItem = nullptr;
 
-    UCharacterManagerSubsystem* Subsystem = nullptr;
+    UCharacterManagerSubsystem* SaveDataManager = nullptr;
+    UCharacterRegistrySubsystem* Registry = nullptr;
 
     if (APlayerController* PC = GetOwningPlayer())
     {
         if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
         {
-            Subsystem = LocalPlayer->GetSubsystem<UCharacterManagerSubsystem>();
+            SaveDataManager = LocalPlayer->GetSubsystem<UCharacterManagerSubsystem>();
+        }
+        if (UGameInstance* GI = PC->GetGameInstance())
+        {
+            Registry = GI->GetSubsystem<UCharacterRegistrySubsystem>();
         }
     }
 
-    if (!Subsystem) return;
+    if (!SaveDataManager) return;
 
     // 拉取所有已拥有角色
-    TArray<FCharacterSaveData> OwnedCharacters = Subsystem->GetAllOwnedCharacterSaveData();
+    TArray<FCharacterSaveData> OwnedCharacters = SaveDataManager->GetAllOwnedCharacterSaveData();
 
     for (const FCharacterSaveData& SaveData : OwnedCharacters)
     {
@@ -50,7 +57,7 @@ void UCharacterCarouselWidget::RefreshCharacterList()
 
         // 查询 RegistryRow 获取 UI 元数据（名称、头像）
         FCharacterRegistryRow Row;
-        bool bHasRow = Subsystem->GetCharacterRegistryRowByTag(SaveData.CharacterTag, Row);
+        bool bHasRow = Registry ? Registry->GetCharacterRegistryRowByTag(SaveData.CharacterTag, Row) : false;
 
         // 创建头像 Widget
         UCharacterCarouselItemWidget* ItemWidget = CreateWidget<UCharacterCarouselItemWidget>(this, CarouselItemClass);

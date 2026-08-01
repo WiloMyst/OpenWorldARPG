@@ -14,7 +14,7 @@
 #include "MotionWarpingComponent.h"
 #include "PlayerCharacter.generated.h"
 
-class AWheeledVehiclePawnBase;
+class AVehiclePawnBase;
 class USpringArmComponent;
 class UCameraComponent;
 class USceneComponent;
@@ -331,6 +331,11 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "PlayerCharacter|Config|Camera")
 	FVector AimingSocketOffset = FVector(0.0f, 50.0f, 20.0f);
+
+	// --- 运行时状态：瞄准时摄像机弹簧臂延迟 ---
+
+	bool bSavedCameraLagEnabled = false;
+	bool bSavedCameraRotationLagEnabled = false;
 
 	// --- 配置：移动 ---
 

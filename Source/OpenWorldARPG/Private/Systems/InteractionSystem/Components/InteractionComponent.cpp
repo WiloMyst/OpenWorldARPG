@@ -2,6 +2,7 @@
 
 #include "Systems/InteractionSystem/Components/InteractionComponent.h"
 #include "Systems/InteractionSystem/Interfaces/InteractableInterface.h"
+#include "Systems/VehicleSystem/Pawns/VehiclePawnBase.h"
 #include "Characters/PlayerCharacter/PlayerCharacter.h"
 #include "AbilitySystemComponent.h"
 #include "Engine/World.h"
@@ -111,20 +112,70 @@ bool UInteractionComponent::IsCharacterInStandby() const
 
 void UInteractionComponent::Interact()
 {
-    if (IsCharacterInStandby() || CurrentInteractableActors.IsEmpty()) return;
+    if (IsCharacterInStandby())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[MountDiag] Interact abort: 角色处于 Standby 状态"));
+        return;
+    }
+    if (CurrentInteractableActors.IsEmpty())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[MountDiag] Interact abort: 交互列表为空"));
+        return;
+    }
 
     APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(GetOwner());
     if (!PlayerChar) return;
 
-    for (TWeakObjectPtr<AActor> WeakActor : CurrentInteractableActors)
+    AActor* TargetActor = nullptr;
+    for (const TWeakObjectPtr<AActor>& WeakActor : CurrentInteractableActors)
     {
-        AActor* TargetActor = WeakActor.Get();
-        if (TargetActor && TargetActor->Implements<UInteractableInterface>())
+        AActor* Candidate = WeakActor.Get();
+        if (Candidate && Candidate->Implements<UInteractableInterface>())
         {
-            IInteractableInterface::Execute_OnInteract(TargetActor, PlayerChar);
+            TargetActor = Candidate;
             break;
         }
     }
+
+    if (TargetActor)
+    {
+        UE_LOG(LogTemp, Log, TEXT("[MountDiag] Interact: 找到目标 %s, 发送 Server_Interact"), *TargetActor->GetName());
+        Server_Interact(TargetActor);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[MountDiag] Interact: 交互列表有 %d 个 Actor 但无实现 IInteractableInterface"), CurrentInteractableActors.Num());
+    }
+}
+
+bool UInteractionComponent::Server_Interact_Validate(AActor* TargetActor)
+{
+    return IsValid(TargetActor);
+}
+
+void UInteractionComponent::Server_Interact_Implementation(AActor* TargetActor)
+{
+    if (!IsValid(TargetActor) || !TargetActor->Implements<UInteractableInterface>()) return;
+
+    APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(GetOwner());
+    if (!PlayerChar) return;
+
+    // 服务器侧二次校验交互距离，防止客户端伪造远程交互
+    // 载具体积大，用 MaxEnterDistance（默认 300cm）；其他交互物用 1.5x InteractionRadius
+    float AllowedDist = InteractionRadius * 1.5f;
+    if (AVehiclePawnBase* Vehicle = Cast<AVehiclePawnBase>(TargetActor))
+    {
+        AllowedDist = Vehicle->GetMaxEnterDistance();
+    }
+    const float ActualDist = FVector::Dist(PlayerChar->GetActorLocation(), TargetActor->GetActorLocation());
+    if (ActualDist > AllowedDist)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[MountDiag] Server_Interact: 距离 %.1f 超过限制 %.1f, 拒绝"), ActualDist, AllowedDist);
+        return;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("[MountDiag] Server_Interact: 调用 OnInteract, 目标=%s"), *TargetActor->GetName());
+    IInteractableInterface::Execute_OnInteract(TargetActor, PlayerChar);
 }
 
 TArray<AActor*> UInteractionComponent::GetCurrentInteractableActors() const

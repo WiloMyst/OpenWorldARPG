@@ -56,24 +56,44 @@ void UAbilityTask_NavMoveTo::Activate()
         return;
     }
 
-    // 调用 SimpleMoveToLocation 发起基于 NavMesh 的真实寻路
-    // SimpleMoveToLocation 内部会通过 InitNavigationControl 自动创建 UPathFollowingComponent
-    UAIBlueprintHelperLibrary::SimpleMoveToLocation(Controller, TargetLocation);
-
-    // 获取 SimpleMoveToLocation 创建的 PathFollowingComponent
+    // 主动确保 Controller 拥有 UPathFollowingComponent。
+    //
+    // 问题：UAIBlueprintHelperLibrary::SimpleMoveToLocation 内部通过 InitNavigationControl
+    // 自动创建 UPathFollowingComponent，但存在两个坑：
+    //   1. PlayerController 在 Possess 后 UPathFollowingComponent 不会自动更新
+    //      （GetOnNewPawnNotifier 只在 Server 触发，客户端不触发）
+    //   2. SimpleMoveToLocation 的 InitNavigationControl 是异步的，立即 FindComponentByClass
+    //      可能返回 null（时序竞态）
+    //
+    // 解决：在调用 SimpleMoveToLocation 前，主动创建并 Initialize UPathFollowingComponent。
+    //       若已存在则强制重新 Initialize 以更新 MovementComponent 引用（修复 Possess 后失效）。
     PathFollowingComp = Controller->FindComponentByClass<UPathFollowingComponent>();
     if (!PathFollowingComp)
     {
-        UE_LOG(LogTemp, Warning, TEXT("AbilityTask_NavMoveTo: PathFollowingComponent not found after SimpleMoveToLocation!"));
+        PathFollowingComp = NewObject<UPathFollowingComponent>(Controller);
+        PathFollowingComp->RegisterComponentWithWorld(GetWorld());
+    }
+
+    // 强制重新初始化，更新对当前 Pawn 的 MovementComponent 引用
+    PathFollowingComp->Initialize();
+
+    // 检查寻路是否被允许
+    if (!PathFollowingComp->IsPathFollowingAllowed())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("AbilityTask_NavMoveTo: PathFollowing not allowed! "
+            "Check 'Allow Client Side Navigation' in Project Settings > Navigation System."));
         OnFailed.Broadcast();
         EndTask();
         return;
     }
 
     // 绑定 OnRequestFinished 委托，监听寻路结果
-    // FMoveComplete 是非动态多播委托，使用 AddUObject 绑定
     PathFinishedHandle = PathFollowingComp->OnRequestFinished.AddUObject(
         this, &UAbilityTask_NavMoveTo::OnPathFollowingFinished);
+
+    // 发起基于 NavMesh 的真实寻路
+    // 此时 PathFollowingComponent 已就绪，SimpleMoveToLocation 会复用它
+    UAIBlueprintHelperLibrary::SimpleMoveToLocation(Controller, TargetLocation);
 }
 
 void UAbilityTask_NavMoveTo::OnPathFollowingFinished(FAIRequestID RequestID, const FPathFollowingResult& Result)

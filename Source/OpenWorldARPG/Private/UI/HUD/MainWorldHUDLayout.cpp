@@ -6,11 +6,10 @@
 #include "UI/HUD/InteractionListWidget.h"
 #include "UI/Extension/PlayerUIExtensionComponent.h"
 #include "Characters/PlayerCharacter/Interfaces/ARPGCharacterInterface.h"
+#include "Characters/PlayerCharacter/Data/CharacterRegistryRow.h"
 #include "Core/PlayerStates/GameplayPlayerState.h"
 #include "UI/Core/UIManagerSubsystem.h"
 #include "Systems/TeamManager/TeamManagerSubsystem.h"
-#include "Systems/CharacterManager/CharacterManagerSubsystem.h"
-#include "Characters/PlayerCharacter/Data/CharacterRegistryRow.h"
 #include "AbilitySystemComponent.h"
 
 void UMainWorldHUDLayout::NativeOnInitialized()

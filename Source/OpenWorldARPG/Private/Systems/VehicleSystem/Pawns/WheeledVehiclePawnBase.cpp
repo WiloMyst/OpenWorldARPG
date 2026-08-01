@@ -21,21 +21,25 @@
 
 AWheeledVehiclePawnBase::AWheeledVehiclePawnBase()
 {
-    bReplicates = true;
-    SetReplicatingMovement(true);
-
     PrimaryActorTick.bCanEverTick = true;
 
-    if (USkeletalMeshComponent* VehicleMesh = GetMesh())
-    {
-        VehicleMesh->SetSimulatePhysics(true);
-        VehicleMesh->SetEnableGravity(true);
-        VehicleMesh->SetCollisionProfileName(UCollisionProfile::Vehicle_ProfileName);
-        VehicleMesh->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
-    }
+    // Chaos 物理级客户端预测：
+    // 启用 p.Net.PhysicsPrediction.Enable=1 (DefaultEngine.ini) 后，
+    // UChaosWheeledVehicleMovementComponent 会自动创建 UNetworkPhysicsComponent，
+    // 基于 Chaos RewindData 做物理级回滚重模拟。
+    // 输入通过组件内部 RPC 自动同步，无需手动发送。
 
+    // 载具网格体（物理模拟根组件）
+    VehicleMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("VehicleMesh"));
+    VehicleMesh->SetSimulatePhysics(true);
+    VehicleMesh->SetEnableGravity(true);
+    VehicleMesh->SetCollisionProfileName(TEXT("Vehicle"));
+    VehicleMesh->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+    RootComponent = VehicleMesh;
+
+    // 弹簧臂
     SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
-    SpringArm->SetupAttachment(GetMesh());
+    SpringArm->SetupAttachment(VehicleMesh);
     SpringArm->TargetArmLength = 600.0f;
     SpringArm->bEnableCameraLag = false;
     SpringArm->bEnableCameraRotationLag = true;
@@ -46,17 +50,80 @@ AWheeledVehiclePawnBase::AWheeledVehiclePawnBase()
     SpringArm->bInheritRoll = false;
     SpringArm->SocketOffset = FVector(0.0f, 0.0f, 150.0f);
 
+    // 摄像机
     FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
     FollowCamera->SetupAttachment(SpringArm);
     FollowCamera->FieldOfView = 90.0f;
     FollowCamera->bUsePawnControlRotation = false;
+
+    // Chaos 轮式载具移动组件
+    CachedWheeledMovement = CreateDefaultSubobject<UChaosWheeledVehicleMovementComponent>(TEXT("WheeledVehicleMovement"));
+    CachedWheeledMovement->SetUpdatedComponent(VehicleMesh);
+
+    // 自动驾驶组件
+    AutopilotComponent = CreateDefaultSubobject<UVehicleAutopilotComponent>(TEXT("AutopilotComponent"));
 }
+
+// --- 公共接口 override ---
+
+USkeletalMeshComponent* AWheeledVehiclePawnBase::GetVehicleMesh() const
+{
+    return VehicleMesh;
+}
+
+void AWheeledVehiclePawnBase::ResetVehicleInputs()
+{
+    if (CachedWheeledMovement)
+    {
+        CachedWheeledMovement->SetThrottleInput(0.0f);
+        CachedWheeledMovement->SetSteeringInput(0.0f);
+        CachedWheeledMovement->SetBrakeInput(0.0f);
+        CachedWheeledMovement->SetHandbrakeInput(false);
+    }
+}
+
+bool AWheeledVehiclePawnBase::FindSafeExitLocation(FVector& OutLocation) const
+{
+    const FVector BaseOffset = VehicleConfig ? VehicleConfig->ExitOffset : FVector(-200.0f, 150.0f, 0.0f);
+    const float CheckRadius = VehicleConfig ? VehicleConfig->ExitCheckRadius : 50.0f;
+
+    const FVector CandidateLocation = GetActorTransform().TransformPositionNoScale(BaseOffset);
+
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(this);
+    QueryParams.AddIgnoredActor(Driver);
+
+    const FCollisionShape CheckShape = FCollisionShape::MakeSphere(CheckRadius);
+
+    bool bLeftClear = !GetWorld()->OverlapAnyTestByChannel(
+        CandidateLocation, FQuat::Identity, ECC_Pawn, CheckShape, QueryParams);
+
+    if (bLeftClear)
+    {
+        OutLocation = CandidateLocation;
+        return true;
+    }
+
+    const FVector RightOffset(BaseOffset.X, -BaseOffset.Y, BaseOffset.Z);
+    const FVector RightLocation = GetActorTransform().TransformPositionNoScale(RightOffset);
+
+    bool bRightClear = !GetWorld()->OverlapAnyTestByChannel(
+        RightLocation, FQuat::Identity, ECC_Pawn, CheckShape, QueryParams);
+
+    if (bRightClear)
+    {
+        OutLocation = RightLocation;
+        return true;
+    }
+
+    return false;
+}
+
+// --- 生命周期 ---
 
 void AWheeledVehiclePawnBase::BeginPlay()
 {
     Super::BeginPlay();
-
-    CachedWheeledMovement = Cast<UChaosWheeledVehicleMovementComponent>(GetVehicleMovement());
 
     ApplyVehicleConfig();
     InitCameraDefaults();
@@ -107,81 +174,6 @@ void AWheeledVehiclePawnBase::SetupPlayerInputComponent(UInputComponent* PlayerI
             EnhancedInput->BindAction(IA_Handbrake, ETriggerEvent::Triggered, this, &AWheeledVehiclePawnBase::InputHandbrake);
             EnhancedInput->BindAction(IA_Handbrake, ETriggerEvent::Completed, this, &AWheeledVehiclePawnBase::InputHandbrake);
         }
-        if (IA_ExitVehicle)
-        {
-            EnhancedInput->BindAction(IA_ExitVehicle, ETriggerEvent::Started, this, &AWheeledVehiclePawnBase::InputExitVehicle);
-        }
-    }
-}
-
-void AWheeledVehiclePawnBase::PawnClientRestart()
-{
-    Super::PawnClientRestart();
-
-    if (VehicleIMC)
-    {
-        if (APlayerController* PC = Cast<APlayerController>(GetController()))
-        {
-            if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC->GetLocalPlayer()))
-            {
-                Subsystem->AddMappingContext(VehicleIMC, 1);
-            }
-        }
-    }
-}
-
-void AWheeledVehiclePawnBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
-{
-    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-
-    DOREPLIFETIME(AWheeledVehiclePawnBase, Driver);
-}
-
-// --- 交互接口 ---
-
-bool AWheeledVehiclePawnBase::CanInteract_Implementation(ACharacter* InstigatorCharacter) const
-{
-    return Driver == nullptr && InstigatorCharacter != nullptr;
-}
-
-void AWheeledVehiclePawnBase::OnInteract_Implementation(ACharacter* InstigatorCharacter)
-{
-    if (!InstigatorCharacter || !MountVehicleEventTag.IsValid()) return;
-
-    FGameplayEventData EventData;
-    EventData.Instigator = InstigatorCharacter;
-    EventData.Target = this;
-    EventData.OptionalObject = this;
-
-    UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(
-        InstigatorCharacter, MountVehicleEventTag, EventData);
-}
-
-FTransform AWheeledVehiclePawnBase::GetInteractionTargetTransform_Implementation() const
-{
-    if (USkeletalMeshComponent* VehicleMesh = GetMesh())
-    {
-        if (VehicleMesh->DoesSocketExist(InteractionSocketName))
-        {
-            return VehicleMesh->GetSocketTransform(InteractionSocketName);
-        }
-    }
-
-    FTransform FallbackTransform = GetActorTransform();
-    FallbackTransform.AddToTranslation(GetActorForwardVector() * 200.0f);
-    return FallbackTransform;
-}
-
-// --- 公开接口 ---
-
-void AWheeledVehiclePawnBase::ResetVehicleInputs()
-{
-    if (CachedWheeledMovement)
-    {
-        CachedWheeledMovement->SetThrottleInput(0.0f);
-        CachedWheeledMovement->SetSteeringInput(0.0f);
-        CachedWheeledMovement->SetBrakeInput(0.0f);
-        CachedWheeledMovement->SetHandbrakeInput(false);
     }
 }
 
@@ -261,6 +253,8 @@ void AWheeledVehiclePawnBase::ApplyVehicleConfig()
             Wheel->MaxSteerAngle = VehicleConfig->MaxSteeringAngle;
         }
     }
+
+    MaxEnterDistance = VehicleConfig->MaxEnterDistance;
 }
 
 void AWheeledVehiclePawnBase::InitCameraDefaults()
@@ -275,44 +269,30 @@ void AWheeledVehiclePawnBase::InitCameraDefaults()
 
 void AWheeledVehiclePawnBase::InputThrottle(const FInputActionValue& Value)
 {
+    if (AutopilotComponent && AutopilotComponent->IsAutopilotActive()) return;
     if (!GetController() || !CachedWheeledMovement) return;
     CachedWheeledMovement->SetThrottleInput(Value.Get<float>());
 }
 
 void AWheeledVehiclePawnBase::InputBrake(const FInputActionValue& Value)
 {
+    if (AutopilotComponent && AutopilotComponent->IsAutopilotActive()) return;
     if (!GetController() || !CachedWheeledMovement) return;
     CachedWheeledMovement->SetBrakeInput(Value.Get<float>());
 }
 
 void AWheeledVehiclePawnBase::InputSteering(const FInputActionValue& Value)
 {
+    if (AutopilotComponent && AutopilotComponent->IsAutopilotActive()) return;
     if (!GetController() || !CachedWheeledMovement) return;
     CachedWheeledMovement->SetSteeringInput(Value.Get<float>());
 }
 
 void AWheeledVehiclePawnBase::InputHandbrake(const FInputActionValue& Value)
 {
+    if (AutopilotComponent && AutopilotComponent->IsAutopilotActive()) return;
     if (!GetController() || !CachedWheeledMovement) return;
     CachedWheeledMovement->SetHandbrakeInput(Value.Get<bool>());
-}
-
-void AWheeledVehiclePawnBase::InputExitVehicle(const FInputActionValue& Value)
-{
-    if (!GetController()) return;
-
-    FVector ExitLocation;
-    if (FindSafeExitLocation(ExitLocation))
-    {
-        if (AOpenWorldPlayerController* PC = Cast<AOpenWorldPlayerController>(GetController()))
-        {
-            PC->Server_UnPossessVehicle(ExitLocation);
-        }
-    }
-    else
-    {
-        GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("[BUG] 下车失败：找不到安全下车点！"));
-    }
 }
 
 // --- 动态相机 ---
@@ -340,66 +320,23 @@ void AWheeledVehiclePawnBase::UpdateDynamicCamera(float DeltaTime)
     FollowCamera->FieldOfView = FMath::Lerp(VehicleConfig->BaseFOV, VehicleConfig->MaxFOV, CameraAlpha);
 }
 
-// --- 安全下车位置 ---
-
-bool AWheeledVehiclePawnBase::FindSafeExitLocation(FVector& OutLocation) const
-{
-    const FVector BaseOffset = VehicleConfig ? VehicleConfig->ExitOffset : FVector(-200.0f, 150.0f, 0.0f);
-    const float CheckRadius = VehicleConfig ? VehicleConfig->ExitCheckRadius : 50.0f;
-
-    const FVector CandidateLocation = GetActorTransform().TransformPositionNoScale(BaseOffset);
-
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(this);
-    QueryParams.AddIgnoredActor(Driver);
-
-    const FCollisionShape CheckShape = FCollisionShape::MakeSphere(CheckRadius);
-
-    bool bLeftClear = !GetWorld()->OverlapAnyTestByChannel(
-        CandidateLocation, FQuat::Identity, ECC_Pawn, CheckShape, QueryParams);
-
-    if (bLeftClear)
-    {
-        OutLocation = CandidateLocation;
-        return true;
-    }
-
-    const FVector RightOffset(BaseOffset.X, -BaseOffset.Y, BaseOffset.Z);
-    const FVector RightLocation = GetActorTransform().TransformPositionNoScale(RightOffset);
-
-    bool bRightClear = !GetWorld()->OverlapAnyTestByChannel(
-        RightLocation, FQuat::Identity, ECC_Pawn, CheckShape, QueryParams);
-
-    if (bRightClear)
-    {
-        OutLocation = RightLocation;
-        return true;
-    }
-
-    return false;
-}
+// --- 掉出世界处理 ---
 
 void AWheeledVehiclePawnBase::FellOutOfWorld(const class UDamageType& dmgType)
 {
-    // 1. 传送逻辑必须只在服务器执行
     if (!HasAuthority()) return;
 
-    // 2. 清除载具输入
     ResetVehicleInputs();
 
-    // 3. 彻底清除 Chaos 载具的物理动量
-    // 如果不清除线速度和角速度，载具传送后会带着下坠的惯性砸向地面并弹飞
-    if (USkeletalMeshComponent* VehicleMesh = GetMesh())
+    if (VehicleMesh)
     {
         VehicleMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
         VehicleMesh->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
     }
 
-    // 4. 寻找出生点
     AActor* StartSpot = nullptr;
     if (AGameModeBase* GM = GetWorld()->GetAuthGameMode())
     {
-        // 如果有驾驶员，使用驾驶员的 Controller 寻找出生点；如果没有，尝试获取默认 Controller
         AController* VehController = GetController();
         if (!VehController)
         {
@@ -408,12 +345,10 @@ void AWheeledVehiclePawnBase::FellOutOfWorld(const class UDamageType& dmgType)
         StartSpot = GM->FindPlayerStart(VehController);
     }
 
-    // 5. 执行传送
     if (StartSpot)
     {
         FRotator SpawnRotation = StartSpot->GetActorRotation();
 
-        // 物理传送（如果有驾驶员 Attach 在车上，会被带着一起传送）
         SetActorLocationAndRotation(
             StartSpot->GetActorLocation(),
             SpawnRotation,
@@ -422,7 +357,6 @@ void AWheeledVehiclePawnBase::FellOutOfWorld(const class UDamageType& dmgType)
             ETeleportType::TeleportPhysics
         );
 
-        // 6. 重置控制器朝向
         if (GetController())
         {
             if (APlayerController* PC = Cast<APlayerController>(GetController()))
@@ -446,8 +380,44 @@ void AWheeledVehiclePawnBase::Client_ResetCameraAndPhysics_Implementation(FRotat
     }
 }
 
-// --- 网络同步回调 ---
+// --- 自动驾驶 RPC ---
 
-void AWheeledVehiclePawnBase::OnRep_Driver()
+void AWheeledVehiclePawnBase::Server_StartAutopilot_Implementation(const TArray<FVector>& PathPoints, float TargetSpeed)
 {
+    if (!GetController()) return;
+    if (AutopilotComponent)
+    {
+        AutopilotComponent->StartAutopilot(PathPoints, TargetSpeed);
+    }
+}
+
+bool AWheeledVehiclePawnBase::Server_StartAutopilot_Validate(const TArray<FVector>& PathPoints, float TargetSpeed)
+{
+    // 只有当前控制载具的玩家可以启动自动驾驶
+    return GetController() != nullptr;
+}
+
+void AWheeledVehiclePawnBase::Server_StopAutopilot_Implementation()
+{
+    if (AutopilotComponent)
+    {
+        AutopilotComponent->StopAutopilot();
+    }
+}
+
+bool AWheeledVehiclePawnBase::Server_StopAutopilot_Validate()
+{
+    return GetController() != nullptr;
+}
+
+// --- UnPossessed: 玩家下车时停止自动驾驶 ---
+
+void AWheeledVehiclePawnBase::UnPossessed()
+{
+    Super::UnPossessed();
+
+    if (AutopilotComponent && AutopilotComponent->IsAutopilotActive())
+    {
+        AutopilotComponent->StopAutopilot();
+    }
 }

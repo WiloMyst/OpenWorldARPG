@@ -1,13 +1,15 @@
 // Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Core/GameModes/GameplayGameModeBase.h"
+#include "Core/GameStates/OpenWorldARPGGameStateBase.h"
 #include "Core/PlayerStates/GameplayPlayerState.h"
 #include "Core/PlayerControllers/GameplayPlayerController.h"
 #include "Characters/PlayerCharacter/PlayerCharacter.h"
 #include "Characters/PlayerCharacter/Data/CharacterRegistryRow.h"
 #include "Characters/PlayerCharacter/Data/CharacterVisualDataAsset.h"
 #include "Systems/CombatSystem/Data/CharacterCombatDataAsset.h"
-#include "Systems/CharacterManager/CharacterManagerSubsystem.h"
+#include "Systems/CharacterManager/CharacterRegistrySubsystem.h"
+#include "Systems/CharacterManager/ServerPlayerDataManager.h"
 #include "Systems/TeamManager/TeamManagerSubsystem.h"
 #include "Systems/GameFlowManager/GameAssetManagerSubsystem.h"
 #include "Systems/GameFlowManager/GameFlowSubsystem.h"
@@ -20,6 +22,8 @@ AGameplayGameModeBase::AGameplayGameModeBase()
 {
     DefaultPlayerStartTag = FName("PlayerStart");
     AssetCleanupDelay = 3.0f;
+
+    GameStateClass = AOpenWorldARPGGameStateBase::StaticClass();
 }
 
 void AGameplayGameModeBase::PostLogin(APlayerController* NewPlayer)
@@ -27,6 +31,15 @@ void AGameplayGameModeBase::PostLogin(APlayerController* NewPlayer)
     Super::PostLogin(NewPlayer);
 
     if (!HasAuthority()) return;
+
+    // 服务器侧：初始化该玩家的存档数据（从模拟数据库/真实后端加载）
+    if (AOpenWorldARPGGameStateBase* GS = GetGameState<AOpenWorldARPGGameStateBase>())
+    {
+        if (UServerPlayerDataManager* PlayerDataManager = GS->GetServerPlayerDataManager())
+        {
+            PlayerDataManager->OnPlayerConnected(NewPlayer);
+        }
+    }
 
     GeneratePlayerCharacters(NewPlayer);
 
@@ -47,22 +60,30 @@ void AGameplayGameModeBase::GeneratePlayerCharacters(APlayerController* PlayerCo
     AGameplayPlayerState* PlayerState = PlayerController->GetPlayerState<AGameplayPlayerState>();
     if (!PlayerState) return;
 
-    UCharacterManagerSubsystem* CharManager = nullptr;
-    UTeamManagerSubsystem* TeamManager = nullptr;
-
-    // TODO: [Network Architecture] 联机模式下应通过 UniqueNetId 向 ServerDataManager 请求队伍数据
-    if (GetNetMode() == NM_Standalone || GetNetMode() == NM_ListenServer)
+    // 服务器侧：从 UServerPlayerDataManager 读取该玩家的存档（按 UniqueNetId 索引）
+    UServerPlayerDataManager* PlayerDataManager = nullptr;
+    if (AOpenWorldARPGGameStateBase* GS = GetGameState<AOpenWorldARPGGameStateBase>())
     {
-        if (ULocalPlayer* LocalPlayer = PlayerController->GetLocalPlayer())
+        PlayerDataManager = GS->GetServerPlayerDataManager();
+    }
+    if (!PlayerDataManager) return;
+
+    // 全局注册表查询：从 UCharacterRegistrySubsystem 读取（所有玩家共用）
+    UCharacterRegistrySubsystem* Registry = GetGameInstance()->GetSubsystem<UCharacterRegistrySubsystem>();
+
+    // 队伍 Tag 列表：服务器侧通过 PlayerState 或数据管理器获取。
+    // 单机/ListenServer 下仍从本地 UTeamManagerSubsystem 读取（主机既是服务器也是客户端）。
+    TArray<FGameplayTag> TeamTags;
+    if (ULocalPlayer* LocalPlayer = PlayerController->GetLocalPlayer())
+    {
+        if (UTeamManagerSubsystem* TeamManager = LocalPlayer->GetSubsystem<UTeamManagerSubsystem>())
         {
-            CharManager = LocalPlayer->GetSubsystem<UCharacterManagerSubsystem>();
-            TeamManager = LocalPlayer->GetSubsystem<UTeamManagerSubsystem>();
+            TeamTags = TeamManager->GetCurrentTeamCharacterTags();
         }
     }
-
-    if (!CharManager || !TeamManager) return;
-
-    const TArray<FGameplayTag> TeamTags = TeamManager->GetCurrentTeamCharacterTags();
+    // [DB-INTEGRATION] Dedicated Server 下 TeamTags 应从该玩家的存档中读取，
+    // 而非本地 UTeamManagerSubsystem（DS 上无 LocalPlayer）。当前模拟阶段复用主机本地配置。
+    if (TeamTags.IsEmpty()) return;
 
     AActor* StartSpot = FindPlayerStart(PlayerController, DefaultPlayerStartTag.ToString());
     FTransform SpawnTransform = StartSpot ? StartSpot->GetActorTransform() : FTransform::Identity;
@@ -78,11 +99,13 @@ void AGameplayGameModeBase::GeneratePlayerCharacters(APlayerController* PlayerCo
     {
         const FGameplayTag& CharacterTag = TeamTags[TeamIndex];
 
-        const FCharacterSaveData* SaveDataPtr = CharManager->GetCharacterSaveData(CharacterTag);
+        // per-玩家存档：从服务器侧数据管理器读取
+        const FCharacterSaveData* SaveDataPtr = PlayerDataManager->GetCharacterSaveData(PlayerController, CharacterTag);
         if (!SaveDataPtr) continue;
 
+        // 全局注册表行：从 UCharacterRegistrySubsystem 读取
         FCharacterRegistryRow RegistryRow;
-        if (!CharManager->GetCharacterRegistryRowByTag(CharacterTag, RegistryRow)) continue;
+        if (!Registry || !Registry->GetCharacterRegistryRowByTag(CharacterTag, RegistryRow)) continue;
 
         UCharacterVisualDataAsset* VisualData = RegistryRow.VisualData.LoadSynchronous();
         UCharacterCombatDataAsset* CombatData = RegistryRow.CombatData.LoadSynchronous();
@@ -104,7 +127,15 @@ void AGameplayGameModeBase::GeneratePlayerCharacters(APlayerController* PlayerCo
 
     PlayerState->SetTeamCharacterActors(TeamActors);
 
-    int32 ActiveIndex = TeamManager->GetActiveCharacterIndex();
+    // 激活角色索引：服务器侧从数据管理器或 PlayerState 读取
+    int32 ActiveIndex = 0;
+    if (ULocalPlayer* LocalPlayer = PlayerController->GetLocalPlayer())
+    {
+        if (UTeamManagerSubsystem* TeamManager = LocalPlayer->GetSubsystem<UTeamManagerSubsystem>())
+        {
+            ActiveIndex = TeamManager->GetActiveCharacterIndex();
+        }
+    }
     if (TeamActors.IsValidIndex(ActiveIndex) && TeamActors[ActiveIndex])
     {
         TeamActors[ActiveIndex]->SetStandbyMode(false);
@@ -125,18 +156,16 @@ void AGameplayGameModeBase::ApplyPlayerTeamChanges(AGameplayPlayerController* Pl
 {
     if (!HasAuthority() || !PlayerController) return;
 
-    UCharacterManagerSubsystem* CharManager = nullptr;
-
-    // TODO: [Network Architecture] 联机模式下应通过 UniqueNetId 向 ServerDataManager 请求角色数据
-    if (GetNetMode() == NM_Standalone || GetNetMode() == NM_ListenServer)
+    // 服务器侧：从 UServerPlayerDataManager 读取该玩家存档
+    UServerPlayerDataManager* PlayerDataManager = nullptr;
+    if (AOpenWorldARPGGameStateBase* GS = GetGameState<AOpenWorldARPGGameStateBase>())
     {
-        if (ULocalPlayer* LocalPlayer = PlayerController->GetLocalPlayer())
-        {
-            CharManager = LocalPlayer->GetSubsystem<UCharacterManagerSubsystem>();
-        }
+        PlayerDataManager = GS->GetServerPlayerDataManager();
     }
+    if (!PlayerDataManager) return;
 
-    if (!CharManager) return;
+    // 全局注册表查询
+    UCharacterRegistrySubsystem* Registry = GetGameInstance()->GetSubsystem<UCharacterRegistrySubsystem>();
 
     AGameplayPlayerState* PlayerState = PlayerController->GetPlayerState<AGameplayPlayerState>();
     if (!PlayerState) return;
@@ -180,11 +209,13 @@ void AGameplayGameModeBase::ApplyPlayerTeamChanges(AGameplayPlayerController* Pl
         const FGameplayTag& CharacterTag = NewTeamTags[TeamIndex];
         if (!CharacterTag.IsValid()) continue;
 
-        const FCharacterSaveData* SaveDataPtr = CharManager->GetCharacterSaveData(CharacterTag);
+        // per-玩家存档：从服务器侧数据管理器读取
+        const FCharacterSaveData* SaveDataPtr = PlayerDataManager->GetCharacterSaveData(PlayerController, CharacterTag);
         if (!SaveDataPtr) continue;
 
+        // 全局注册表行：从 UCharacterRegistrySubsystem 读取
         FCharacterRegistryRow RegistryRow;
-        if (!CharManager->GetCharacterRegistryRowByTag(CharacterTag, RegistryRow)) continue;
+        if (!Registry || !Registry->GetCharacterRegistryRowByTag(CharacterTag, RegistryRow)) continue;
 
         UCharacterVisualDataAsset* VisualData = RegistryRow.VisualData.LoadSynchronous();
         UCharacterCombatDataAsset* CombatData = RegistryRow.CombatData.LoadSynchronous();

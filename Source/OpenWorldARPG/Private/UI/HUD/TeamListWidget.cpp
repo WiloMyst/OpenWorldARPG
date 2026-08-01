@@ -4,12 +4,13 @@
 #include "UI/HUD/TeamListSlotWidget.h"
 #include "Components/VerticalBox.h"
 #include "Systems/TeamManager/TeamManagerSubsystem.h"
-#include "Systems/CharacterManager/CharacterManagerSubsystem.h"
+#include "Systems/CharacterManager/CharacterRegistrySubsystem.h"
 #include "Characters/PlayerCharacter/Data/CharacterRegistryRow.h"
 #include "Core/PlayerStates/GameplayPlayerState.h"
 #include "Characters/PlayerCharacter/PlayerCharacter.h"
 #include "AbilitySystemComponent.h"
 #include "TimerManager.h" // 【新增】引入定时器管理器
+#include "Engine/GameInstance.h"
 
 void UTeamListWidget::NativeOnInitialized()
 {
@@ -111,18 +112,21 @@ void UTeamListWidget::UpdateTeamList()
     if (!TeamList) return;
 
     UTeamManagerSubsystem* TeamManager = nullptr;
-    UCharacterManagerSubsystem* CharManager = nullptr;
+    UCharacterRegistrySubsystem* Registry = nullptr;
 
     if (APlayerController* PC = GetOwningPlayer())
     {
         if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
         {
             TeamManager = LocalPlayer->GetSubsystem<UTeamManagerSubsystem>();
-            CharManager = LocalPlayer->GetSubsystem<UCharacterManagerSubsystem>();
+        }
+        if (UGameInstance* GI = PC->GetGameInstance())
+        {
+            Registry = GI->GetSubsystem<UCharacterRegistrySubsystem>();
         }
     }
 
-    if (!TeamManager || !CharManager) return;
+    if (!TeamManager || !Registry) return;
 
     TArray<FGameplayTag> TeamTags = TeamManager->GetCurrentTeamCharacterTags();
 
@@ -143,7 +147,7 @@ void UTeamListWidget::UpdateTeamList()
             const FGameplayTag& CharTag = TeamTags[i];
             FCharacterRegistryRow OutRow;
 
-            if (CharManager->GetCharacterRegistryRowByTag(CharTag, OutRow))
+            if (Registry->GetCharacterRegistryRowByTag(CharTag, OutRow))
             {
                 UAbilitySystemComponent* CharASC = nullptr;
                 if (PS)

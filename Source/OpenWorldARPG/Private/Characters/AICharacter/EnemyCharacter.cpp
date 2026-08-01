@@ -9,6 +9,7 @@
 #include "AbilitySystemComponent.h"
 #include "AIController.h"
 #include "BrainComponent.h"
+#include "Net/UnrealNetwork.h"
 
 AEnemyCharacter::AEnemyCharacter()
 {
@@ -23,6 +24,22 @@ AEnemyCharacter::AEnemyCharacter()
     HealthBarComponent = CreateDefaultSubobject<UWidgetComponent>(TEXT("HealthBar"));
     HealthBarComponent->SetupAttachment(RootComponent);
     HealthBarComponent->SetWidgetSpace(EWidgetSpace::World);
+}
+
+void AEnemyCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+    DOREPLIFETIME(ThisClass, EnemyWeapon);
+}
+
+void AEnemyCharacter::OnRep_EnemyWeapon()
+{
+    // 客户端收到服务器复制的武器引用后挂载到武器 Socket
+    if (EnemyWeapon && GetMesh())
+    {
+        EnemyWeapon->AttachToComponent(GetMesh(), FAttachmentTransformRules::KeepRelativeTransform, WeaponSocketName);
+    }
 }
 
 void AEnemyCharacter::PostInitializeComponents()
@@ -43,10 +60,12 @@ void AEnemyCharacter::BeginPlay()
     BindAnimLayers();
     UpdateHealthBar();
 
-    if (WeaponClass)
+    // 武器仅在服务器生成，通过复制 + OnRep 在客户端挂载，避免各端各自 Spawn 导致不同步
+    if (HasAuthority() && WeaponClass)
     {
         FActorSpawnParameters SpawnParams;
         SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+        SpawnParams.Owner = this;
 
         EnemyWeapon = GetWorld()->SpawnActor<AActor>(WeaponClass, GetActorTransform(), SpawnParams);
         if (EnemyWeapon)
@@ -150,6 +169,9 @@ void AEnemyCharacter::OnMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 
 void AEnemyCharacter::ApplyDamage()
 {
+    // 伤害结算必须服务器权威，否则客户端会非法施加 GameplayEffect
+    if (!HasAuthority()) return;
+
     TArray<AActor*> LocalHitActors;
 
     FVector StartLoc = GetActorLocation() + GetActorForwardVector() * DamageTraceForwardStartOffset;
@@ -231,6 +253,17 @@ void AEnemyCharacter::HandleDeath_Implementation()
     GetWorld()->GetTimerManager().SetTimer(
         DeathDestroyTimerHandle, this, &AEnemyCharacter::DestroyEnemy, DestroyDelayTime, false
     );
+}
+
+void AEnemyCharacter::OnRep_IsDead(bool bOldIsDead)
+{
+    Super::OnRep_IsDead(bOldIsDead);
+
+    // 模拟代理上死亡 GA 不会激活，这里通过复制状态兜底隐藏血条
+    if (bIsDead && HealthBarComponent)
+    {
+        HealthBarComponent->SetHiddenInGame(true);
+    }
 }
 
 void AEnemyCharacter::DestroyEnemy()

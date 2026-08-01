@@ -1,7 +1,7 @@
 // Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Systems/GameFlowManager/GameAssetManagerSubsystem.h"
-#include "Systems/CharacterManager/CharacterManagerSubsystem.h"
+#include "Systems/CharacterManager/CharacterRegistrySubsystem.h"
 #include "Core/OpenWorldARPGSettings.h"
 #include "Characters/PlayerCharacter/Data/CharacterVisualDataAsset.h"
 #include "Systems/CombatSystem/Data/CharacterCombatDataAsset.h"
@@ -223,20 +223,13 @@ void UGameAssetManagerSubsystem::StartDataAssetLoading()
         return;
     }
 
-    UCharacterManagerSubsystem* CharManager = nullptr;
+    UCharacterRegistrySubsystem* Registry = nullptr;
     if (UGameInstance* GI = GetGameInstance())
     {
-        for (int32 i = 0; i < GI->GetNumLocalPlayers(); ++i)
-        {
-            if (ULocalPlayer* LocalPlayer = GI->GetLocalPlayerByIndex(i))
-            {
-                CharManager = LocalPlayer->GetSubsystem<UCharacterManagerSubsystem>();
-                if (CharManager) break;
-            }
-        }
+        Registry = GI->GetSubsystem<UCharacterRegistrySubsystem>();
     }
 
-    if (!CharManager)
+    if (!Registry)
     {
         OnAllTeamAssetsLoaded();
         return;
@@ -244,7 +237,7 @@ void UGameAssetManagerSubsystem::StartDataAssetLoading()
 
     for (const FGameplayTag& CharTag : CurrentTeamToLoad)
     {
-        FName RowName = CharManager->GetRowNameByTag(CharTag);
+        FName RowName = Registry->GetRowNameByTag(CharTag);
         if (RowName == NAME_None) continue;
 
         const FCharacterRegistryRow* Row = LoadedTable->FindRow<FCharacterRegistryRow>(RowName, TEXT(""));
@@ -295,20 +288,13 @@ void UGameAssetManagerSubsystem::StartInnerAssetLoading()
         return;
     }
 
-    UCharacterManagerSubsystem* CharManager = nullptr;
+    UCharacterRegistrySubsystem* Registry = nullptr;
     if (UGameInstance* GI = GetGameInstance())
     {
-        for (int32 i = 0; i < GI->GetNumLocalPlayers(); ++i)
-        {
-            if (ULocalPlayer* LocalPlayer = GI->GetLocalPlayerByIndex(i))
-            {
-                CharManager = LocalPlayer->GetSubsystem<UCharacterManagerSubsystem>();
-                if (CharManager) break;
-            }
-        }
+        Registry = GI->GetSubsystem<UCharacterRegistrySubsystem>();
     }
 
-    if (!CharManager)
+    if (!Registry)
     {
         OnAllTeamAssetsLoaded();
         return;
@@ -316,7 +302,7 @@ void UGameAssetManagerSubsystem::StartInnerAssetLoading()
 
     for (const FGameplayTag& CharTag : CurrentTeamToLoad)
     {
-        FName RowName = CharManager->GetRowNameByTag(CharTag);
+        FName RowName = Registry->GetRowNameByTag(CharTag);
         if (RowName == NAME_None) continue;
 
         const FCharacterRegistryRow* Row = LoadedTable->FindRow<FCharacterRegistryRow>(RowName, TEXT(""));

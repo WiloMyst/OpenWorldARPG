@@ -3,7 +3,7 @@
 #include "Systems/VehicleSystem/Abilities/GA_UnmountVehicleBase.h"
 #include "Characters/PlayerCharacter/PlayerCharacter.h"
 #include "Systems/CombatSystem/Components/WeaponManagerComponent.h"
-#include "Systems/VehicleSystem/Pawns/WheeledVehiclePawnBase.h"
+#include "Systems/VehicleSystem/Pawns/VehiclePawnBase.h"
 #include "Components/CapsuleComponent.h"
 #include "AbilitySystemComponent.h"
 #include "Abilities/Tasks/AbilityTask_PlayMontageAndWait.h"
@@ -40,7 +40,7 @@ void UGA_UnmountVehicleBase::ActivateAbility(const FGameplayAbilitySpecHandle Ha
 
     // 从角色的 Attachment Parent 获取载具引用
     // （Server_UnPossessVehicle 已交接控制权，但角色仍然 Attach 在车座上）
-    TargetVehicle = Cast<AWheeledVehiclePawnBase>(PlayerChar->GetAttachParentActor());
+    TargetVehicle = Cast<AVehiclePawnBase>(PlayerChar->GetAttachParentActor());
 
     // 播放下车蒙太奇 — 角色在载具局部坐标系中播放，天然保持相对静止
     if (UnmountMontage)

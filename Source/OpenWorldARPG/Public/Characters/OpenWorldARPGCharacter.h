@@ -20,6 +20,8 @@ class AOpenWorldARPGCharacter : public ACharacter, public IGenericTeamAgentInter
 public:
 	AOpenWorldARPGCharacter(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
 
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
 	// --- 接口实现 (IGenericTeamAgentInterface / ICombatInterface) ---
 
 	virtual FGenericTeamId GetGenericTeamId() const override { return TeamId; }
@@ -31,12 +33,24 @@ public:
 
 	void CorrectPawnOrient();
 
+	// --- 死亡/复活的客户端视觉应用，子类可覆盖以追加表现 ---
+
+	UFUNCTION()
+	virtual void OnRep_IsDead(bool bOldIsDead);
+
 public:
 	// --- 状态 ---
 
+	// 死亡状态由服务器权威设置并复制，客户端通过 OnRep 应用视觉（胶囊/移动等）
+	UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_IsDead, Category = "Character|State")
 	bool bIsDead = false;
 
 protected:
+	// --- 死亡/复活视觉实现 ---
+
+	virtual void ApplyDeathState();
+	virtual void ApplyReviveState();
+
 	// --- AI ---
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")

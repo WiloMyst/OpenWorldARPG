@@ -4,7 +4,7 @@
 #include "Characters/PlayerCharacter/PlayerCharacter.h"
 #include "Core/PlayerControllers/OpenWorldPlayerController.h"
 #include "Systems/CombatSystem/Components/WeaponManagerComponent.h"
-#include "Systems/VehicleSystem/Pawns/WheeledVehiclePawnBase.h"
+#include "Systems/VehicleSystem/Pawns/VehiclePawnBase.h"
 #include "AbilitySystemComponent.h"
 #include "Abilities/Tasks/AbilityTask_PlayMontageAndWait.h"
 #include "Systems/AbilitySystem/Tasks/AbilityTask_NavMoveTo.h"
@@ -25,9 +25,11 @@ UGA_MountVehicleBase::UGA_MountVehicleBase()
 void UGA_MountVehicleBase::ActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, const FGameplayEventData* TriggerEventData)
 {
     bHasExecutedMount = false;
+    UE_LOG(LogTemp, Warning, TEXT("[MountDiag] GA_ActivateAbility begin"));
 
     if (!CommitAbility(Handle, ActorInfo, ActivationInfo))
     {
+        UE_LOG(LogTemp, Warning, TEXT("[MountDiag] GA abort: CommitAbility 失败"));
         EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
         return;
     }
@@ -35,17 +37,23 @@ void UGA_MountVehicleBase::ActivateAbility(const FGameplayAbilitySpecHandle Hand
     APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(ActorInfo->AvatarActor.Get());
     if (!PlayerChar || !TriggerEventData)
     {
+        UE_LOG(LogTemp, Warning, TEXT("[MountDiag] GA abort: PlayerChar=%s TriggerEventData=%s"),
+            PlayerChar ? TEXT("有效") : TEXT("null"),
+            TriggerEventData ? TEXT("有效") : TEXT("null"));
         EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
         return;
     }
 
-    // 从 EventData 解析目标载具（OptionalObject 在 const EventData 中为 const，需去常量转换）
-    TargetVehicle = Cast<AWheeledVehiclePawnBase>(const_cast<UObject*>(TriggerEventData->OptionalObject.Get()));
+    TargetVehicle = Cast<AVehiclePawnBase>(const_cast<UObject*>(TriggerEventData->OptionalObject.Get()));
     if (!TargetVehicle)
     {
+        UE_LOG(LogTemp, Warning, TEXT("[MountDiag] GA abort: OptionalObject 不是 AVehiclePawnBase, 实际类型=%s"),
+            TriggerEventData->OptionalObject ? *TriggerEventData->OptionalObject->GetClass()->GetName() : TEXT("null"));
         EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
         return;
     }
+
+    UE_LOG(LogTemp, Log, TEXT("[MountDiag] GA: 目标载具=%s, 开始寻路"), *TargetVehicle->GetName());
 
     // --- 阶段 1：NavMesh 寻路 (Approach) ---
 
@@ -116,9 +124,10 @@ void UGA_MountVehicleBase::OnApproachReached()
         // 角色在动画期间与车门保持相对静止，即使车辆在移动也不会脱节
         MotionWarping->AddOrUpdateWarpTargetFromComponent(
             WarpTargetName,
-            TargetVehicle->GetMesh(),
+            TargetVehicle->GetVehicleMesh(),
             TargetVehicle->GetInteractionSocketName(),
-            true // bFollowComponent
+            true,                    // bFollowComponent
+            FVector::ZeroVector      // LocationOffset：显式指定以消除 UE5.7 新增重载的歧义
         );
     }
 

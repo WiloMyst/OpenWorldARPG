@@ -7,6 +7,7 @@
 #include "Characters/PlayerCharacter/Data/CharacterGeneralDataAsset.h"
 #include "Systems/GameFlowManager/GameAssetManagerSubsystem.h"
 #include "Systems/CharacterManager/CharacterManagerSubsystem.h"
+#include "Systems/CharacterManager/ServerPlayerDataManager.h"
 #include "Core/PlayerControllers/GameplayPlayerController.h"
 #include "Systems/AbilitySystem/AttributeSets/AS_Player.h"
 #include "Systems/MovementSystem/Components/PlayerCharacterMovementComponent.h"
@@ -14,10 +15,11 @@
 #include "Systems/InteractionSystem/Components/InteractionComponent.h"
 #include "Systems/InteractionSystem/Components/TargetingComponent.h"
 #include "UI/Extension/PlayerUIExtensionComponent.h"
-#include "Systems/VehicleSystem/Pawns/WheeledVehiclePawnBase.h"
+#include "Systems/VehicleSystem/Pawns/VehiclePawnBase.h"
 
 #include "Camera/CameraComponent.h"
 #include "GameFramework/SpringArmComponent.h"
+#include "GameFramework/GameStateBase.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/StreamableManager.h"
@@ -294,6 +296,25 @@ void APlayerCharacter::SyncAttributesToSaveData()
 	RuntimeData.MaxHealth = PlayerAS->GetMaxHealth();
 	// TODO: 待 AS_Player 扩展后补充 Attack/Defense/CritRate/CritDamage 反写
 
+	// 服务器侧：回写到 UServerPlayerDataManager（权威存档）
+	if (HasAuthority())
+	{
+		if (APlayerController* PC = GetController<APlayerController>())
+		{
+			if (AGameStateBase* GS = GetWorld()->GetGameState())
+			{
+				if (UActorComponent* Comp = GS->GetComponentByClass(UServerPlayerDataManager::StaticClass()))
+				{
+					if (UServerPlayerDataManager* ServerDataMgr = Cast<UServerPlayerDataManager>(Comp))
+					{
+						ServerDataMgr->SetCharacterSaveData(PC, GetCharacterTag(), RuntimeData);
+					}
+				}
+			}
+		}
+	}
+
+	// 客户端侧：同步回写到本地缓存（供 UI 立即刷新）
 	if (APlayerController* PC = GetController<APlayerController>())
 	{
 		if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
@@ -767,9 +788,27 @@ void APlayerCharacter::AdjustAimingCamera(float DeltaTime)
 
 void APlayerCharacter::OnAimingTagChanged(const FGameplayTag Tag, int32 NewCount)
 {
-	if (Tag == AimingStateTag && NewCount > 0)
+	if (Tag != AimingStateTag) return;
+
+	if (NewCount > 0)
 	{
 		if (WeaponManagerComponent) WeaponManagerComponent->WeaponToHand();
+
+		if (CameraBoom)
+		{
+			bSavedCameraLagEnabled = CameraBoom->bEnableCameraLag;
+			bSavedCameraRotationLagEnabled = CameraBoom->bEnableCameraRotationLag;
+			CameraBoom->bEnableCameraLag = false;
+			CameraBoom->bEnableCameraRotationLag = false;
+		}
+	}
+	else
+	{
+		if (CameraBoom)
+		{
+			CameraBoom->bEnableCameraLag = bSavedCameraLagEnabled;
+			CameraBoom->bEnableCameraRotationLag = bSavedCameraRotationLagEnabled;
+		}
 	}
 }
 
@@ -895,11 +934,11 @@ void APlayerCharacter::PrepareForDriving(AActor* VehicleActor, FName SocketName)
 	// 双重保险：关闭 SkeletalMesh 碰撞，彻底消除 Chaos Vehicle 物理干涉
 	GetMesh()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
-	if (AWheeledVehiclePawnBase* VehiclePawn = Cast<AWheeledVehiclePawnBase>(VehicleActor))
+	if (AVehiclePawnBase* VehiclePawn = Cast<AVehiclePawnBase>(VehicleActor))
 	{
 		// 【核心修改】使用 KeepWorldTransform，角色保持在车门外，由 Motion Warping 处理后续位移
 		AttachToComponent(
-			VehiclePawn->GetMesh(),
+			VehiclePawn->GetVehicleMesh(),
 			FAttachmentTransformRules::KeepWorldTransform,
 			SocketName);
 	}

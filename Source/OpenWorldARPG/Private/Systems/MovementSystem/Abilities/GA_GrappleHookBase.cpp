@@ -67,9 +67,9 @@ void UGA_GrappleHookBase::ActivateAbility(const FGameplayAbilitySpecHandle Handl
 
     // 播放蒙太奇
     UAnimMontage* GrappleMontage = nullptr;
-    if (IARPGCharacterInterface* ARPGChar = Cast<IARPGCharacterInterface>(CachedCharacter))
+    if (CachedCharacter->GetClass()->ImplementsInterface(UARPGCharacterInterface::StaticClass()))
     {
-        if (UCharacterVisualDataAsset* VisualData = ARPGChar->GetVisualDataAsset())
+        if (UCharacterVisualDataAsset* VisualData = IARPGCharacterInterface::Execute_GetVisualDataAsset(CachedCharacter))
         {
             if (!VisualData->GrappleMontage.IsNull())
             {

@@ -112,7 +112,7 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Config|UI")
     TSubclassOf<UUserWidget> MainHUDClass;
 
-    UPROPERTY()
+    UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Config|UI")
     TObjectPtr<UUserWidget> MainHUDInstance;
 
     bool bIsAltKeyDown = false;

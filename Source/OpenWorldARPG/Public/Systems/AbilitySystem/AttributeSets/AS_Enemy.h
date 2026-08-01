@@ -15,15 +15,24 @@ public:
 	UAS_Enemy();
 
 	virtual void PreAttributeChange(const FGameplayAttribute& Attribute, float& NewValue) override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	// --- 属性 ---
 
-	UPROPERTY(BlueprintReadOnly, Category = "Attributes | Health")
+	UPROPERTY(BlueprintReadOnly, Category = "Attributes | Health", ReplicatedUsing = OnRep_Health)
 	FGameplayAttributeData Health;
 	ATTRIBUTE_ACCESSORS(UAS_Enemy, Health)
 
-	UPROPERTY(BlueprintReadOnly, Category = "Attributes | Health")
+	UPROPERTY(BlueprintReadOnly, Category = "Attributes | Health", ReplicatedUsing = OnRep_MaxHealth)
 	FGameplayAttributeData MaxHealth;
 	ATTRIBUTE_ACCESSORS(UAS_Enemy, MaxHealth)
-	
+
+	// --- 复制回调 ---
+
+	UFUNCTION()
+	virtual void OnRep_Health(const FGameplayAttributeData& OldHealth);
+
+	UFUNCTION()
+	virtual void OnRep_MaxHealth(const FGameplayAttributeData& OldMaxHealth);
+
 };

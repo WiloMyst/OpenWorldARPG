@@ -26,7 +26,11 @@ public class OpenWorldARPG : ModuleRules
             "DeveloperSettings",
             "ChaosVehicles",
 			"MotionWarping",
-			"NavigationSystem"
+			"NavigationSystem",
+			"AudioMixer",
+			"Json",
+			"JsonUtilities",
+			"TurboLinkGrpc"
         });
 	}
 }

@@ -52,8 +52,8 @@ void UGA_MeleeAttackBase::ExecuteAttack(FName NodeName)
         return;
     }
 
-    // 1. 武器切换到手
-    if (UWeaponManagerComponent* WeaponComp = CachedPlayer->FindComponentByClass<UWeaponManagerComponent>())
+    // 1. 武器切换到手 (通过缓存的接口指针, 避免 FindComponentByClass 遍历)
+    if (UWeaponManagerComponent* WeaponComp = CachedPlayer->GetWeaponManagerComponent_Implementation())
     {
         WeaponComp->WeaponToHand();
     }
@@ -217,11 +217,15 @@ void UGA_MeleeAttackBase::AttackOrientation(float MaxWarpDistance)
         FVector Direction = (BestTarget->GetActorLocation() - ActorLoc).GetSafeNormal2D();
         float ActualDistance = FMath::Min(FVector::Dist2D(ActorLoc, BestTarget->GetActorLocation()), MaxWarpDistance);
         FVector WarpLocation = ActorLoc + Direction * ActualDistance;
+        FRotator FaceRotation = Direction.Rotation();
 
-        // 使用 AddOrUpdateWarpTargetFromLocation：
-        // 仅设置位置吸附，朝向由蒙太奇中的 Root Motion + Motion Warping AnimNotifyState 的
-        // bFacing 处理。动画师可以精确控制角色在吸附过程中的朝向过渡。
-        MotionWarpingComp->AddOrUpdateWarpTargetFromLocation(WarpTargetName, WarpLocation);
+        // 使用 AddOrUpdateWarpTargetFromLocationAndRotation：
+        // 同时设置位置和朝向，角色在 Warp 窗口内会平滑滑步到目标位置并面向敌人。
+        // 蒙太奇中的 AnimNotifyState_MotionWarp 需配置：
+        //   WarpTargetName = "AttackTarget"（与 C++ WarpTargetName 一致）
+        //   bUpdateTranslation = true（启用位移吸附）
+        //   bUpdateRotation = true（启用朝向吸附）
+        MotionWarpingComp->AddOrUpdateWarpTargetFromLocationAndRotation(WarpTargetName, WarpLocation, FaceRotation);
     }
     else if (MotionWarpingComp)
     {
@@ -395,7 +399,7 @@ void UGA_MeleeAttackBase::EndAbility(const FGameplayAbilitySpecHandle Handle, co
     // 被其他 GA Cancel 时，武器回到背上
     if (bWasCancelled && CachedPlayer)
     {
-        if (UWeaponManagerComponent* WeaponComp = CachedPlayer->FindComponentByClass<UWeaponManagerComponent>())
+        if (UWeaponManagerComponent* WeaponComp = CachedPlayer->GetWeaponManagerComponent_Implementation())
         {
             WeaponComp->WeaponToBack();
         }
