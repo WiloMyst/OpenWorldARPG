@@ -104,3 +104,27 @@ Plugins/
 *.xcf
 *.txt
 *.dna
+
+# VHServer
+VHServer/build/
+VHServer/bin/
+VHServer/lib/
+VHServer/.venv/
+VHServer/**/__pycache__/
+VHServer/**/*.pyc
+VHServer/generated/
+VHServer/**/*.pb.cc
+VHServer/**/*.pb.h
+VHServer/**/*_pb2_grpc.py
+VHServer/**/*_pb2.py
+VHServer/**/*.onnx
+VHServer/**/*.onnx.json
+VHServer/**/*.onnx.data
+VHServer/**/*.pt
+VHServer/**/*.bin
+VHServer/**/*.gguf
+VHServer/**/*.wav
+VHServer/third_party/*
+VHServer/.vscode/
+VHServer/.idea/
+VHServer/logs/

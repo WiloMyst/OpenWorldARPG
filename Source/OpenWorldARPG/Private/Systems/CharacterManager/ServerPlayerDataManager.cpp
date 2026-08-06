@@ -195,28 +195,3 @@ void UServerPlayerDataManager::CollectSaveDataFromCharacters(APlayerController* 
     // 当前实现：数据仅在内存中，不持久化。
 }
 
-// ============================================================================
-// 任务存档
-// ============================================================================
-
-const TMap<FGameplayTag, FQuestProgress>* UServerPlayerDataManager::GetQuestProgress(APlayerController* PlayerController) const
-{
-    if (!HasServerAuthority(this) || !PlayerController) return nullptr;
-
-    const FString PlayerKey = GetPlayerKey(PlayerController);
-    const FPlayerSaveDataEntry* Found = PlayerSaveDataMap.Find(PlayerKey);
-    if (!Found) return nullptr;
-
-    return &Found->QuestProgressMap;
-}
-
-void UServerPlayerDataManager::SetQuestProgress(APlayerController* PlayerController, const TMap<FGameplayTag, FQuestProgress>& InProgress)
-{
-    if (!HasServerAuthority(this) || !PlayerController) return;
-
-    const FString PlayerKey = GetPlayerKey(PlayerController);
-    FPlayerSaveDataEntry* Found = PlayerSaveDataMap.Find(PlayerKey);
-    if (!Found) return;
-
-    Found->QuestProgressMap = InProgress;
-}

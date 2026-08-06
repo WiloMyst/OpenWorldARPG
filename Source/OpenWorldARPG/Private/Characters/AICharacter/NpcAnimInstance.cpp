@@ -46,8 +46,8 @@ void UNPCAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
         }
     }
 
-    // TODO: 当对话系统集成后，从对话系统快照情绪状态
-    // SnapshotEmotionState = DialogueComponent->GetCurrentEmotionState();
+    // TODO: 从 AvatarStreamingComponent 快照情绪状态
+    // SnapshotEmotionState = AvatarStreamingComponent->GetCurrentEmotionState();
 }
 
 void UNPCAnimInstance::NativeThreadSafeUpdateAnimation(float DeltaSeconds)

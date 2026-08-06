@@ -7,15 +7,14 @@
 #include "Systems/InteractionSystem/Interfaces/InteractableInterface.h"
 #include "NpcCharacter.generated.h"
 
-class UDialogueComponent;
 class UAvatarStreamingComponent;
 class UAgentActionComponent;
 class UWidgetComponent;
 class UNpcAgentStatusWidget;
 
 /**
- * NPC 角色。挂载 DialogueComponent 并实现 IInteractableInterface，
- * 玩家交互时通过 DialogueComponent 启动对话。
+ * NPC 角色。挂载 AvatarStreamingComponent 并实现 IInteractableInterface，
+ * 作为 AI 虚拟人的承载实体。
  */
 UCLASS()
 class OPENWORLDARPG_API ANpcCharacter : public AAiCharacter, public IInteractableInterface
@@ -33,10 +32,6 @@ public:
 
 protected:
     // --- 组件 ---
-
-    /** 对话组件，持有对话图引用并驱动对话流程 */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue")
-    TObjectPtr<UDialogueComponent> DialogueComponent;
 
     /** gRPC 流式通道组件，接收 VHServer 下发音频/表情/工具调用 */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Agent")

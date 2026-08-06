@@ -14,7 +14,6 @@ class UPlayerCharacterBarWidget;
 class UGameplayListWidget; 
 class UInteractionListWidget; 
 class UPlayerControlButtonWidget;
-//class UMinimapWidget;
 struct FCharacterRegistryRow;
 
 /**
@@ -45,10 +44,6 @@ protected:
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
     UPlayerControlButtonWidget* WBP_PlayerControlButton;
-
-    /** 小地图 */
-    //UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
-    //UMinimapWidget* WBP_Minimap;
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
     UWidget* WBP_AimStar;

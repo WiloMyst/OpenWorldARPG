@@ -6,7 +6,6 @@
 #include "Components/ActorComponent.h"
 #include "GameplayTagContainer.h"
 #include "Characters/PlayerCharacter/Data/CharacterSaveData.h"
-#include "Systems/QuestSystem/Data/QuestTypes.h"
 #include "ServerPlayerDataManager.generated.h"
 
 class APlayerCharacter;
@@ -22,10 +21,6 @@ struct FPlayerSaveDataEntry
     /** 该玩家拥有的所有角色存档，按 CharacterTag 索引。 */
     UPROPERTY()
     TMap<FGameplayTag, FCharacterSaveData> CharacterSaveDataMap;
-
-    /** 该玩家的任务进度存档，按 QuestTag 索引。 */
-    UPROPERTY()
-    TMap<FGameplayTag, FQuestProgress> QuestProgressMap;
 };
 
 /**
@@ -86,14 +81,6 @@ public:
 
     /** 从角色实体收集运行时数据并回写到玩家存档。服务器专用。 */
     void CollectSaveDataFromCharacters(APlayerController* PlayerController, const TArray<APlayerCharacter*>& CharacterActors);
-
-    // --- 任务存档（服务器侧权威） ---
-
-    /** 获取指定玩家的任务进度存档。服务器专用。 */
-    const TMap<FGameplayTag, FQuestProgress>* GetQuestProgress(APlayerController* PlayerController) const;
-
-    /** 更新指定玩家的任务进度存档。服务器专用。 */
-    void SetQuestProgress(APlayerController* PlayerController, const TMap<FGameplayTag, FQuestProgress>& InProgress);
 
 private:
     /** 按 UniqueNetId 索引的 per-玩家存档。 */

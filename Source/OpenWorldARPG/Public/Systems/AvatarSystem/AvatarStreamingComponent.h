@@ -118,6 +118,9 @@ private:
 	// 基于音频实际播放时间的绝对时钟 (单位：秒)
 	float CurrentAudioTime;
 
+	// FrameBuffer[0] 应播放的音频时刻，把绝对时钟重锚定到帧缓冲内部索引
+	float BufferBaseAudioTime;
+
 	// 云端 AI 模型的面部表情生成帧率基准 (当前约定为 30.0 FPS)
 	float AnimationFPS;
 

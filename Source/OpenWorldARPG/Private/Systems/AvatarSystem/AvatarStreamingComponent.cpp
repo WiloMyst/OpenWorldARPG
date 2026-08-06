@@ -31,6 +31,7 @@ UAvatarStreamingComponent::UAvatarStreamingComponent()
     // 核心时钟与渲染参数初始化
     AnimationFPS = 30.0f;
     CurrentAudioTime = 0.0f;
+    BufferBaseAudioTime = 0.0f;
     bIsNetworkStreamEnded = false;
     CurrentBlendShapes.Init(0.0f, 52);
 }
@@ -147,6 +148,7 @@ void UAvatarStreamingComponent::InterruptAndFlush()
     // 4. 核心状态机全面复位
     QueuedChunkCounter.Reset();
     CurrentAudioTime = 0.0f;
+    BufferBaseAudioTime = 0.0f;
     FrameBuffer.Empty();
     bIsNetworkStreamEnded = false;
 
@@ -234,8 +236,17 @@ void UAvatarStreamingComponent::TickComponent(float DeltaTime, ELevelTick TickTy
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
     // ====================================================================
-    // 1. 面部渲染数据流消费 (Animation Frame Buffer Update)
+    // 1. 音频主时钟采样
     // ====================================================================
+    if (SynthPlayer)
+    {
+        CurrentAudioTime = SynthPlayer->GetCurrentAudioTime();
+    }
+
+    // ====================================================================
+    // 2. 消费网络帧入缓冲；空→非空跳变时锚定 FrameBuffer[0] 的音频时刻
+    // ====================================================================
+    const bool bWasEmpty = FrameBuffer.Num() == 0;
     TArray<float> FrameData;
     while (BlendShapeQueue.Dequeue(FrameData))
     {
@@ -245,42 +256,45 @@ void UAvatarStreamingComponent::TickComponent(float DeltaTime, ELevelTick TickTy
             FrameBuffer.Add(FrameData);
         }
     }
+    if (bWasEmpty && FrameBuffer.Num() > 0)
+    {
+        BufferBaseAudioTime = CurrentAudioTime;
+    }
 
     // ====================================================================
-    // 2. 面部动画帧序列插值渲染
+    // 3. 滑窗式帧驱动：按音频进度消费已播放帧，对齐当前帧并插值
+    //    BufferBaseAudioTime 始终等于 FrameBuffer[0] 应播放的音频时刻
     // ====================================================================
     if (FrameBuffer.Num() > 0)
     {
-        // 向底层合成器索要绝对物理时间
-        if (SynthPlayer)
+        float ContinuousIdx = (CurrentAudioTime - BufferBaseAudioTime) * AnimationFPS;
+        int32 Idx0 = FMath::FloorToInt(ContinuousIdx);
+
+        if (Idx0 >= FrameBuffer.Num())
         {
-            CurrentAudioTime = SynthPlayer->GetCurrentAudioTime();
+            // 音频已播过所有已到达帧：清空缓冲并重锚定，等待新帧或进入衰减
+            FrameBuffer.Empty();
+            BufferBaseAudioTime = CurrentAudioTime;
         }
-
-        float ExactFrame = CurrentAudioTime * AnimationFPS;
-        int32 FrameIndex0 = FMath::FloorToInt(ExactFrame);
-
-        // 历史帧垃圾回收 (Garbage Collection)：截断过期帧防内存泄漏
-        if (FrameIndex0 > 150)
+        else
         {
-            FrameBuffer.RemoveAt(0, FrameIndex0);
-            CurrentAudioTime -= (static_cast<float>(FrameIndex0) / AnimationFPS);
-            ExactFrame = CurrentAudioTime * AnimationFPS;
-            FrameIndex0 = FMath::FloorToInt(ExactFrame);
-        }
-
-        int32 FrameIndex1 = FrameIndex0 + 1;
-        float Alpha = ExactFrame - FrameIndex0; // 计算帧间插值权重 [0.0, 1.0)
-
-        // 越界防护与插值平滑处理
-        if (FrameIndex0 < FrameBuffer.Num())
-        {
-            const TArray<float>& Shapes0 = FrameBuffer[FrameIndex0];
-
-            if (FrameIndex1 < FrameBuffer.Num())
+            // 丢弃已播放过的帧，基准时间同步推进（滑窗前移）
+            if (Idx0 > 0)
             {
-                // 执行帧间线性插值，将云端 30FPS 平滑补偿至 UE5 本地高渲染帧率
-                const TArray<float>& Shapes1 = FrameBuffer[FrameIndex1];
+                FrameBuffer.RemoveAt(0, Idx0);
+                BufferBaseAudioTime += static_cast<float>(Idx0) / AnimationFPS;
+                ContinuousIdx = (CurrentAudioTime - BufferBaseAudioTime) * AnimationFPS;
+                Idx0 = FMath::FloorToInt(ContinuousIdx);
+            }
+            Idx0 = FMath::Clamp(Idx0, 0, FrameBuffer.Num() - 1);
+            const int32 Idx1 = Idx0 + 1;
+            const float Alpha = FMath::Clamp(ContinuousIdx - Idx0, 0.0f, 1.0f);
+
+            const TArray<float>& Shapes0 = FrameBuffer[Idx0];
+            if (Idx1 < FrameBuffer.Num())
+            {
+                // 帧间线性插值，将云端 30FPS 平滑补偿至 UE5 本地高渲染帧率
+                const TArray<float>& Shapes1 = FrameBuffer[Idx1];
                 for (int32 i = 0; i < 52; ++i)
                 {
                     CurrentBlendShapes[i] = FMath::Lerp(Shapes0[i], Shapes1[i], Alpha);
@@ -288,17 +302,15 @@ void UAvatarStreamingComponent::TickComponent(float DeltaTime, ELevelTick TickTy
             }
             else
             {
-                // 抵达当前缓冲末尾，保持静态
+                // 抵达缓冲末尾，保持末帧
                 CurrentBlendShapes = Shapes0;
             }
         }
     }
-    else
+
+    if (FrameBuffer.Num() == 0)
     {
-        // ====================================================================
-        // 网络饥饿或播放结束状态：执行面部权重平滑衰减
-        // ====================================================================
-        CurrentAudioTime = 0.0f;
+        // 网络饥饿或播放结束：面部权重平滑衰减至静默
         for (int32 i = 0; i < 52; ++i)
         {
             CurrentBlendShapes[i] = FMath::FInterpTo(CurrentBlendShapes[i], 0.0f, DeltaTime, 15.0f);
@@ -306,17 +318,12 @@ void UAvatarStreamingComponent::TickComponent(float DeltaTime, ELevelTick TickTy
     }
 
     // ====================================================================
-    // 3. 终极状态机检测：流生命周期闭环与 UI 恢复广播
+    // 4. 流生命周期闭环检测：网络下发完毕且本地帧缓冲已耗尽
     // ====================================================================
-    // 触发条件：网络宣告下发完毕 && 本地面部动画缓冲已被完全消费
     if (bIsNetworkStreamEnded && FrameBuffer.IsEmpty())
     {
         UE_LOG(LogTemp, Log, TEXT("[AvatarStreaming] 对话生命周期完整闭环！执行 UI 恢复广播。"));
-
-        // 触发多播委托，通知 UI 组件开放下一次输入
         OnStreamComplete.Broadcast();
-
-        // 务必复位标志位，防止下一帧发生重复广播
         bIsNetworkStreamEnded = false;
     }
 }
