@@ -4,6 +4,7 @@
 #include "engine/business/models/piper_tts_model.h"
 #include "engine/business/models/audio2face_model.h"
 #include "engine/infra/thread_pool.hpp"
+#include "engine/infra/resampler.hpp"
 
 #include <arpa/inet.h>
 #include <sys/socket.h>
@@ -51,9 +52,21 @@ AIBrain::AIBrain(const infra::AppConfig& config) {
 
     // 流式分块参数
     sub_chunk_samples_ = config.sub_chunk_samples;
+    animation_fps_ = config.animation_fps;
+
+    // 采样率参数：TTS 域 → V2F 域可能需要重采样对齐
+    tts_sample_rate_ = config.audio_sample_rate;
+    v2f_input_sample_rate_ = config.v2f_input_sample_rate;
+    need_resample_ = (tts_sample_rate_ != v2f_input_sample_rate_);
 
     InitNlpConnection();
-    spdlog::info("[AIBrain] Pipeline ready [sub_chunk={} samples]", sub_chunk_samples_);
+    if (need_resample_) {
+        spdlog::info("[AIBrain] Pipeline ready [sub_chunk={} samples, resample {}Hz -> {}Hz]",
+                     sub_chunk_samples_, tts_sample_rate_, v2f_input_sample_rate_);
+    } else {
+        spdlog::info("[AIBrain] Pipeline ready [sub_chunk={} samples, sample_rate={}Hz]",
+                     sub_chunk_samples_, tts_sample_rate_);
+    }
 }
 
 AIBrain::~AIBrain() {
@@ -251,11 +264,40 @@ void AIBrain::InferStream(const std::string& user_prompt,
                         v2f_pipeline_->enqueue([this, pcm_slice, is_end, offset, total_samples, current_chunk_size, on_chunk_ready, is_cancelled]() {
                             if (is_cancelled && is_cancelled()) return;
 
+                            // TTS 域 → Audio2Face 域重采样对齐
+                            // 注意：audio_pcm_chunk 必须保留原始 TTS 采样率，下发客户端播放
+                            // 重采样只作用于 V2F 推理分支，不影响音频播放分支
+                            std::vector<int16_t> v2f_input_pcm;
+                            if (need_resample_) {
+                                v2f_input_pcm = infra::LinearResampler::Resample(
+                                    pcm_slice, tts_sample_rate_, v2f_input_sample_rate_);
+                            } else {
+                                v2f_input_pcm = pcm_slice;
+                            }
+
                             auto v2f_t0 = std::chrono::steady_clock::now();
-                            std::vector<std::vector<float>> frames_slice = v2f_model_->Forward(pcm_slice);
+                            std::vector<std::vector<float>> frames_slice = v2f_model_->Forward(v2f_input_pcm);
                             auto v2f_t1 = std::chrono::steady_clock::now();
                             metrics_.last_v2f_ms.store(
                                 std::chrono::duration<double, std::milli>(v2f_t1 - v2f_t0).count());
+
+                            // 帧数补偿：保证表情帧覆盖时长 = 音频时长，对齐客户端 AnimationFPS 消费
+                            // 切片时长基于原始 TTS 域 pcm_slice 计算（与 audio_pcm_chunk 同源）
+                            // 自训练模型硬编码 735 样本/帧（22050Hz/30FPS），重采样到 16kHz 会导致
+                            // 帧数按比例缩减（8 帧 vs 预期 12 帧），此处补齐末帧恢复音画时长对齐
+                            const double chunk_duration_sec =
+                                static_cast<double>(pcm_slice.size()) / static_cast<double>(tts_sample_rate_);
+                            const size_t expected_frames = static_cast<size_t>(
+                                chunk_duration_sec * static_cast<double>(animation_fps_) + 0.5);
+
+                            if (!frames_slice.empty() && frames_slice.size() < expected_frames) {
+                                std::vector<float> last_frame = frames_slice.back();
+                                while (frames_slice.size() < expected_frames) {
+                                    frames_slice.push_back(last_frame);
+                                }
+                            } else if (frames_slice.size() > expected_frames && expected_frames > 0) {
+                                frames_slice.resize(expected_frames);
+                            }
 
                             ChunkResult chunk_result;
                             chunk_result.audio_pcm_chunk = std::move(pcm_slice);

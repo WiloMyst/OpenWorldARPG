@@ -14,10 +14,12 @@ fi
 source .venv/bin/activate
 echo "Python 虚拟环境已激活: $VIRTUAL_ENV"
 
-# 3. 动态搜寻并挂载 GPU 库 (V2F 推理需要 CUDA)
+# 3. 动态搜寻并挂载 GPU 库 (V2F 推理需要 CUDA, 找不到则 CPU 降级)
 echo "正在扫描虚拟环境中的 GPU 加速库..."
-CUDNN_SO_PATH=$(dirname $(find "$VIRTUAL_ENV" -name "libcudnn.so*" | head -n 1))
-TRT_SO_PATH=$(dirname $(find "$VIRTUAL_ENV" -name "libnvinfer.so*" | head -n 1))
+CUDNN_SO=$(find "$VIRTUAL_ENV" -name "libcudnn.so*" 2>/dev/null | head -n 1)
+TRT_SO=$(find "$VIRTUAL_ENV" -name "libnvinfer.so*" 2>/dev/null | head -n 1)
+CUDNN_SO_PATH="${CUDNN_SO:+$(dirname "$CUDNN_SO")}"
+TRT_SO_PATH="${TRT_SO:+$(dirname "$TRT_SO")}"
 
 if [ -z "$CUDNN_SO_PATH" ] || [ -z "$TRT_SO_PATH" ]; then
     echo "警告: 未找到 cuDNN 或 TensorRT！V2F GPU 推理可能不可用"

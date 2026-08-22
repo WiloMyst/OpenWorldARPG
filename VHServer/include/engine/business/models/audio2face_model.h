@@ -13,6 +13,8 @@ namespace models {
 /// @brief 音频驱动面部动画（Audio2Face）推理模型
 ///
 /// 接收 16-bit PCM 音频，输出 ARKit 标准 52 维 blendshape 权重帧序列。
+/// 输入采样率由上游 AIBrain 通过重采样对齐至 NVIDIA 官方推荐的 16kHz，
+/// 本类不感知具体采样率，仅按模型训练时的输入约定执行推理。
 /// 支持配置 GPU 推理与算子内并行线程数；内部使用对象池复用张量缓冲区，
 /// 降低热路径上的内存分配开销。
 class Audio2FaceModel : public OnnxModelBase {
@@ -32,7 +34,7 @@ public:
 
 private:
     /// 单次推理处理的最大样本数。
-    /// 按 22050Hz 采样率、0.5s 流式切片约为 11025 样本，
+    /// 按 16kHz 采样率、0.5s 流式切片约为 8000 样本，
     /// 预留余量并对齐至 2^14=16384，兼顾缓存行对齐与扩容需求。
     static constexpr size_t MAX_CHUNK_SAMPLES = 16384;
 

@@ -128,3 +128,10 @@ VHServer/third_party/*
 VHServer/.vscode/
 VHServer/.idea/
 VHServer/logs/
+
+# GameServer
+GameServer/build/
+GameServer/**/*.log
+GameServer/**/config_degraded.yaml
+GameServer/**/config_real.yaml
+!GameServer/CMakeLists.txt

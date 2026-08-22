@@ -14,6 +14,10 @@ struct AppConfig {
     int worker_threads = 4;
     int max_queue_size = 1000;
 
+    // Auth: 对话票据验证密钥, 与 GameServer 共享 (信令面签发 / 数据面验证)
+    // 为空则放行所有请求 (离线调试模式), 生产环境必须配置
+    std::string dialogue_secret;
+
     // AI Brain — LLM (Cloud API)
     std::string llm_api_base_url;
     std::string llm_api_key;
@@ -38,7 +42,8 @@ struct AppConfig {
     int nlp_send_timeout_sec = 10;
 
     // Streaming
-    int audio_sample_rate = 22050;
+    int audio_sample_rate = 22050;       // Piper TTS 输出采样率（音频下发客户端的播放采样率）
+    int v2f_input_sample_rate = 22050;   // Audio2Face 推理输入采样率（默认与 TTS 一致走零开销透传；切换 NVIDIA 官方 A2F 微服务时改为 16000 触发自动重采样）
     int animation_fps = 30;
     int sub_chunk_samples = 8820;
 
@@ -59,6 +64,16 @@ inline AppConfig LoadConfig(const std::string& filepath) {
             config.port = node["server"]["port"].as<int>(config.port);
             config.worker_threads = node["server"]["worker_threads"].as<int>(config.worker_threads);
             config.max_queue_size = node["server"]["max_queue_size"].as<int>(config.max_queue_size);
+        }
+
+        if (node["auth"]) {
+            // 环境变量 DIALOGUE_SECRET 优先, 避免密钥明文进配置文件
+            const char* env_secret = std::getenv("DIALOGUE_SECRET");
+            if (env_secret != nullptr && *env_secret != '\0') {
+                config.dialogue_secret = env_secret;
+            } else {
+                config.dialogue_secret = node["auth"]["dialogue_secret"].as<std::string>("");
+            }
         }
 
         if (node["ai_brain"]) {
@@ -84,6 +99,7 @@ inline AppConfig LoadConfig(const std::string& filepath) {
 
         if (node["streaming"]) {
             config.audio_sample_rate = node["streaming"]["audio_sample_rate"].as<int>(config.audio_sample_rate);
+            config.v2f_input_sample_rate = node["streaming"]["v2f_input_sample_rate"].as<int>(config.v2f_input_sample_rate);
             config.animation_fps = node["streaming"]["animation_fps"].as<int>(config.animation_fps);
             config.sub_chunk_samples = node["streaming"]["sub_chunk_samples"].as<int>(config.sub_chunk_samples);
         }

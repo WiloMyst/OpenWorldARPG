@@ -11,6 +11,8 @@
 #include "Systems/InventoryManager/Data/ItemInstance.h"
 #include "InventoryManagerSubsystem.generated.h"
 
+class UGameServerSubsystem;
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnInventoryUpdated);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnItemAdded, int32, ItemID, int32, AddedAmount);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnItemDropped, int32, ItemID, int32, DroppedAmount);
@@ -21,6 +23,10 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnItemUsed, FGuid, ItemGUID, int
 /**
  * 背包管理子系统 (Model 层)
  * GUID 驱动、分类容量限制、装备与消耗。纯业务数据，不含 UI 逻辑。
+ *
+ * 服务器权威模式 (M3)：已登录 GameServer 时，所有变更接口只向服务器转发请求，
+ * 本地状态唯一来源是 ApplyServerSnapshot 应用服务器快照；
+ * 未登录（编辑器离线调试）时回退为本地直改。
  */
 UCLASS()
 class OPENWORLDARPG_API UInventoryManagerSubsystem : public ULocalPlayerSubsystem
@@ -29,6 +35,13 @@ class OPENWORLDARPG_API UInventoryManagerSubsystem : public ULocalPlayerSubsyste
 
 public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+
+    // --- 服务器权威 ---
+
+    // 应用服务器下发的背包全量快照（登录响应 / 操作确认），并差分广播事件
+    void ApplyServerSnapshot(const TArray<FItemInstance>& Items,
+                             const TMap<FGuid, FWeaponInstanceData>& WeaponMap,
+                             const TMap<FGuid, FArtifactInstanceData>& ArtifactMap);
 
     // --- 添加物品 ---
 
@@ -78,6 +91,7 @@ private:
 
     int32 FindIndexByGUID(FGuid ItemGUID) const;
     bool HasCategorySpace(EItemCategory Category) const;
+    UGameServerSubsystem* GetGameServer() const;
 
 public:
     // --- 事件委托 ---

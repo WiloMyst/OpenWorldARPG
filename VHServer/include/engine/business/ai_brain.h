@@ -84,6 +84,12 @@ private:
 
     // 流式参数
     int sub_chunk_samples_ = 8820;
+    int animation_fps_ = 30;            // 云端表情帧率，用于 V2F 帧数补偿对齐音画时长
+
+    // 采样率参数：TTS 输出域与 V2F 输入域可能不一致，由 AIBrain 在 V2F 分支独立重采样
+    int tts_sample_rate_ = 22050;       // Piper TTS 输出采样率（与下发客户端播放的音频同源）
+    int v2f_input_sample_rate_ = 22050; // Audio2Face 推理输入采样率（默认与 TTS 一致；切换 NVIDIA 官方 A2F 改为 16000 触发重采样）
+    bool need_resample_ = false;        // 构造时判定：tts_sample_rate_ != v2f_input_sample_rate_ 时置 true
 
     // 运行时指标
     RuntimeMetrics metrics_;

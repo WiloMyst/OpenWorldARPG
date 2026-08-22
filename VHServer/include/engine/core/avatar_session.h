@@ -25,14 +25,16 @@ public:
     };
 
     static void Create(Avatar::AvatarService::AsyncService* service, grpc::ServerCompletionQueue* cq,
-                       infra::ThreadPool* pool, business::AIBrain* brain);
+                       infra::ThreadPool* pool, business::AIBrain* brain,
+                       const std::string& dialogue_secret);
 
     void HandleEvent(EventType type, bool ok);
 
 private:
     // 构造函数与私有方法的声明
     AvatarSession(Avatar::AvatarService::AsyncService* service, grpc::ServerCompletionQueue* cq,
-                  infra::ThreadPool* pool, business::AIBrain* brain);
+                  infra::ThreadPool* pool, business::AIBrain* brain,
+                  const std::string& dialogue_secret);
 
     void Start();
     void IssueRead();
@@ -40,12 +42,17 @@ private:
     void EnqueueWrite(const Avatar::AvatarStreamResponse& response);
     void ProcessRequestAsync(Avatar::AvatarStreamRequest req);
 
+    // 对话票据验证: 解析 account.npc_id.expires_at.hmac, 重算签名 + 过期检查
+    // 返回 false 时 reason 写明拒绝原因; 密钥未配置时放行 (离线调试模式)
+    bool ValidateDialogueToken(const std::string& token, std::string* reason);
+
     // 成员变量
     Avatar::AvatarService::AsyncService* service_;
     grpc::ServerCompletionQueue* cq_;
     infra::ThreadPool* pool_;
     business::AIBrain* brain_;
-    
+    const std::string dialogue_secret_;
+
     grpc::ServerContext ctx_;
     Avatar::AvatarStreamRequest request_;
     grpc::ServerAsyncReaderWriter<Avatar::AvatarStreamResponse, Avatar::AvatarStreamRequest> stream_;

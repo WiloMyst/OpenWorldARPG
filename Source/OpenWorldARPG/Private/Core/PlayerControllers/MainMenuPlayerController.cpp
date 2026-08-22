@@ -2,10 +2,11 @@
 
 #include "Core/PlayerControllers/MainMenuPlayerController.h"
 #include "UI/Core/UIManagerSubsystem.h"
-#include "Systems/GameFlowManager/GameFlowSubsystem.h"
-#include "Core/GameModes/MainMenuGameMode.h"
 #include "UI/Screens/LoginScreenWidget.h"
 #include "UI/Screens/StartGameScreenWidget.h"
+#include "Systems/GameServer/GameServerSubsystem.h"
+#include "Systems/GameFlowManager/GameFlowSubsystem.h"
+#include "Core/GameModes/MainMenuGameMode.h"
 #include "Engine/GameInstance.h"
 #include "Engine/LocalPlayer.h"
 #include "Kismet/GameplayStatics.h"
@@ -38,15 +39,72 @@ void AMainMenuPlayerController::BeginPlay()
     UWindowWidgetBase* LoginWidgetBase = UIManager->ShowUIByTag(LoginUITag);
 
     // 4. 类型转换为具体的登录UI类，并绑定事件
-    if (ULoginScreenWidget* LoginWidget = Cast<ULoginScreenWidget>(LoginWidgetBase))
+    LoginScreenWidget = Cast<ULoginScreenWidget>(LoginWidgetBase);
+    if (LoginScreenWidget)
     {
         // 先移除可能残留的绑定（安全起见），然后添加新绑定
-        LoginWidget->OnLoginButtonClicked.RemoveDynamic(this, &AMainMenuPlayerController::HandleOnLoginButtonClicked);
-        LoginWidget->OnLoginButtonClicked.AddDynamic(this, &AMainMenuPlayerController::HandleOnLoginButtonClicked);
+        LoginScreenWidget->OnLoginButtonClicked.RemoveDynamic(this, &AMainMenuPlayerController::HandleOnLoginButtonClicked);
+        LoginScreenWidget->OnLoginButtonClicked.AddDynamic(this, &AMainMenuPlayerController::HandleOnLoginButtonClicked);
     }
 }
 
 void AMainMenuPlayerController::HandleOnLoginButtonClicked()
+{
+    UGameServerSubsystem* GameServer = GetGameInstance()->GetSubsystem<UGameServerSubsystem>();
+    if (!GameServer || !LoginScreenWidget)
+    {
+        UE_LOG(LogTemp, Error, TEXT("MainMenuPlayerController: GameServerSubsystem 或登录界面缺失，跳过服务器登录门禁。"));
+        AdvanceToStartScreen();
+        return;
+    }
+
+    // 已登录（断线重连场景）直接放行
+    if (GameServer->IsLoggedIn())
+    {
+        AdvanceToStartScreen();
+        return;
+    }
+
+    // 防重复点击：登录请求进行中忽略
+    if (GameServer->IsLoginPending())
+    {
+        return;
+    }
+
+    GameServer->OnLoginResult.RemoveDynamic(this, &AMainMenuPlayerController::HandleServerLoginResult);
+    GameServer->OnLoginResult.AddDynamic(this, &AMainMenuPlayerController::HandleServerLoginResult);
+
+    LoginScreenWidget->OnLoginPending();
+    GameServer->RequestLogin(LoginScreenWidget->GetAccountInput(), LoginScreenWidget->GetTokenInput());
+    UE_LOG(LogTemp, Log, TEXT("MainMenuPlayerController: 已发起服务器登录，等待确认。"));
+}
+
+void AMainMenuPlayerController::HandleServerLoginResult(bool bSuccess, const FString& ErrorMsg)
+{
+    if (UGameServerSubsystem* GameServer = GetGameInstance()->GetSubsystem<UGameServerSubsystem>())
+    {
+        GameServer->OnLoginResult.RemoveDynamic(this, &AMainMenuPlayerController::HandleServerLoginResult);
+    }
+
+    if (!bSuccess)
+    {
+        // 登录失败：保留登录界面并反馈原因
+        if (LoginScreenWidget)
+        {
+            LoginScreenWidget->OnLoginResult(false, ErrorMsg.IsEmpty() ? TEXT("登录失败") : ErrorMsg);
+        }
+        UE_LOG(LogTemp, Warning, TEXT("MainMenuPlayerController: 服务器登录失败: %s"), *ErrorMsg);
+        return;
+    }
+
+    if (LoginScreenWidget)
+    {
+        LoginScreenWidget->OnLoginResult(true, TEXT(""));
+    }
+    AdvanceToStartScreen();
+}
+
+void AMainMenuPlayerController::AdvanceToStartScreen()
 {
     UUIManagerSubsystem* UIManager = GetLocalPlayer()->GetSubsystem<UUIManagerSubsystem>();
     if (!UIManager) return;

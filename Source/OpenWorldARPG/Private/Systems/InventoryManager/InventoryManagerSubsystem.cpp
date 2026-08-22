@@ -2,6 +2,7 @@
 
 #include "Systems/InventoryManager/InventoryManagerSubsystem.h"
 #include "Systems/GameFlowManager/GameAssetManagerSubsystem.h"
+#include "Systems/GameServer/GameServerSubsystem.h"
 #include "Engine/DataTable.h"
 #include "Engine/Engine.h"
 #include "AbilitySystemComponent.h"
@@ -38,6 +39,60 @@ const FItemData* UInventoryManagerSubsystem::GetItemData(int32 ItemID) const
 }
 
 // --- 内部辅助 ---
+
+UGameServerSubsystem* UInventoryManagerSubsystem::GetGameServer() const
+{
+    return GetLocalPlayer()->GetGameInstance()->GetSubsystem<UGameServerSubsystem>();
+}
+
+// --- 服务器权威 ---
+
+void UInventoryManagerSubsystem::ApplyServerSnapshot(const TArray<FItemInstance>& Items,
+                                                     const TMap<FGuid, FWeaponInstanceData>& WeaponMap,
+                                                     const TMap<FGuid, FArtifactInstanceData>& ArtifactMap)
+{
+    // 索引旧状态用于差分事件
+    TMap<FGuid, FItemInstance> OldItems;
+    for (const FItemInstance& Item : InventoryItems)
+    {
+        OldItems.Add(Item.ItemGUID, Item);
+    }
+
+    InventoryItems = Items;
+    WeaponInstanceMap = WeaponMap;
+    ArtifactInstanceMap = ArtifactMap;
+
+    TSet<FGuid> NewGuids;
+    NewGuids.Reserve(InventoryItems.Num());
+    for (const FItemInstance& NewItem : InventoryItems)
+    {
+        NewGuids.Add(NewItem.ItemGUID);
+
+        const FItemInstance* Old = OldItems.Find(NewItem.ItemGUID);
+        if (!Old)
+        {
+            OnItemAdded.Broadcast(NewItem.ItemID, NewItem.Count);
+        }
+        else if (Old->EquippedCharacterID < 0 && NewItem.EquippedCharacterID >= 0)
+        {
+            OnItemEquipped.Broadcast(NewItem.ItemGUID, NewItem.ItemID, NewItem.EquippedCharacterID);
+        }
+        else if (Old->EquippedCharacterID >= 0 && NewItem.EquippedCharacterID < 0)
+        {
+            OnItemUnequipped.Broadcast(NewItem.ItemGUID, NewItem.ItemID, Old->EquippedCharacterID);
+        }
+    }
+
+    for (const TPair<FGuid, FItemInstance>& Pair : OldItems)
+    {
+        if (!NewGuids.Contains(Pair.Key))
+        {
+            OnItemDropped.Broadcast(Pair.Value.ItemID, Pair.Value.Count);
+        }
+    }
+
+    OnInventoryUpdated.Broadcast();
+}
 
 int32 UInventoryManagerSubsystem::FindIndexByGUID(FGuid ItemGUID) const
 {
@@ -77,6 +132,15 @@ int32 UInventoryManagerSubsystem::GetCategoryCapacity(EItemCategory Category) co
 void UInventoryManagerSubsystem::AddStackableItem(int32 ItemID, int32 Amount)
 {
     if (Amount <= 0) return;
+
+    if (UGameServerSubsystem* Server = GetGameServer())
+    {
+        if (Server->IsLoggedIn())
+        {
+            Server->ServerAddItem(ItemID, Amount);
+            return;
+        }
+    }
 
     const FItemData* ItemConfig = GetItemData(ItemID);
     if (!ItemConfig)
@@ -146,6 +210,16 @@ void UInventoryManagerSubsystem::AddStackableItem(int32 ItemID, int32 Amount)
 
 void UInventoryManagerSubsystem::AddUniqueItem(int32 ItemID, const FWeaponInstanceData& WeaponData)
 {
+    // 在线时实例数据由服务器生成，本地入参仅离线模式生效
+    if (UGameServerSubsystem* Server = GetGameServer())
+    {
+        if (Server->IsLoggedIn())
+        {
+            Server->ServerAddItem(ItemID, 1);
+            return;
+        }
+    }
+
     const FItemData* ItemConfig = GetItemData(ItemID);
     if (!ItemConfig)
     {
@@ -180,6 +254,16 @@ void UInventoryManagerSubsystem::AddUniqueItem(int32 ItemID, const FWeaponInstan
 
 void UInventoryManagerSubsystem::AddArtifactItem(int32 ItemID, const FArtifactInstanceData& ArtifactData)
 {
+    // 在线时词条由服务器生成，本地入参仅离线模式生效
+    if (UGameServerSubsystem* Server = GetGameServer())
+    {
+        if (Server->IsLoggedIn())
+        {
+            Server->ServerAddItem(ItemID, 1);
+            return;
+        }
+    }
+
     const FItemData* ItemConfig = GetItemData(ItemID);
     if (!ItemConfig)
     {
@@ -209,6 +293,16 @@ void UInventoryManagerSubsystem::AddArtifactItem(int32 ItemID, const FArtifactIn
 void UInventoryManagerSubsystem::AddItem(int32 ItemID, int32 Amount)
 {
     if (Amount <= 0) return;
+
+    if (UGameServerSubsystem* Server = GetGameServer())
+    {
+        if (Server->IsLoggedIn())
+        {
+            // 可堆叠与非堆叠（武器/圣遗物数量）统一由服务器处理
+            Server->ServerAddItem(ItemID, Amount);
+            return;
+        }
+    }
 
     const FItemData* ItemConfig = GetItemData(ItemID);
     if (!ItemConfig)
@@ -254,6 +348,15 @@ void UInventoryManagerSubsystem::AddItem(int32 ItemID, int32 Amount)
 
 bool UInventoryManagerSubsystem::RemoveItemByGUID(FGuid ItemGUID, int32 RemoveAmount)
 {
+    if (UGameServerSubsystem* Server = GetGameServer())
+    {
+        if (Server->IsLoggedIn())
+        {
+            Server->ServerRemoveItem(ItemGUID, RemoveAmount);
+            return true;
+        }
+    }
+
     int32 Index = FindIndexByGUID(ItemGUID);
     if (Index == INDEX_NONE)
     {
@@ -269,6 +372,15 @@ bool UInventoryManagerSubsystem::RemoveItemByIndex(int32 DropIndex, int32 DropAm
     {
         UE_LOG(LogTemp, Warning, TEXT("RemoveItemByIndex: 无效的丢弃数量或索引。"));
         return false;
+    }
+
+    if (UGameServerSubsystem* Server = GetGameServer())
+    {
+        if (Server->IsLoggedIn())
+        {
+            Server->ServerRemoveItem(InventoryItems[DropIndex].ItemGUID, DropAmount);
+            return true;
+        }
     }
 
     FItemInstance& TargetItem = InventoryItems[DropIndex];
@@ -317,6 +429,16 @@ bool UInventoryManagerSubsystem::RemoveItemByIndex(int32 DropIndex, int32 DropAm
 
 bool UInventoryManagerSubsystem::EquipItem(FGuid ItemGUID, int32 CharacterID)
 {
+    if (UGameServerSubsystem* Server = GetGameServer())
+    {
+        if (Server->IsLoggedIn())
+        {
+            // 换装冲突（同槽替换/武器替换）由服务器仲裁，快照回推后生效
+            Server->ServerEquipItem(ItemGUID, CharacterID);
+            return true;
+        }
+    }
+
     int32 Index = FindIndexByGUID(ItemGUID);
     if (Index == INDEX_NONE) return false;
 
@@ -365,6 +487,15 @@ bool UInventoryManagerSubsystem::EquipItem(FGuid ItemGUID, int32 CharacterID)
 
 bool UInventoryManagerSubsystem::UnequipItem(FGuid ItemGUID)
 {
+    if (UGameServerSubsystem* Server = GetGameServer())
+    {
+        if (Server->IsLoggedIn())
+        {
+            Server->ServerUnequipItem(ItemGUID);
+            return true;
+        }
+    }
+
     int32 Index = FindIndexByGUID(ItemGUID);
     if (Index == INDEX_NONE) return false;
 
@@ -381,6 +512,21 @@ bool UInventoryManagerSubsystem::UnequipItem(FGuid ItemGUID)
 
 void UInventoryManagerSubsystem::UnequipAllForCharacter(int32 CharacterID)
 {
+    if (UGameServerSubsystem* Server = GetGameServer())
+    {
+        if (Server->IsLoggedIn())
+        {
+            for (const FItemInstance& Item : InventoryItems)
+            {
+                if (Item.EquippedCharacterID == CharacterID)
+                {
+                    Server->ServerUnequipItem(Item.ItemGUID);
+                }
+            }
+            return;
+        }
+    }
+
     for (FItemInstance& Item : InventoryItems)
     {
         if (Item.EquippedCharacterID == CharacterID) Item.EquippedCharacterID = -1;
@@ -419,6 +565,15 @@ TArray<FItemInstance> UInventoryManagerSubsystem::GetEquippedArtifacts(int32 Cha
 
 bool UInventoryManagerSubsystem::UseItem(FGuid ItemGUID, int32 TargetCharacterID, int32 UseAmount)
 {
+    if (UGameServerSubsystem* Server = GetGameServer())
+    {
+        if (Server->IsLoggedIn())
+        {
+            Server->ServerUseItem(ItemGUID, TargetCharacterID, UseAmount);
+            return true;
+        }
+    }
+
     int32 Index = FindIndexByGUID(ItemGUID);
     if (Index == INDEX_NONE) return false;
 

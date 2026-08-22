@@ -1,7 +1,10 @@
 #include "engine/core/avatar_session.h"
 #include "engine/infra/thread_pool.hpp"
+#include "engine/infra/hmac.hpp"
 #include "engine/business/ai_brain.h"
 #include <spdlog/spdlog.h>
+
+#include <chrono>
 
 using namespace engine::infra;
 using namespace engine::business;
@@ -10,14 +13,15 @@ namespace engine {
 namespace core {
 
 void AvatarSession::Create(Avatar::AvatarService::AsyncService* service, grpc::ServerCompletionQueue* cq,
-                           ThreadPool* pool, AIBrain* brain) {
-    auto call = std::shared_ptr<AvatarSession>(new AvatarSession(service, cq, pool, brain));
+                           ThreadPool* pool, AIBrain* brain, const std::string& dialogue_secret) {
+    auto call = std::shared_ptr<AvatarSession>(new AvatarSession(service, cq, pool, brain, dialogue_secret));
     call->Start();
 }
 
 AvatarSession::AvatarSession(Avatar::AvatarService::AsyncService* service, grpc::ServerCompletionQueue* cq,
-                             ThreadPool* pool, AIBrain* brain)
+                             ThreadPool* pool, AIBrain* brain, const std::string& dialogue_secret)
     : service_(service), cq_(cq), pool_(pool), brain_(brain),
+      dialogue_secret_(dialogue_secret),
       stream_(&ctx_), is_writing_(false) {}
 
 void AvatarSession::HandleEvent(EventType type, bool ok) {
@@ -43,7 +47,7 @@ void AvatarSession::HandleEvent(EventType type, bool ok) {
         case EventType::CONNECT: {
             // 新连接到达: 立即创建下一个 Session 等待新连接, 然后处理当前连接
             spdlog::info("[AvatarSession] New connection established");
-            AvatarSession::Create(service_, cq_, pool_, brain_);
+            AvatarSession::Create(service_, cq_, pool_, brain_, dialogue_secret_);
             IssueRead();
             break;
         }
@@ -117,10 +121,70 @@ void AvatarSession::EnqueueWrite(const Avatar::AvatarStreamResponse& response) {
     }
 }
 
+bool AvatarSession::ValidateDialogueToken(const std::string& token, std::string* reason) {
+    // 密钥未配置: 离线调试模式, 放行 (与 GameServer 签发侧约定: secret 为空不签发, 此处兜底)
+    if (dialogue_secret_.empty()) {
+        return true;
+    }
+    if (token.empty()) {
+        *reason = "Dialogue auth required: missing token";
+        return false;
+    }
+
+    // 票据格式: account.npc_id.expires_at.hmac_hex (与 GameServer 共享契约)
+    const size_t p1 = token.find('.');
+    const size_t p2 = token.find('.', p1 + 1);
+    const size_t p3 = token.find('.', p2 + 1);
+    if (p1 == std::string::npos || p2 == std::string::npos || p3 == std::string::npos) {
+        *reason = "Invalid token format";
+        return false;
+    }
+
+    const std::string account = token.substr(0, p1);
+    const std::string payload = token.substr(0, p3);
+    const std::string hmac_hex = token.substr(p3 + 1);
+    if (account.empty() || hmac_hex.size() != 64) {
+        *reason = "Invalid token format";
+        return false;
+    }
+
+    // 签名重算 + 常数时间比较
+    if (!crypto::ConstTimeEqual(crypto::HmacSha256Hex(dialogue_secret_, payload), hmac_hex)) {
+        *reason = "Invalid token signature";
+        return false;
+    }
+
+    // 有效期检查
+    char* end = nullptr;
+    const int64_t expires_at = std::strtoll(token.substr(p2 + 1, p3 - p2 - 1).c_str(), &end, 10);
+    const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    if (end == nullptr || *end != '\0' || now_ms >= expires_at) {
+        *reason = "Token expired";
+        return false;
+    }
+
+    return true;
+}
+
 void AvatarSession::ProcessRequestAsync(Avatar::AvatarStreamRequest req) {
     uint64_t my_request_id = ++current_request_id_;
 
     std::string raw_text = req.text_payload();
+
+    // 对话票据验证 (信令面授权校验): 失败直接拒流, 不进入推理管线
+    std::string auth_reason;
+    if (!ValidateDialogueToken(req.auth_token(), &auth_reason)) {
+        spdlog::warn("[AvatarSession] Request rejected by dialogue auth [id={}, reason={}]",
+                     my_request_id, auth_reason);
+        Avatar::AvatarStreamResponse err_reply;
+        err_reply.set_success(false);
+        err_reply.set_error_msg("Dialogue auth failed: " + auth_reason);
+        err_reply.set_is_end_of_stream(true);
+        EnqueueWrite(err_reply);
+        return;
+    }
+
     spdlog::info("[AvatarSession] Request received [id={}, text_len={}]", my_request_id, raw_text.length());
 
     if (raw_text.empty()) {

@@ -10,6 +10,9 @@ message AvatarStreamRequest {
   repeated int64 phoneme_ids = 4;
   bool is_end_of_stream = 5;
   string text_payload = 6;
+  // GameServer 签发的短期对话票据 (account.npc_id.expires_at.hmac)
+  // 信令面授权 + 数据面直连: VHServer 本地验证签名与有效期, 不回调 GameServer
+  string auth_token = 7;
 }
 
 message BlendShapeFrame {

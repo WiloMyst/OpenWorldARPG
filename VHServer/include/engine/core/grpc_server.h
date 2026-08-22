@@ -24,7 +24,7 @@ public:
     void Shutdown();
 
 private:
-    void HandleRpcs();
+    void HandleRpcs(const std::string& dialogue_secret);
 
     struct Impl;
     std::unique_ptr<Impl> pimpl_;

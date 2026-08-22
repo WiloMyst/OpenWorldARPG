@@ -80,12 +80,12 @@ void GrpcServer::Run(const std::string& host, int port, int threads, int max_que
     std::signal(SIGINT, [](int) { shutdown_requested_.store(true); });
     std::signal(SIGTERM, [](int) { shutdown_requested_.store(true); });
 
-    HandleRpcs();
+    HandleRpcs(config.dialogue_secret);
 }
 
-void GrpcServer::HandleRpcs() {
+void GrpcServer::HandleRpcs(const std::string& dialogue_secret) {
     // 启动初始 Session 等待第一个客户端连接
-    AvatarSession::Create(&(pimpl_->service), pimpl_->cq.get(), pool_.get(), brain_.get());
+    AvatarSession::Create(&(pimpl_->service), pimpl_->cq.get(), pool_.get(), brain_.get(), dialogue_secret);
 
     void* raw_tag;
     bool ok;

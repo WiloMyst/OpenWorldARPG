@@ -1,0 +1,181 @@
+syntax = "proto3";
+
+package game;
+
+// 游戏服务器主通道: 单一双向流, 消息按 oneof 类型路由
+// sequence 由客户端递增, 服务器在响应中原样回执用于请求关联
+service GameService {
+    rpc GameChannel(stream ClientMessage) returns (stream ServerMessage);
+}
+
+// ---------- 客户端 -> 服务器 ----------
+
+message ClientMessage {
+    uint64 sequence = 1;
+    oneof payload {
+        LoginRequest login = 2;
+        Heartbeat heartbeat = 3;
+        SaveDataRequest save_data = 4;
+        LogoutRequest logout = 5;
+        InventoryOpRequest inventory_op = 6;
+        DialogueAuthRequest dialogue_auth = 7;
+    }
+}
+
+message LoginRequest {
+    string account = 1;
+    string token = 2;
+}
+
+message Heartbeat {
+    int64 client_timestamp = 1;
+}
+
+message SaveDataRequest {
+    PlayerData player_data = 1;
+}
+
+message LogoutRequest {
+}
+
+// 背包操作: 服务器权威校验并执行, 响应携带操作后的完整背包快照
+message InventoryOpRequest {
+    oneof op {
+        InventoryAdd add = 1;
+        InventoryRemove remove = 2;
+        InventoryEquip equip = 3;
+        InventoryUnequip unequip = 4;
+        InventoryUse use = 5;
+    }
+}
+
+message InventoryAdd {
+    int32 item_id = 1;
+    int32 amount = 2;         // 堆叠物品数量; 不可堆叠物品须为 1
+}
+
+message InventoryRemove {
+    string item_guid = 1;
+    int32 amount = 2;         // 堆叠物品扣减数量; 不可堆叠物品忽略
+}
+
+message InventoryEquip {
+    string item_guid = 1;
+    int32 character_id = 2;   // 目标角色, 须 >= 0
+}
+
+message InventoryUnequip {
+    string item_guid = 1;
+}
+
+message InventoryUse {
+    string item_guid = 1;
+    int32 target_character_id = 2;  // 可选, 物品配置要求选择目标时必填
+    int32 amount = 3;               // 堆叠物品使用数量
+}
+
+// 对话授权请求 (信令面): 服务器校验玩家资格后签发短期票据,
+// 客户端持票据直连 VHServer 推理流 (数据面)
+message DialogueAuthRequest {
+    int32 npc_id = 1;               // 绑定进票据, VHServer 侧可校验用途
+}
+
+// ---------- 服务器 -> 客户端 ----------
+
+message ServerMessage {
+    uint64 ack_sequence = 1;
+    oneof payload {
+        LoginResponse login = 2;
+        HeartbeatAck heartbeat = 3;
+        SaveDataResponse save_data = 4;
+        KickNotify kick = 5;
+        ErrorResponse error = 6;
+        InventoryOpResponse inventory_op = 7;
+        DialogueAuthResult dialogue_auth_result = 8;
+    }
+}
+
+message LoginResponse {
+    bool success = 1;
+    uint64 player_id = 2;
+    string session_token = 3;
+    PlayerData player_data = 4;
+    repeated ItemInstance inventory = 5;   // 登录时的权威背包快照
+    string error_msg = 6;
+}
+
+message HeartbeatAck {
+    int64 server_timestamp = 1;
+}
+
+message SaveDataResponse {
+    bool success = 1;
+    string error_msg = 2;
+}
+
+// 服务器主动下线通知: duplicate_login / heartbeat_timeout / login_timeout
+message KickNotify {
+    string reason = 1;
+}
+
+// code: 401 未登录, 400 参数错误, 503 过载
+message ErrorResponse {
+    int32 code = 1;
+    string message = 2;
+}
+
+message InventoryOpResponse {
+    bool success = 1;
+    string error_msg = 2;
+    repeated ItemInstance items = 3;   // 操作后的权威背包快照
+}
+
+// 对话授权结果: 携带短期票据, 过期后客户端须重新申请
+message DialogueAuthResult {
+    bool ok = 1;
+    string reason = 2;
+    string dialogue_token = 3;         // HMAC-SHA256 签名票据
+    int64 expires_at = 4;              // epoch ms
+}
+
+// ---------- 共享数据结构 ----------
+
+message PlayerData {
+    string account = 1;
+    int32 level = 2;
+    int64 exp = 3;
+}
+
+// 背包物品实例, 对齐客户端 FItemInstance
+message ItemInstance {
+    string item_guid = 1;
+    int32 item_id = 2;
+    int32 count = 3;
+    int32 equipped_character_id = 4;   // -1 表示未装备
+    int64 acquired_time = 5;           // epoch ms
+    string category = 6;               // weapon/artifact/material/food/quest
+    WeaponInstanceData weapon_data = 7;      // 仅武器物品填充
+    ArtifactInstanceData artifact_data = 8;  // 仅圣遗物物品填充
+}
+
+// 对齐客户端 FWeaponInstanceData
+message WeaponInstanceData {
+    int32 level = 1;
+    int32 ascension_level = 2;
+    int32 refinement_level = 3;
+}
+
+// 对齐客户端 FArtifactInstanceData
+message ArtifactInstanceData {
+    int32 set_id = 1;
+    string slot = 2;             // flower/plume/sands/goblet/circlet
+    string main_stat = 3;
+    float main_stat_value = 4;
+    repeated ArtifactSubStat sub_stats = 5;
+}
+
+message ArtifactSubStat {
+    string stat_type = 1;
+    float stat_value = 2;
+    int32 upgrade_count = 3;
+}

@@ -20,7 +20,12 @@ inline void InitLogger(const std::string& level_str = "info",
         std::filesystem::create_directories(log_dir);
     }
 
-    spdlog::init_thread_pool(8192, 1);
+    // 线程池只初始化一次: 重复 init_thread_pool 会销毁旧池并 join 其 worker,
+    // 与队列中在途消息竞态, 会导致重初始化后异步日志静默丢失。
+    // 重初始化仅重建 logger/sinks, 复用全局池 (spdlog 异步 logger 标准用法)。
+    if (spdlog::thread_pool() == nullptr) {
+        spdlog::init_thread_pool(8192, 1);
+    }
 
     auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
     auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(

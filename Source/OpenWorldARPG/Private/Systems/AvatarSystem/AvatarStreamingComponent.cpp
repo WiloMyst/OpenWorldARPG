@@ -2,8 +2,11 @@
 
 #include "Systems/AvatarSystem/AvatarStreamingComponent.h"
 #include "Systems/AvatarSystem/AvatarSynthComponent.h"
+#include "Systems/GameServer/GameServerSubsystem.h"
 #include "TurboLinkGrpcUtilities.h"
 #include "TurboLinkGrpcManager.h"
+
+#include "Engine/GameInstance.h"
 
 // ====================================================================
 // ARKit 52 维标准面部混合形状 (BlendShape) 命名映射字典
@@ -87,10 +90,27 @@ void UAvatarStreamingComponent::BeginPlay()
     // 初始化 gRPC Session
     CurrentSessionHandle = AvatarClient->InitChatWithAvatar();
     UE_LOG(LogTemp, Log, TEXT("[AvatarStreaming] gRPC 双向流通道已就绪，进入监听状态。"));
+
+    // 绑定 GameServer 信令面回调: 对话票据签发结果
+    if (UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
+    {
+        if (UGameServerSubsystem* GameServer = GI->GetSubsystem<UGameServerSubsystem>())
+        {
+            GameServer->OnDialogueAuthResult.AddDynamic(this, &UAvatarStreamingComponent::OnDialogueAuthResult);
+        }
+    }
 }
 
 void UAvatarStreamingComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+    if (UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
+    {
+        if (UGameServerSubsystem* GameServer = GI->GetSubsystem<UGameServerSubsystem>())
+        {
+            GameServer->OnDialogueAuthResult.RemoveDynamic(this, &UAvatarStreamingComponent::OnDialogueAuthResult);
+        }
+    }
+
     if (AvatarClient)
     {
         // 解绑动态委托，防御生命周期结束后的悬垂指针 (Dangling Pointers)
@@ -115,11 +135,90 @@ void UAvatarStreamingComponent::SendChatText(const FString& InText)
     // 发起新会话前，强制执行本地缓冲清理与网络流重置
     InterruptAndFlush();
 
+    UGameServerSubsystem* GameServer = nullptr;
+    if (UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
+    {
+        GameServer = GI->GetSubsystem<UGameServerSubsystem>();
+    }
+
+    // 未登录 GameServer (离线调试): 无票据直发，由 VHServer 决定放行与否
+    if (!GameServer || !GameServer->IsLoggedIn())
+    {
+        SendChatRequest(InText, TEXT(""));
+        return;
+    }
+
+    // 缓存票据未过期: 直接携带发送（避开服务器 1 秒频控）
+    if (HasValidDialogueToken())
+    {
+        SendChatRequest(InText, CachedDialogueToken);
+        return;
+    }
+
+    // 信令面向 GameServer 申请新票据，到账后在 OnDialogueAuthResult 中补发
+    if (GameServer->RequestDialogueAuth(NpcId))
+    {
+        PendingChatText = InText;
+        bWaitingDialogueAuth = true;
+        UE_LOG(LogTemp, Log, TEXT("[AvatarStreaming] 正在向 GameServer 申请对话票据 [npc_id=%d]..."), NpcId);
+        return;
+    }
+
+    // 票据申请发送失败（通道异常）: 以无票据模式直发，交由 VHServer 鉴权结果兜底
+    SendChatRequest(InText, TEXT(""));
+}
+
+void UAvatarStreamingComponent::OnDialogueAuthResult(bool bOk, const FString& DialogueToken, int64 ExpiresAtMs, const FString& Reason)
+{
+    if (!bWaitingDialogueAuth)
+    {
+        return;
+    }
+    bWaitingDialogueAuth = false;
+
+    if (!bOk)
+    {
+        PendingChatText.Reset();
+        const FString ErrString = FString::Printf(TEXT("对话授权失败: %s"), *Reason);
+        UE_LOG(LogTemp, Error, TEXT("[AvatarStreaming] %s"), *ErrString);
+
+        OnStreamError.Broadcast(ErrString);
+        OnStreamComplete.Broadcast();
+        return;
+    }
+
+    CachedDialogueToken = DialogueToken;
+    TokenExpiresAtMs = ExpiresAtMs;
+    UE_LOG(LogTemp, Log, TEXT("[AvatarStreaming] 对话票据已获取，携带票据直连 VHServer 数据面。"));
+
+    SendChatRequest(PendingChatText, CachedDialogueToken);
+    PendingChatText.Reset();
+}
+
+bool UAvatarStreamingComponent::HasValidDialogueToken() const
+{
+    if (CachedDialogueToken.IsEmpty())
+    {
+        return false;
+    }
+    // 预留 2 秒余量，避免票据在发送途中过期
+    const int64 NowMs = FDateTime::UtcNow().ToUnixTimestamp() * 1000;
+    return NowMs < TokenExpiresAtMs - 2000;
+}
+
+void UAvatarStreamingComponent::SendChatRequest(const FString& InText, const FString& AuthToken)
+{
+    if (!AvatarClient)
+    {
+        return;
+    }
+
     FGrpcAvatarAvatarStreamRequest Request;
     Request.SessionId = TEXT("UE5_Session_001");
     Request.StreamType = TEXT("TEXT_INFER");
     Request.TextPayload = InText;
     Request.IsEndOfStream = false;
+    Request.AuthToken = AuthToken;
 
     // 执行异步非阻塞网络写操作
     AvatarClient->ChatWithAvatar(CurrentSessionHandle, Request);

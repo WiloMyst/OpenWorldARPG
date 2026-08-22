@@ -43,11 +43,18 @@ public:
 	TSoftObjectPtr<UInitialArchiveData> InitialArchiveData;
 
 	// --- UI ---
-	UPROPERTY(Config, EditDefaultsOnly, Category = "UI", meta=(ToolTip="UI映射数据资产"))
-	TSoftObjectPtr<UUIDataAsset> UIMapDataAsset;
+    UPROPERTY(Config, EditDefaultsOnly, Category = "UI", meta=(ToolTip="UI映射数据资产"))
+    TSoftObjectPtr<UUIDataAsset> UIMapDataAsset;
 
-	UPROPERTY(Config, EditDefaultsOnly, Category = "UI", meta=(ToolTip="加载界面Widget类"))
-	TSubclassOf<ULoadingScreenWidget> LoadingScreenWidgetClass;
+    UPROPERTY(Config, EditDefaultsOnly, Category = "UI", meta=(ToolTip="加载界面Widget类"))
+    TSubclassOf<ULoadingScreenWidget> LoadingScreenWidgetClass;
+
+    // --- GameServer 登录 ---
+    UPROPERTY(Config, EditDefaultsOnly, Category = "Game Server", meta=(ToolTip="开发环境默认登录账号（登录界面未提供输入框时使用）"))
+    FString GameServerDefaultAccount = TEXT("DevPlayer");
+
+    UPROPERTY(Config, EditDefaultsOnly, Category = "Game Server", meta=(ToolTip="开发环境静态令牌，须与 GameServer config.yaml 的 auth.static_token 一致"))
+    FString GameServerStaticToken = TEXT("dev-token-2026");
 
 #if WITH_EDITOR
 	virtual FName GetCategoryName() const override;

@@ -39,4 +39,23 @@ private:
 
 	// 当前采样率，用于时间计算
 	int32 CurrentSampleRate = 22050;
+
+	// ====================================================================
+	// 起播水位 (对话开头的底部抗抖动缓冲)
+	// ====================================================================
+
+	// 起播前需攒够的缓冲时长 (秒)。对话开头流水线领先量最薄, 是抗抖最脆弱的时刻;
+	// 首块到达后先静音攒够该时长再开播, 用约 0.5s 首响换取首句期间的抖动吸收
+	UPROPERTY(EditAnywhere, Category = "Avatar|Audio")
+	float StartupBufferSeconds = 0.5f;
+
+	// 起播水位 (采样点数), 由 Init 按 StartupBufferSeconds × 采样率换算
+	int32 StartupBufferSamples = 0;
+
+	// 是否已越过起播水位进入正常播放。仅对话开头关门一次,
+	// 句中饥饿不重新关门, 避免每次网络抖动都补一段静音
+	std::atomic<bool> bPlaybackStarted{ false };
+
+	// 队列当前积压采样点数 (入队累加 / 消费递减), 供起播水位判断
+	std::atomic<uint64_t> TotalSamplesQueued{ 0 };
 };

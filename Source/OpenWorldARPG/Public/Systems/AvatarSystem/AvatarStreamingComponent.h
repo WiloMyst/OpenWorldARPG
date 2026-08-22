@@ -12,6 +12,7 @@
 #include "AvatarStreamingComponent.generated.h"
 
 class UAvatarSynthComponent;
+class UGameServerSubsystem;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnAvatarStreamComplete);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnAvatarStreamError, const FString&, ErrorMsg);
@@ -57,10 +58,14 @@ public:
 	// ====================================================================
 
 	UFUNCTION()
-	void OnChatResponseReceived(FGrpcContextHandle Handle, const FGrpcResult& GrpcResult, const FGrpcAvatarAvatarStreamResponse& Response);
+    void OnChatResponseReceived(FGrpcContextHandle Handle, const FGrpcResult& GrpcResult, const FGrpcAvatarAvatarStreamResponse& Response);
 
-	UFUNCTION()
-	void OnChatWriteComplete(FGrpcContextHandle Handle);
+    UFUNCTION()
+    void OnChatWriteComplete(FGrpcContextHandle Handle);
+
+    // GameServer 信令面回调: 对话票据签发结果，到账后补发待发送文本
+    UFUNCTION()
+    void OnDialogueAuthResult(bool bOk, const FString& DialogueToken, int64 ExpiresAtMs, const FString& Reason);
 
 	// ====================================================================
 	// 3. 渲染与动画数据获取 (Animation & Rendering Data)
@@ -75,17 +80,36 @@ public:
 	void BindTargetFaceMesh(USkeletalMeshComponent* InFaceMesh);
 
 private:
-	// ====================================================================
-	// 4. gRPC 通信与会话管理 (gRPC Session Management)
-	// ====================================================================
+    // ====================================================================
+    // 4. gRPC 通信与会话管理 (gRPC Session Management)
+    // ====================================================================
 
-	UPROPERTY()
-	UAvatarServiceClient* AvatarClient;
+    UPROPERTY()
+    UAvatarServiceClient* AvatarClient;
 
-	FGrpcContextHandle CurrentSessionHandle;
+    FGrpcContextHandle CurrentSessionHandle;
 
-	// 标记网络流是否结束
-	bool bIsNetworkStreamEnded = false;
+    // 标记网络流是否结束
+    bool bIsNetworkStreamEnded = false;
+
+    // ====================================================================
+    // 4.1 对话授权（信令面: GameServer 签发短期票据，数据面直连 VHServer）
+    // ====================================================================
+
+    // 目标 NPC 编号，绑定进对话票据
+    UPROPERTY(EditAnywhere, Category = "Avatar|Network")
+    int32 NpcId = 1;
+
+    // 缓存的对话票据与过期时刻 (epoch ms)，未过期时复用避免触发服务器频控
+    FString CachedDialogueToken;
+    int64 TokenExpiresAtMs = 0;
+
+    // 等待票据签发期间的待发送文本
+    FString PendingChatText;
+    bool bWaitingDialogueAuth = false;
+
+    bool HasValidDialogueToken() const;
+    void SendChatRequest(const FString& InText, const FString& AuthToken);
 
 	// ====================================================================
 	// 5. 客户端背压防护机制 (Backpressure & Circuit Breaker)
@@ -94,8 +118,12 @@ private:
 	// 维护缓冲队列的原子计数器，提供线程安全的积压量统计
 	FThreadSafeCounter QueuedChunkCounter;
 
-	// 客户端硬熔断水位线阈值（设定为 50，折合音频物理缓冲约 5-10 秒，超出则触发强制截断防 OOM）
-	int32 MaxQueueChunks = 50;
+	// 客户端硬熔断水位线阈值。
+    // 容量按最坏情况配置: max_generation_tokens=2048 的完整回复约 800~1000 块(0.4s/块),
+    // 峰值积压上限即回复总块数(约 16~20MB, UE 进程量级下无内存压力)。
+    // 600 低于该上限, 保留对"回复长度彻底失控"场景的最后防线;
+    // 正常剧情长回复(数百块)不会再被误杀, 每次新对话前 InterruptAndFlush 已清仓。
+    int32 MaxQueueChunks = 600;
 
 	// ====================================================================
 	// 6. 抗抖动无锁缓冲区 (Jitter Buffer)

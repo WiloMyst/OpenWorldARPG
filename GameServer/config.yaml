@@ -1,0 +1,47 @@
+server:
+  host: "0.0.0.0"
+  port: 50061
+  worker_threads: 4
+  max_queue_size: 1000
+
+session:
+  heartbeat_timeout_sec: 30      # 在线会话超过该时长无任何消息则踢出
+  login_timeout_sec: 15          # 连接建立后未完成登录的清理时长
+  check_interval_sec: 5          # 会话扫描间隔
+
+auth:
+  static_token: "dev-token-2026" # 后续替换为账号服务校验
+  # 对话票据签名密钥 (信令面): 须与 VHServer config.yaml 的 auth.dialogue_secret 完全一致
+  # 生产环境优先用环境变量 DIALOGUE_SECRET 注入并删除此行
+  dialogue_secret: "dev-dialogue-secret-2026"
+  dialogue_token_ttl_sec: 30     # 票据有效期 (秒), 过期后客户端须重新申请
+
+items:
+  config_path: "../items.yaml"   # 相对 build 目录运行
+
+mysql:
+  # WSL -> Docker Desktop MySQL (my-mysql): NAT 模式下需用 Windows 网关 IP (ip route show default)
+  # 直连本机 MySQL 时改回 127.0.0.1
+  host: "172.28.80.1"
+  port: 3306
+  user: "game"
+  # 密码优先读环境变量 GAME_DB_PASSWORD, 此处为开发环境兜底值
+  password: "game_pass_2026"
+  database: "game_server"
+  connect_timeout_ms: 3000
+
+redis:
+  # WSL -> Docker Desktop Redis (my-redis-stack): 宿主机 7000 -> 容器 6379
+  # 可选依赖: 连接失败自动降级 (无缓存/内存频控), 不阻断启动
+  host: "172.28.80.1"
+  port: 7000
+  # 密码优先读环境变量 REDIS_PASSWORD, 空串 = 无认证 (开发环境)
+  password: ""
+  connect_timeout_ms: 2000
+  player_cache_ttl_sec: 300   # 玩家数据 Cache-Aside 读缓存 TTL
+
+logging:
+  level: "info"
+  file_path: "logs/game_server.log"
+  max_file_size_mb: 10
+  max_files: 3
