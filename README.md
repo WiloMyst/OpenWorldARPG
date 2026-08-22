@@ -6,13 +6,15 @@
 
 基于 UE5.7 C++ 与蓝图混合开发的开放世界 ARPG 原型，参考当前热门游戏的多角色配队战斗与开放世界探索玩法。客户端以 GAS 为核心驱动框架，实现了自定义移动组件（攀爬/滑翔/墙角过渡）、多角色零延迟切换、数据驱动的背包装备系统等功能模块。
 
-项目同时包含 **VHServer**——一个基于 C++17 gRPC 异步流式的 AI 虚拟人云端服务后端，构建了"云端 LLM 流式生成 → TTS 合成 → Audio2Face 面部动画"的三级推理流水线，所有重推理在云端完成后通过网络下发音频 PCM 与表情帧序列，UE5 端侧只负责渲染与播放。（已去除第三方资源）
+项目同时包含 **GameServer**——独立权威游戏服务器（C++17 / gRPC 异步双向流 + MySQL + Redis），持有会话、玩家数据与背包的权威状态，并承担对话授权信令面：为通过资格校验的在线玩家签发 HMAC-SHA256 短期票据，虚拟人推理流凭票直连 VHServer。
 
-以及 **GameServer**——独立权威游戏服务器（C++17 / gRPC 异步双向流 + MySQL），持有会话、玩家数据与背包的权威状态，并承担对话授权信令面：为通过资格校验的在线玩家签发 HMAC-SHA256 短期票据，虚拟人推理流凭票直连 VHServer。详见 `GameServer/README.md`。
+以及 **VHServer**——一个基于 C++17 gRPC 异步流式的 AI 虚拟人云端服务后端，构建了"云端 LLM 流式生成 → TTS 合成 → Audio2Face 面部动画"的三级推理流水线，所有重推理在云端完成后通过网络下发音频 PCM 与表情帧序列，UE5 端侧只负责渲染与播放。
+
+（已去除第三方资源）
 
 ## 项目架构
 
-### 整体架构（云端推理 - 端侧渲染）
+### 整体架构（三端：客户端 / 游戏服 / 虚拟人服）
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -36,11 +38,48 @@
 │  ┌──────────────────────────────────────────────────────────────────┐   │
 │  │  GA (GameplayAbility)  ←→  GE (GameplayEffect)  ←→  Tag         │   │
 │  └──────────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────┬───────────────────────────────────────┘
-                                  │
-                                  │ gRPC 双向流式 RPC
-                                  │ (AvatarService.ChatWithAvatar)
-                                  ▼
+└──────────────────────────────────┬──────────────────────────────┬─────┘
+                                  │                                │
+                                  │ 信令面: GameChannel (50061)      │
+                                  │ 登录 / 心跳 / 背包 / 对话授权       │
+                                  │                                  │数据面: AvatarStream (50051)
+                                  │                                   │持票直连 (音频/表情)
+                                  │                                   │
+                                  ▼                                   │
+┌─────────────────────────────────────────────────────────────────┐   │
+│                    GameServer 后端 (C++17 / Linux)               │   │
+│                                                                 │   │
+│  ┌───────────────────────────────────────────────────────┐      │   │
+│  │              gRPC 异步服务端 (端口 50061)              │      │   │
+│  │      ServerCompletionQueue + PlayerSession 状态机      │      │   │
+│  │      (CONNECT → READ → WRITE → FINISH)                 │      │   │
+│  │      (ACCEPTING → WAIT_LOGIN → ONLINE)                 │      │   │
+│  └───────────────────────────┬───────────────────────────┘      │   │
+│                              │                                  │   │
+│                              ▼                                  │   │
+│  ┌───────────────────────────────────────────────────────┐      │   │
+│  │      Worker 线程池 (有界队列, 满则拒绝 503 背压)        │      │   │
+│  │    GameLogic 消息分发                                    │      │   │
+│  │    Login / Heartbeat / InventoryOp / DialogueAuth       │      │   │
+│  │      └─ 权威背包 InventoryManager (items.yaml)          │      │   │
+│  └───────────────────────────┬───────────────────────────┘      │   │
+│                              │                                  │   │
+│               ┌──────────────┴────────────────┐                 │   │
+│               ▼                               ▼                 │   │
+│  ┌──────────────────────────┐  ┌────────────────────────────┐  │   │
+│  │ RedisStore (失败降级)    │  │ MysqlStore (预处理+事务)   │  │   │
+│  │ player:{account} 读缓存  │  │ players: 代理主键          │  │   │
+│  │ dlg:rate:{account} 频控  │  │ inventory_items uk_guid    │  │   │
+│  │ session/online TTL 在线  │  │ (account,acquired_time)    │  │   │
+│  └──────────────────────────┘  └────────────────────────────┘  │   │
+│                                                                 │   │
+│  ┌───────────────────────────────────────────────────────┐      │   │
+│  │ SessionManager (后台扫描): 账号→会话绑定, 重复登录踢旧;    │      │   │
+│  │ 心跳/登录超时踢出 (锁外执行, KickNotify 主动通知)          │      │   │
+│  └───────────────────────────────────────────────────────┘      │   │
+└─────────────────────────────────────────────────────────────────┘   │
+                                                                      │
+                                                                      ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                    VHServer 后端 (C++17 / Linux)                        │
 │                                                                         │
@@ -88,7 +127,7 @@
 ```
                  信令面 (gRPC GameChannel, 50061)
 UE5 客户端 ───────────────────────────────► GameServer
-    │  ① 登录 / 心跳 / 背包操作              会话权威 + 背包权威 + MySQL
+    │  ① 登录 / 心跳 / 背包操作              会话权威 + 背包权威 + MySQL/Redis
     │  ② DialogueAuthRequest(npc_id)
     │         ◄── DialogueAuthResult ◄── 校验在线状态 + 每账号频控,
     │             account.npc_id.expires_at.hmac  HMAC-SHA256 签发, 默认 30s 有效
@@ -100,69 +139,6 @@ UE5 客户端 ──────────────────────
 ```
 
 票据缓存至过期前 2 秒复用；密钥 `dialogue_secret` 双端共享、环境变量 `DIALOGUE_SECRET` 优先。跨服闭环由 `GameServer/tests/token_probe.cpp`（取票）+ `VHServer/tests/test_cross_server.py`（验票）覆盖。
-
-### AI 虚拟人 NPC 数据流
-
-```
-UE5 客户端                        VHServer 后端
-─────────────                    ──────────────
-
-[玩家输入文本]
-     │
-     ▼
-AvatarStreaming
-Component
-.SendChatText()
-     │
-     │ AvatarStreamRequest
-     │ (gRPC 双向流)
-     ▼
-                                 [gRPC Server]
-                                 AvatarSession
-                                      │
-                                      ▼
-                                 [AIBrain.InferStream]
-                                      │
-                    ┌─────────────────┼─────────────────┐
-                    │                 │                 │
-                    ▼                 ▼                 ▼
-              [Stage 1: LLM]    [Stage 2: TTS]    [Stage 3: V2F]
-              Deepseek API      Piper TTS          NVIDIA Audio2Face
-              (SSE 流式)         (CPU ONNX)         (CUDA ONNX)
-                    │                 │                 │
-                    │ token           │ sentence        │ PCM 切片
-                    ▼                 ▼                 ▼
-              [标点断句]         [PCM 22050Hz]    [LinearResampler]
-                                      │       (默认透传; 切 NVIDIA A2F 时 22050→16k)
-                                      │                 │
-                                      │                 ▼
-                                      │            [BlendShape 52D]
-                                      │                 │
-                                      └────────┬────────┘
-                                               │
-                                      [ChunkResult]
-                                      {audio_pcm (22050Hz),
-                                       frames (52D)}
-                                               │
-                                               │ AvatarStreamResponse
-                                               │ (gRPC 双向流)
-                                               ▼
-AvatarStreaming
-Component
-.OnChatResponseReceived()
-     │
-     ├─► AvatarSynthComponent     ├─► TickComponent
-     │   .QueueAudio()            │   消费 BlendShapeQueue
-     │   (无锁 PCMQueue)          │   帧间线性插值
-     │                            │   30FPS → 高帧率
-     ▼                            ▼
-[Audio Render Thread]         [Skeletal Mesh]
-OnGenerateAudio()             BlendShape 应用
-int16 → float
-22050Hz 单声道
-
-[最终效果: AI NPC 实时说话 + 面部表情同步驱动]
-```
 
 ## 主要实现
 
@@ -191,13 +167,34 @@ int16 → float
 
 `ANpcCharacter` 挂载 `UAvatarStreamingComponent`（gRPC 流式通道）并实现 `IInteractableInterface`，玩家输入文本交互时由 AvatarStreamingComponent 接管，触发 VHServer 后端推理流水线。
 
-### 二、3C 与战斗（游戏客户端基础功能）
+### 二、权威游戏服务器（GameServer 后端）
+
+#### 1. 会话与消息通道
+
+- **gRPC 异步服务端**：单一双向流 `GameChannel` 承载全部消息，按 oneof 类型路由，sequence/ack 关联请求与响应；`ServerCompletionQueue` 事件循环驱动 `PlayerSession` 状态机（CONNECT→READ/WRITE→FINISH，ACCEPTING→WAIT_LOGIN→ONLINE）。
+- **会话管理**：登录鉴权（静态令牌）、心跳超时踢出、登录超时清理、同账号重复登录踢旧连接，踢出经 `KickNotify` 主动通知客户端；`SessionManager` 后台扫描线程在锁外执行踢出。
+- **线程模型**：CQ 事件循环（单线程，只驱动状态机不做业务）+ Worker 线程池（消息处理与存储 IO，有界队列满时拒绝并回 503）+ 会话扫描线程，三层职责分离。
+
+#### 2. 权威背包与 MySQL 持久化
+
+- **服务器权威**：背包五类操作 Add / Remove / Equip / Unequip / Use 全部经服务器校验后执行（堆叠合并、分类容量、装备互斥、使用目标校验），客户端仅接收操作后的完整快照，无法伪造数据；`items.yaml` 物品静态配置为客户端 DT_ItemDatabase 的服务器侧镜像。
+- **表设计**：`players` 采用自增代理主键（避免字符串主键的二级索引膨胀与随机插入页分裂）+ `uk_account` 业务唯一键 + `created_at` / `last_login_at` 运营字段；`inventory_items` 以 `uk_guid` 保证物品实例唯一，`(account, acquired_time)` 复合索引覆盖"按账号加载背包"主查询路径，`ext_json` 存武器成长数据与圣遗物词条。上线时完成 V1（字符串主键）到 V2 的在线迁移：影子表建好后搬移数据，`RENAME TABLE` 原子切换。
+- **持久化策略**：所有带参数 SQL 走预处理语句，背包操作在事务内落库；落库失败时从 DB 重载内存数据回滚本次操作，保证内存与磁盘一致。
+
+#### 3. Redis 热点层与高可用降级
+
+- **玩家数据 Cache-Aside**：`player:{account}` 读缓存（TTL 300s），未命中回源 MySQL 并回填，写库成功后删除缓存，登录路径避免重复查库。
+- **分布式频控**：对话票据签发使用 `dlg:rate:{account}` 固定窗口频控（`SET NX EX` + `INCR`），多实例部署下频控口径一致；`session:*` / `online:*` 以 TTL 管理会话与在线状态，心跳续期、超时自动过期。
+- **可选依赖降级**：Redis 为可选依赖，连接失败自动降级——频控回退进程内存实现、玩家数据直连 MySQL，不阻断启动；命令失败标记不可用，恢复后懒重连自动回切。
+- **对话授权信令面**：为通过资格校验（在线状态 + 频控）的玩家签发 HMAC-SHA256 短期票据，VHServer 本地验签、数据面直连零额外往返（见"三端拓扑与对话授权"）。
+
+### 三、3C 与战斗（游戏客户端基础功能）
 
 - **GAS 能力驱动**：跳跃/冲刺/慢走/攀爬/滑翔/钩索/瞄准等探索行为、近战连招/射击/下落攻击等战斗技能、角色切换均封装为独立 GA（`GA_*Base` 系列），通过 GameplayTag 管理状态互斥与事件流转；近战连招通过 `AnimNotify_SendGameplayEvent` 在动画关键帧触发 GameplayEvent Tag（伤害判定窗口、连招窗口开闭），动画时序与逻辑判定解耦。
 - **自定义移动组件**：两层继承结构（`UBaseCharacterMovementComponent` 通用物理 + `UPlayerCharacterMovementComponent` 玩家专属），均派生自 `UCharacterMovementComponent`，通过 `PhysCustom` 实现攀爬、墙角过渡（阳角二次贝塞尔/阴角 Slerp）、翻越、滑翔、游泳等移动模式；CMC 同时负责物理模拟与射线检测，GAS 通过 GA 掌控状态与生命周期。
 - **分层动画架构**：AnimGraph 分层设计；`NativeUpdateAnimation` 主线程快照速度/位置/ASC Tags 等 UObject 数据，`NativeThreadSafeUpdateAnimation` Worker Thread 只读消费快照做纯数学运算，避免工作线程访问 UObject 的线程安全问题。
 
-### 三、游戏系统模块（游戏客户端基础功能）
+### 四、游戏系统模块（游戏客户端基础功能）
 
 - **多角色数据管理与角色切换**：基于 `UCharacterVisualDataAsset` / `UCharacterCombatDataAsset` 等 PrimaryDataAsset 配置角色静态数据，`FCharacterSaveData` 存储运行时动态数据；`GA_SwapOutBase`/`GA_SwapInBase` 驱动退场→出场流水线，StandbyMode 通过 `NetMulticast` 同步。
 - **背包与装备系统**：采用 MVVM 架构——`UInventoryManagerSubsystem`（`ULocalPlayerSubsystem`）作为 Model 层数据源，`UInventoryViewModel` 作为中介层处理排序/筛选并通过委托广播驱动 View 更新，`UItemObject` 包装 `FItemInstance` + 静态数据指针作为 View 层数据载体；ViewModel 内置 `UItemObject` 对象池避免频繁 `NewObject` 造成的 GC 压力。
@@ -222,6 +219,14 @@ int16 → float
 - libcurl（LLM API SSE 流式调用）
 - nlohmann_json / yaml-cpp / spdlog
 - Python（piper_phonemize NLP 微服务）
+
+**GameServer 后端**：
+
+- C++17 / Linux
+- gRPC + Protobuf（异步双向流式 RPC）
+- MySQL（libmysqlclient，预处理语句 + 事务）
+- Redis（hiredis，读缓存 / 分布式频控 / 在线状态）
+- nlohmann_json / yaml-cpp / spdlog
 
 ## 版本
 
@@ -274,14 +279,14 @@ OpenWorldARPG/
 │   ├── config.yaml            # 配置 (Deepseek API/ONNX/流式参数)
 │   ├── nlp_server.py           # NLP 音素微服务
 │   └── start_server.sh         # 启动脚本
-├── GameServer/                 # 权威游戏服务器 (C++17 gRPC + MySQL)
-│   ├── src/                    # 源码 (grpc_server/session/logic/storage)
+├── GameServer/                 # 权威游戏服务器 (C++17 gRPC + MySQL + Redis)
+│   ├── src/                    # 源码 (core/logic/session/storage)
 │   ├── include/                # 头文件
 │   ├── protos/                 # protobuf 定义 (game.proto)
 │   ├── items.yaml              # 物品静态配置 (客户端 DT_ItemDatabase 镜像)
-│   ├── config.yaml            # 配置 (鉴权/频控/MySQL)
+│   ├── config.yaml            # 配置 (鉴权/频控/MySQL/Redis)
 │   ├── tests/                  # 集成测试 + 跨服票据探针
-│   └── scripts/                # 重启辅助脚本
+│   └── scripts/                # 构建/验证/建表脚本
 ├── Content/                   # UE5 资源 (仅目录结构)
 └── Protos/                    # protobuf 定义 (UE5 客户端侧)
 ```
