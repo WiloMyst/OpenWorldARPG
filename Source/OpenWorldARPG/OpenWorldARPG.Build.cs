@@ -30,6 +30,8 @@ public class OpenWorldARPG : ModuleRules
 			"AudioMixer",
 			"Json",
 			"JsonUtilities",
+			"Sockets",
+			"Networking",
 			"TurboLinkGrpc"
         });
 	}

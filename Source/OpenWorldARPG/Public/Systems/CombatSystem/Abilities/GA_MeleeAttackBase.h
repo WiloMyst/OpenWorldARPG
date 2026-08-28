@@ -39,7 +39,7 @@ protected:
      */
     void AttackOrientation(float MaxWarpDistance);
 
-    /** 对检测范围内的敌人施加伤害（使用当前节点的 DamageEffect） */
+    /** 对检测范围内的敌人上报攻击命中（Phase 3: 服务器权威伤害） */
     void ApplyDamageToTargets();
 
     /** 清理所有 Ability Task */
@@ -90,6 +90,13 @@ protected:
      */
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
     FGameplayTag TalentTag;
+
+    /**
+     * 服务器技能 ID（对齐 GameServer skills.yaml 的 skill_id）。
+     * 攻击命中敌人时上报 DamageIntent，伤害由服务器裁决并以 DamageDeal 广播。
+     */
+    UPROPERTY(EditDefaultsOnly, Category = "Config|Server")
+    int32 ServerSkillId = 1;
 
     /**
      * 默认伤害 GameplayEffect。

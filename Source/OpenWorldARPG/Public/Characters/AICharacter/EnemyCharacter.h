@@ -14,7 +14,8 @@ class UAbilitySystemComponent;
 class UAS_Enemy;
 class UWidgetComponent;
 class UAnimMontage;
-class UGameplayEffect;
+
+struct FGrpcGameDamageDeal;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnEnemyAttackFinished);
 
@@ -50,6 +51,17 @@ public:
     void MeleeAttack();
     void CancelMeleeAttack();
     void ApplyDamage();
+
+    // --- 服务器权威战斗 (Phase 3) ---
+
+    // 服务器分配的敌人 ID (DamageIntent/ DamageDeal 按此定位), 未由服务器刷怪时为 0
+    uint64 GetServerEnemyId() const { return ServerEnemyId; }
+
+    // 服务器刷怪回调: 写入服务器 enemy_id, 绑定巡逻区, 按服务器权威 HP 初始化血条
+    void ConfigureFromServer(uint64 EnemyId, int32 MaxHp, AAIPatrolAreaBase* Area);
+
+    // 服务器权威伤害结算表现 (DamageDeal 经 World 流下发): 客户端只据此设置 HP, 不参与任何本地扣血计算
+    void ApplyServerDamage(const FGrpcGameDamageDeal& Deal);
 
     // --- 死亡 ---
 
@@ -114,9 +126,6 @@ protected:
     TObjectPtr<UAnimMontage> ComboAttackMontage;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Config|Combat")
-    TSubclassOf<UGameplayEffect> DamageEffectClass;
-
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Config|Combat")
     float DamageTraceRadius = 120.0f;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Enemy|Config|Combat")
@@ -141,6 +150,9 @@ protected:
 
 private:
     // --- 运行时状态 ---
+
+    // 服务器分配的敌人 ID (0 = 非服务器刷怪), DamageIntent/DamageDeal 均按此定位
+    uint64 ServerEnemyId = 0;
 
     UPROPERTY(ReplicatedUsing = OnRep_EnemyWeapon)
     TObjectPtr<AActor> EnemyWeapon;

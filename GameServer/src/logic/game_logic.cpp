@@ -1,10 +1,12 @@
-#include "game/logic/game_logic.h"
-#include "game/infra/config_manager.hpp"
-#include "game/infra/hmac.hpp"
+﻿#include "game/logic/game_logic.h"
+#include "game/infra/config_manager.h"
+#include "game/infra/hmac.h"
+#include "game/infra/sha256.h"
 #include "game/infra/time_utils.h"
 #include "game/storage/mysql_store.h"
 #include "game/storage/redis_store.h"
 #include "game/logic/item_database.h"
+#include "game/logic/initial_archive_loader.h"
 
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
@@ -26,31 +28,10 @@ game::ItemInstance ToProto(const data::InvItem& item, const ItemDatabase* db) {
     out.set_item_guid(item.guid);
     out.set_item_id(item.item_id);
     out.set_count(item.count);
-    out.set_equipped_character_id(item.equipped_character_id);
     out.set_acquired_time(item.acquired_time);
 
     if (const ItemConfig* cfg = db->Find(item.item_id)) {
         out.set_category(cfg->category);
-    }
-
-    if (item.has_weapon) {
-        game::WeaponInstanceData* w = out.mutable_weapon_data();
-        w->set_level(item.weapon_level);
-        w->set_ascension_level(item.weapon_ascension);
-        w->set_refinement_level(item.weapon_refinement);
-    }
-    if (item.has_artifact) {
-        game::ArtifactInstanceData* a = out.mutable_artifact_data();
-        a->set_set_id(item.artifact_set_id);
-        a->set_slot(item.artifact_slot);
-        a->set_main_stat(item.artifact_main_stat);
-        a->set_main_stat_value(item.artifact_main_stat_value);
-        for (const auto& sub : item.artifact_sub_stats) {
-            game::ArtifactSubStat* s = a->add_sub_stats();
-            s->set_stat_type(sub.stat_type);
-            s->set_stat_value(sub.stat_value);
-            s->set_upgrade_count(sub.upgrade_count);
-        }
     }
     return out;
 }
@@ -75,12 +56,12 @@ std::string MakeSessionToken() {
 } // namespace
 
 GameLogic::GameLogic(const infra::AppConfig& config)
-    : static_token_(config.static_token),
-      dialogue_secret_(config.dialogue_secret),
+    : dialogue_secret_(config.dialogue_secret),
       dialogue_token_ttl_sec_(config.dialogue_token_ttl_sec),
       session_ttl_sec_(std::max(60, config.heartbeat_timeout_sec * 2)),
       player_cache_ttl_sec_(config.redis.player_cache_ttl_sec),
-      item_db_(ItemDatabase::LoadFromYaml(config.items_config_path)) {
+      item_db_(ItemDatabase::LoadFromYaml(config.items_config_path)),
+      initial_archive_(LoadInitialArchive(config.initial_archive_config_path)) {
     // MySQL 是存档核心依赖, 连接失败直接抛出 -> 服务器拒绝启动
     store_ = std::make_unique<storage::MysqlStore>(config.mysql);
     store_->Connect();
@@ -117,50 +98,51 @@ game::LoginResponse GameLogic::HandleLogin(const game::LoginRequest& req,
         resp.set_error_msg("Invalid account: 3-32 chars, [A-Za-z0-9_] only");
         return resp;
     }
-    if (!static_token_.empty() && req.token() != static_token_) {
+    if (req.password().empty()) {
         resp.set_success(false);
-        resp.set_error_msg("Auth failed: invalid token");
-        spdlog::warn("[GameLogic] Login rejected [account={}, reason=bad_token]", req.account());
+        resp.set_error_msg("Password required");
         return resp;
     }
 
     try {
-        // Cache-Aside 读路径: Redis 命中免 MySQL 读; 脏缓存解析失败自动回源
-        storage::PlayerRecord rec;
-        const std::string cache_key = "player:" + req.account();
-        bool cache_hit = false;
-        if (redis_ && redis_->Available()) {
-            std::string cached;
-            if (redis_->Get(cache_key, &cached)) {
-                try {
-                    const json j = json::parse(cached);
-                    rec.exists = true;
-                    rec.player_id = j.value("player_id", 0ULL);
-                    rec.level = j.value("level", 1);
-                    rec.exp = j.value("exp", 0LL);
-                    cache_hit = true;
-                } catch (const json::exception&) {
-                    spdlog::warn("[GameLogic] 玩家缓存损坏, 回源 MySQL [account={}]", req.account());
-                }
-            }
-        }
-        if (!cache_hit) {
-            rec = store_->LoadPlayer(req.account());
-            if (rec.exists) WritePlayerCache(req.account(), rec);
-        }
+        // 玩家记录 (含密码盐/哈希) 从 MySQL 读, 不缓存到 Redis:
+        // 密码是登录凭据, 只信任唯一事实源, 不置于热数据层
+        storage::PlayerRecord rec = store_->LoadPlayer(req.account());
 
-        uint64_t player_id = 0;
-        if (rec.exists) {
-            player_id = rec.player_id;
-            store_->TouchLastLogin(req.account());
-        } else {
-            // 新玩家: 注册建档 (自增代理主键), 写入缓存
-            player_id = store_->CreatePlayer(req.account());
+        std::string salt = rec.password_salt;
+        std::string password_hash = rec.password_hash;
+        if (rec.exists && password_hash.empty()) {
+            // 理论不可达 (迁移时已清空无密码存量账号), 防御拒登
+            resp.set_success(false);
+            resp.set_error_msg("Account has no password, login refused");
+            spdlog::warn("[GameLogic] login refused: account has empty password_hash [account={}]",
+                         req.account());
+            return resp;
+        }
+        if (!rec.exists) {
+            // 首次登录即注册: 生成独立盐 -> 哈希 -> 落库建档
+            // 盐以 hex 编码存储 (仅 ASCII, 兼容 utf8mb4 VARCHAR; 反查表由随机盐消解)
+            salt = infra::HexEncode(infra::RandomSalt());
+            password_hash = infra::HashPassword(salt, req.password());
+            rec.player_id = store_->CreatePlayer(req.account(), salt, password_hash);
             rec.level = 1;
             rec.exp = 0;
-            WritePlayerCache(req.account(), storage::PlayerRecord{player_id, 1, 0, true});
+            rec.password_salt = salt;
+            rec.password_hash = password_hash;
+        } else {
+            // 已建档: 常数时间比对凭据, 拒绝暴露"账号存在/密码错"差异
+            const std::string calc = infra::HashPassword(salt, req.password());
+            if (!infra::ConstantTimeEquals(calc, password_hash)) {
+                resp.set_success(false);
+                resp.set_error_msg("Auth failed: invalid password");
+                spdlog::warn("[GameLogic] Login rejected [account={}, reason=bad_password]", req.account());
+                return resp;
+            }
         }
+        WritePlayerCache(req.account(), rec);
+        store_->TouchLastLogin(req.account());
 
+        uint64_t player_id = rec.player_id;
         resp.set_success(true);
         resp.set_player_id(player_id);
         resp.set_session_token(MakeSessionToken());
@@ -188,9 +170,8 @@ game::LoginResponse GameLogic::HandleLogin(const game::LoginRequest& req,
         }
 
         *bound_account = req.account();
-        spdlog::info("[GameLogic] Login ok [account={}, level={}, items={}, cache={}]",
-                     req.account(), data->level(), resp.inventory_size(),
-                     cache_hit ? "hit" : "miss");
+        spdlog::info("[GameLogic] Login ok [account={}, level={}, items={}]",
+                     req.account(), data->level(), resp.inventory_size());
     } catch (const std::exception& e) {
         resp.set_success(false);
         resp.set_error_msg("Load player data failed, please retry");
@@ -209,39 +190,6 @@ game::HeartbeatAck GameLogic::HandleHeartbeat(const std::string& account,
     game::HeartbeatAck ack;
     ack.set_server_timestamp(infra::NowMs());
     return ack;
-}
-
-game::SaveDataResponse GameLogic::HandleSaveData(const std::string& account,
-                                                 const game::SaveDataRequest& req) {
-    game::SaveDataResponse resp;
-    const game::PlayerData& data = req.player_data();
-
-    if (data.account() != account) {
-        resp.set_success(false);
-        resp.set_error_msg("Account mismatch: save data belongs to another player");
-        return resp;
-    }
-    if (data.level() < 1 || data.level() > 90) {
-        resp.set_success(false);
-        resp.set_error_msg("Invalid level range");
-        return resp;
-    }
-
-    try {
-        // Cache-Aside 写路径: 先更新 MySQL (事实源), 成功后失效缓存, 下次登录回源重建
-        store_->UpdatePlayerProgress(account, data.level(), data.exp());
-        if (redis_ && redis_->Available()) {
-            redis_->Del("player:" + account);
-        }
-        resp.set_success(true);
-        spdlog::info("[GameLogic] Save ok [account={}, level={}, exp={}]",
-                     account, data.level(), data.exp());
-    } catch (const std::exception& e) {
-        resp.set_success(false);
-        resp.set_error_msg("Persist failed, see server log");
-        spdlog::error("[GameLogic] Save DB error [account={}, err={}]", account, e.what());
-    }
-    return resp;
 }
 
 game::InventoryOpResponse GameLogic::HandleInventoryOp(const std::string& account,
@@ -263,16 +211,6 @@ game::InventoryOpResponse GameLogic::HandleInventoryOp(const std::string& accoun
             break;
         case game::InventoryOpRequest::kRemove:
             result = inv->Remove(req.remove().item_guid(), req.remove().amount());
-            break;
-        case game::InventoryOpRequest::kEquip:
-            result = inv->Equip(req.equip().item_guid(), req.equip().character_id());
-            break;
-        case game::InventoryOpRequest::kUnequip:
-            result = inv->Unequip(req.unequip().item_guid());
-            break;
-        case game::InventoryOpRequest::kUse:
-            result = inv->Use(req.use().item_guid(), req.use().target_character_id(),
-                              req.use().amount());
             break;
         default:
             break;
@@ -379,6 +317,64 @@ game::DialogueAuthResult GameLogic::HandleDialogueAuth(const std::string& accoun
                  account, req.npc_id(), dialogue_token_ttl_sec_,
                  (redis_ && redis_->Available()) ? "redis" : "memory");
     return resp;
+}
+
+std::vector<data::OwnedCharacter> GameLogic::LoadOwnedCharacters(const std::string& account) {
+    return store_->LoadOwnedCharacters(account);
+}
+
+void GameLogic::RewriteOwnedCharacters(const std::string& account,
+                                       const std::vector<data::OwnedCharacter>& chars) {
+    store_->RewriteOwnedCharacters(account, chars);
+}
+
+void GameLogic::UpsertOwnedCharacter(const std::string& account,
+                                     const data::OwnedCharacter& c) {
+    store_->UpsertOwnedCharacter(account, c);
+}
+
+void GameLogic::SetOwnedCharacterActive(const std::string& account,
+                                        const std::string& character_tag) {
+    store_->SetOwnedCharacterActive(account, character_tag);
+}
+
+std::vector<data::TeamSlot> GameLogic::LoadTeamSlots(const std::string& account) {
+    return store_->LoadTeamSlots(account);
+}
+
+void GameLogic::RewriteTeamSlots(const std::string& account,
+                                 const std::vector<data::TeamSlot>& slots) {
+    store_->RewriteTeamSlots(account, slots);
+}
+
+void GameLogic::SetTeamSlotActive(const std::string& account,
+                                  const std::string& character_tag) {
+    store_->SetTeamSlotActive(account, character_tag);
+}
+
+void GameLogic::SavePlayerPosition(const std::string& account,
+                                   const storage::PlayerPosition& p) {
+    storage::PlayerPosition copy = p;
+    copy.updated_at = infra::NowMs();
+    store_->SavePlayerPosition(account, copy);
+}
+
+void GameLogic::LoadPlayerPosition(const std::string& account, storage::PlayerPosition* out) {
+    store_->LoadPlayerPosition(account, out);
+}
+
+void GameLogic::SaveCharacterHp(const std::string& account, const std::string& character_tag,
+                                float max_hp, float current_hp) {
+    store_->SaveCharacterHp(account, character_tag, max_hp, current_hp);
+}
+
+void GameLogic::LoadCharacterHp(const std::string& account,
+                                std::vector<storage::CharacterHpRow>& out) {
+    store_->LoadCharacterHp(account, out);
+}
+
+void GameLogic::FlushPersistence() {
+    store_->FlushAsyncWrites();
 }
 
 } // namespace logic

@@ -1,0 +1,14 @@
+Begin Object Class=/Script/OpenWorldARPG.InitialArchiveData Name="DA_InitialArchiveData" ExportPath="/Script/OpenWorldARPG.InitialArchiveData'/Game/_Core/Data/DA_InitialArchiveData.DA_InitialArchiveData'"
+   InitialOwnedCharacters(0)=(CharacterTag=(TagName="Character.Playable.Stelle"),CharacterLevel=20,Experience=20)
+   InitialOwnedCharacters(1)=(CharacterTag=(TagName="Character.Playable.Lumine"),CharacterLevel=10,Experience=10)
+   InitialOwnedCharacters(2)=(CharacterTag=(TagName="Character.Playable.YiXuan"),CharacterLevel=40,Experience=40)
+   InitialOwnedCharacters(3)=(CharacterTag=(TagName="Character.Playable.Saber"),CharacterLevel=30,Experience=30,MaxHealth=800.000000,Attack=120.000000)
+   InitialOwnedCharacters(4)=(CharacterTag=(TagName="Character.Playable.Carlotta"),CharacterLevel=25,Experience=25,MaxHealth=600.000000,Attack=150.000000,Defense=40.000000)
+   InitialOwnedCharacters(5)=(CharacterTag=(TagName="Character.Playable.GongSunLi"),CharacterLevel=35,Experience=35,MaxHealth=900.000000,Defense=55.000000)
+   InitialOwnedCharacters(6)=(CharacterTag=(TagName="Character.Playable.Manageress"),CharacterLevel=15,Experience=15)
+   InitialOwnedCharacters(7)=(CharacterTag=(TagName="Character.Playable.Mita"),CharacterLevel=5,Experience=5)
+   InitialTeamTags(0)=(TagName="Character.Playable.Saber")
+   InitialTeamTags(1)=(TagName="Character.Playable.Carlotta")
+   InitialTeamTags(2)=(TagName="Character.Playable.GongSunLi")
+   InitialTeamTags(3)=(TagName="Character.Playable.YiXuan")
+End Object

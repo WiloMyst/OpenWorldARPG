@@ -34,7 +34,7 @@ protected:
     /** 执行单次射击逻辑 (动画、特效、伤害结算) */
     void PerformSingleShot();
     
-    /** 结算射线伤害 */
+    /** 结算射线伤害（Phase 3: 命中敌人时上报 DamageIntent, 伤害由服务器裁决） */
     void ApplyDamage();
 
     // --- 回调 ---
@@ -63,6 +63,9 @@ protected:
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Weapon")
     TEnumAsByte<ECollisionChannel> TraceChannel = ECC_Visibility;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Config|Server")
+    int32 ServerSkillId = 1;
 
     UPROPERTY(EditDefaultsOnly, Category = "Config|Effects")
     TSubclassOf<UGameplayEffect> DamageEffectClass;

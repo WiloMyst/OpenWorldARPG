@@ -58,6 +58,9 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Config|Tags")
     FGameplayTag TalentTag;
 
+    UPROPERTY(EditDefaultsOnly, Category = "Config|Server")
+    int32 ServerSkillId = 1;
+
     UPROPERTY(EditDefaultsOnly, Category = "Config|Effects")
     TSubclassOf<UGameplayEffect> DamageEffectClass;
 

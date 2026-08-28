@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package vhadmin;
+
+// 控制面 (GameServer -> VHServer 服务间 RPC):
+// 数据面对话票据仅在流建立/首个请求时校验, 已建立的流无法凭票据终止;
+// GameServer 侧玩家会话终结 (登出/踢出/断线/心跳超时) 时, 经此通知 VHServer
+// 主动吊销该账号的全部对话流, 封堵"被踢玩家凭未过期票据继续推理"的残留窗口.
+service AdminService {
+    // 吊销指定账号的全部对话流 (TryCancel), 返回实际终止数
+    rpc RevokeDialogue(RevokeDialogueRequest) returns (RevokeDialogueResponse);
+}
+
+message RevokeDialogueRequest {
+    string account = 1;
+}
+
+message RevokeDialogueResponse {
+    int32 revoked = 1;
+}

@@ -5,8 +5,6 @@
 #include "Systems/GameServer/GameServerSubsystem.h"
 #include "Engine/DataTable.h"
 #include "Engine/Engine.h"
-#include "AbilitySystemComponent.h"
-#include "AbilitySystemInterface.h"
 
 void UInventoryManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -47,9 +45,7 @@ UGameServerSubsystem* UInventoryManagerSubsystem::GetGameServer() const
 
 // --- 服务器权威 ---
 
-void UInventoryManagerSubsystem::ApplyServerSnapshot(const TArray<FItemInstance>& Items,
-                                                     const TMap<FGuid, FWeaponInstanceData>& WeaponMap,
-                                                     const TMap<FGuid, FArtifactInstanceData>& ArtifactMap)
+void UInventoryManagerSubsystem::ApplyServerSnapshot(const TArray<FItemInstance>& Items)
 {
     // 索引旧状态用于差分事件
     TMap<FGuid, FItemInstance> OldItems;
@@ -59,8 +55,6 @@ void UInventoryManagerSubsystem::ApplyServerSnapshot(const TArray<FItemInstance>
     }
 
     InventoryItems = Items;
-    WeaponInstanceMap = WeaponMap;
-    ArtifactInstanceMap = ArtifactMap;
 
     TSet<FGuid> NewGuids;
     NewGuids.Reserve(InventoryItems.Num());
@@ -72,14 +66,6 @@ void UInventoryManagerSubsystem::ApplyServerSnapshot(const TArray<FItemInstance>
         if (!Old)
         {
             OnItemAdded.Broadcast(NewItem.ItemID, NewItem.Count);
-        }
-        else if (Old->EquippedCharacterID < 0 && NewItem.EquippedCharacterID >= 0)
-        {
-            OnItemEquipped.Broadcast(NewItem.ItemGUID, NewItem.ItemID, NewItem.EquippedCharacterID);
-        }
-        else if (Old->EquippedCharacterID >= 0 && NewItem.EquippedCharacterID < 0)
-        {
-            OnItemUnequipped.Broadcast(NewItem.ItemGUID, NewItem.ItemID, Old->EquippedCharacterID);
         }
     }
 
@@ -151,7 +137,7 @@ void UInventoryManagerSubsystem::AddStackableItem(int32 ItemID, int32 Amount)
 
     if (!ItemConfig->bIsStackable)
     {
-        UE_LOG(LogTemp, Warning, TEXT("AddStackableItem: 物品ID %d 不是可堆叠物品，请使用 AddUniqueItem。"), ItemID);
+        UE_LOG(LogTemp, Warning, TEXT("AddStackableItem: 物品ID %d 不是可堆叠物品。"), ItemID);
         return;
     }
 
@@ -208,88 +194,6 @@ void UInventoryManagerSubsystem::AddStackableItem(int32 ItemID, int32 Amount)
     }
 }
 
-void UInventoryManagerSubsystem::AddUniqueItem(int32 ItemID, const FWeaponInstanceData& WeaponData)
-{
-    // 在线时实例数据由服务器生成，本地入参仅离线模式生效
-    if (UGameServerSubsystem* Server = GetGameServer())
-    {
-        if (Server->IsLoggedIn())
-        {
-            Server->ServerAddItem(ItemID, 1);
-            return;
-        }
-    }
-
-    const FItemData* ItemConfig = GetItemData(ItemID);
-    if (!ItemConfig)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("AddUniqueItem: 物品ID %d 不存在于数据表中！"), ItemID);
-        return;
-    }
-
-    if (ItemConfig->bIsStackable)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("AddUniqueItem: 物品ID %d 是可堆叠物品，请使用 AddStackableItem。"), ItemID);
-        return;
-    }
-
-    if (!HasCategorySpace(ItemConfig->ItemCategory))
-    {
-        if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red, TEXT("该分类背包已满"));
-        return;
-    }
-
-    FItemInstance NewItem;
-    NewItem.ItemGUID = FGuid::NewGuid();
-    NewItem.ItemID = ItemID;
-    NewItem.Count = 1;
-    NewItem.AcquiredTime = FDateTime::UtcNow();
-    InventoryItems.Add(NewItem);
-
-    WeaponInstanceMap.Add(NewItem.ItemGUID, WeaponData);
-
-    OnItemAdded.Broadcast(ItemID, 1);
-    OnInventoryUpdated.Broadcast();
-}
-
-void UInventoryManagerSubsystem::AddArtifactItem(int32 ItemID, const FArtifactInstanceData& ArtifactData)
-{
-    // 在线时词条由服务器生成，本地入参仅离线模式生效
-    if (UGameServerSubsystem* Server = GetGameServer())
-    {
-        if (Server->IsLoggedIn())
-        {
-            Server->ServerAddItem(ItemID, 1);
-            return;
-        }
-    }
-
-    const FItemData* ItemConfig = GetItemData(ItemID);
-    if (!ItemConfig)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("AddArtifactItem: 物品ID %d 不存在于数据表中！"), ItemID);
-        return;
-    }
-
-    if (!HasCategorySpace(ItemConfig->ItemCategory))
-    {
-        if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red, TEXT("圣遗物背包已满"));
-        return;
-    }
-
-    FItemInstance NewItem;
-    NewItem.ItemGUID = FGuid::NewGuid();
-    NewItem.ItemID = ItemID;
-    NewItem.Count = 1;
-    NewItem.AcquiredTime = FDateTime::UtcNow();
-    InventoryItems.Add(NewItem);
-
-    ArtifactInstanceMap.Add(NewItem.ItemGUID, ArtifactData);
-
-    OnItemAdded.Broadcast(ItemID, 1);
-    OnInventoryUpdated.Broadcast();
-}
-
 void UInventoryManagerSubsystem::AddItem(int32 ItemID, int32 Amount)
 {
     if (Amount <= 0) return;
@@ -314,34 +218,28 @@ void UInventoryManagerSubsystem::AddItem(int32 ItemID, int32 Amount)
     if (ItemConfig->bIsStackable)
     {
         AddStackableItem(ItemID, Amount);
+        return;
     }
-    else
+
+    // 不可堆叠: 每个实例独立槽位 (count = 1)
+    if (!HasCategorySpace(ItemConfig->ItemCategory))
     {
-        if (ItemConfig->ItemCategory == EItemCategory::Weapon)
-        {
-            for (int32 i = 0; i < Amount; ++i)
-            {
-                FWeaponInstanceData DefaultWeaponData;
-                AddUniqueItem(ItemID, DefaultWeaponData);
-            }
-        }
-        else if (ItemConfig->ItemCategory == EItemCategory::Artifact)
-        {
-            for (int32 i = 0; i < Amount; ++i)
-            {
-                FArtifactInstanceData DefaultArtifactData;
-                AddArtifactItem(ItemID, DefaultArtifactData);
-            }
-        }
-        else
-        {
-            for (int32 i = 0; i < Amount; ++i)
-            {
-                FWeaponInstanceData EmptyData;
-                AddUniqueItem(ItemID, EmptyData);
-            }
-        }
+        if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red, TEXT("该分类背包已满"));
+        return;
     }
+
+    for (int32 i = 0; i < Amount; ++i)
+    {
+        FItemInstance NewItem;
+        NewItem.ItemGUID = FGuid::NewGuid();
+        NewItem.ItemID = ItemID;
+        NewItem.Count = 1;
+        NewItem.AcquiredTime = FDateTime::UtcNow();
+        InventoryItems.Add(NewItem);
+    }
+
+    OnItemAdded.Broadcast(ItemID, Amount);
+    OnInventoryUpdated.Broadcast();
 }
 
 // --- 移除物品 ---
@@ -385,22 +283,12 @@ bool UInventoryManagerSubsystem::RemoveItemByIndex(int32 DropIndex, int32 DropAm
 
     FItemInstance& TargetItem = InventoryItems[DropIndex];
     const int32 ItemIDToDrop = TargetItem.ItemID;
-    const FGuid ItemGUIDToDrop = TargetItem.ItemGUID;
-
-    if (TargetItem.EquippedCharacterID >= 0)
-    {
-        if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red, TEXT("装备中的物品无法丢弃，请先卸下"));
-        return false;
-    }
 
     const FItemData* ItemConfig = GetItemData(ItemIDToDrop);
     const bool bIsStackable = ItemConfig ? ItemConfig->bIsStackable : false;
 
     if (!bIsStackable)
     {
-        WeaponInstanceMap.Remove(ItemGUIDToDrop);
-        ArtifactInstanceMap.Remove(ItemGUIDToDrop);
-
         OnItemDropped.Broadcast(ItemIDToDrop, 1);
         InventoryItems.RemoveAt(DropIndex);
         OnInventoryUpdated.Broadcast();
@@ -421,203 +309,6 @@ bool UInventoryManagerSubsystem::RemoveItemByIndex(int32 DropIndex, int32 DropAm
         OnItemDropped.Broadcast(ItemIDToDrop, ActualDropped);
     }
 
-    OnInventoryUpdated.Broadcast();
-    return true;
-}
-
-// --- 装备系统 ---
-
-bool UInventoryManagerSubsystem::EquipItem(FGuid ItemGUID, int32 CharacterID)
-{
-    if (UGameServerSubsystem* Server = GetGameServer())
-    {
-        if (Server->IsLoggedIn())
-        {
-            // 换装冲突（同槽替换/武器替换）由服务器仲裁，快照回推后生效
-            Server->ServerEquipItem(ItemGUID, CharacterID);
-            return true;
-        }
-    }
-
-    int32 Index = FindIndexByGUID(ItemGUID);
-    if (Index == INDEX_NONE) return false;
-
-    FItemInstance& Item = InventoryItems[Index];
-    if (Item.EquippedCharacterID >= 0)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("EquipItem: 物品已装备在角色 %d 上。"), Item.EquippedCharacterID);
-        return false;
-    }
-
-    const FItemData* ItemConfig = GetItemData(Item.ItemID);
-    if (!ItemConfig) return false;
-    const EItemCategory ItemCategory = ItemConfig->ItemCategory;
-
-    if (ItemCategory == EItemCategory::Weapon)
-    {
-        FItemInstance OldWeapon = GetEquippedWeapon(CharacterID);
-        if (OldWeapon.ItemGUID.IsValid())
-        {
-            UnequipItem(OldWeapon.ItemGUID);
-        }
-    }
-
-    if (ItemCategory == EItemCategory::Artifact)
-    {
-        const FArtifactInstanceData* TargetArtifactData = ArtifactInstanceMap.Find(Item.ItemGUID);
-        if (!TargetArtifactData) return false;
-
-        TArray<FItemInstance> CurrentArtifacts = GetEquippedArtifacts(CharacterID);
-        for (const FItemInstance& Artifact : CurrentArtifacts)
-        {
-            const FArtifactInstanceData* EquippedArtifactData = ArtifactInstanceMap.Find(Artifact.ItemGUID);
-            if (EquippedArtifactData && EquippedArtifactData->Slot == TargetArtifactData->Slot)
-            {
-                UnequipItem(Artifact.ItemGUID);
-                break;
-            }
-        }
-    }
-
-    Item.EquippedCharacterID = CharacterID;
-    OnItemEquipped.Broadcast(ItemGUID, Item.ItemID, CharacterID);
-    OnInventoryUpdated.Broadcast();
-    return true;
-}
-
-bool UInventoryManagerSubsystem::UnequipItem(FGuid ItemGUID)
-{
-    if (UGameServerSubsystem* Server = GetGameServer())
-    {
-        if (Server->IsLoggedIn())
-        {
-            Server->ServerUnequipItem(ItemGUID);
-            return true;
-        }
-    }
-
-    int32 Index = FindIndexByGUID(ItemGUID);
-    if (Index == INDEX_NONE) return false;
-
-    FItemInstance& Item = InventoryItems[Index];
-    if (Item.EquippedCharacterID < 0) return false;
-
-    int32 OldCharacterID = Item.EquippedCharacterID;
-    Item.EquippedCharacterID = -1;
-
-    OnItemUnequipped.Broadcast(ItemGUID, Item.ItemID, OldCharacterID);
-    OnInventoryUpdated.Broadcast();
-    return true;
-}
-
-void UInventoryManagerSubsystem::UnequipAllForCharacter(int32 CharacterID)
-{
-    if (UGameServerSubsystem* Server = GetGameServer())
-    {
-        if (Server->IsLoggedIn())
-        {
-            for (const FItemInstance& Item : InventoryItems)
-            {
-                if (Item.EquippedCharacterID == CharacterID)
-                {
-                    Server->ServerUnequipItem(Item.ItemGUID);
-                }
-            }
-            return;
-        }
-    }
-
-    for (FItemInstance& Item : InventoryItems)
-    {
-        if (Item.EquippedCharacterID == CharacterID) Item.EquippedCharacterID = -1;
-    }
-    OnInventoryUpdated.Broadcast();
-}
-
-FItemInstance UInventoryManagerSubsystem::GetEquippedWeapon(int32 CharacterID) const
-{
-    for (const FItemInstance& Item : InventoryItems)
-    {
-        const FItemData* StaticData = GetItemData(Item.ItemID);
-        if (StaticData && StaticData->ItemCategory == EItemCategory::Weapon && Item.EquippedCharacterID == CharacterID)
-        {
-            return Item;
-        }
-    }
-    return FItemInstance();
-}
-
-TArray<FItemInstance> UInventoryManagerSubsystem::GetEquippedArtifacts(int32 CharacterID) const
-{
-    TArray<FItemInstance> Result;
-    for (const FItemInstance& Item : InventoryItems)
-    {
-        const FItemData* StaticData = GetItemData(Item.ItemID);
-        if (StaticData && StaticData->ItemCategory == EItemCategory::Artifact && Item.EquippedCharacterID == CharacterID)
-        {
-            Result.Add(Item);
-        }
-    }
-    return Result;
-}
-
-// --- 使用/消耗 ---
-
-bool UInventoryManagerSubsystem::UseItem(FGuid ItemGUID, int32 TargetCharacterID, int32 UseAmount)
-{
-    if (UGameServerSubsystem* Server = GetGameServer())
-    {
-        if (Server->IsLoggedIn())
-        {
-            Server->ServerUseItem(ItemGUID, TargetCharacterID, UseAmount);
-            return true;
-        }
-    }
-
-    int32 Index = FindIndexByGUID(ItemGUID);
-    if (Index == INDEX_NONE) return false;
-
-    FItemInstance& Item = InventoryItems[Index];
-    const FItemData* ItemConfig = GetItemData(Item.ItemID);
-    if (!ItemConfig) return false;
-
-    if (ItemConfig->UseTargetType == EItemUseTarget::None)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("UseItem: 物品ID %d 不可使用。"), Item.ItemID);
-        return false;
-    }
-
-    if (ItemConfig->UseTargetType == EItemUseTarget::SelectCharacter && TargetCharacterID < 0)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("UseItem: 物品ID %d 需要指定目标角色。"), Item.ItemID);
-        return false;
-    }
-
-    if (ItemConfig->bIsStackable && Item.Count < UseAmount)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("UseItem: 物品数量不足。"));
-        return false;
-    }
-
-    if (!ItemConfig->UseEffectClass.IsNull())
-    {
-        // TODO: 由调用方通过 TargetCharacterID 获取 ASC 应用 GE
-        UE_LOG(LogTemp, Log, TEXT("UseItem: 物品ID %d 使用效果需要由调用方应用。"), Item.ItemID);
-    }
-
-    if (ItemConfig->bIsStackable)
-    {
-        Item.Count -= UseAmount;
-        if (Item.Count <= 0) InventoryItems.RemoveAt(Index);
-    }
-    else
-    {
-        WeaponInstanceMap.Remove(Item.ItemGUID);
-        ArtifactInstanceMap.Remove(Item.ItemGUID);
-        InventoryItems.RemoveAt(Index);
-    }
-
-    OnItemUsed.Broadcast(ItemGUID, Item.ItemID, UseAmount);
     OnInventoryUpdated.Broadcast();
     return true;
 }
@@ -689,28 +380,6 @@ bool UInventoryManagerSubsystem::GetItemInstanceAtIndex(int32 Index, FItemInstan
     if (InventoryItems.IsValidIndex(Index))
     {
         OutInstance = InventoryItems[Index];
-        return true;
-    }
-    return false;
-}
-
-bool UInventoryManagerSubsystem::GetWeaponInstanceData(FGuid ItemGUID, FWeaponInstanceData& OutData) const
-{
-    const FWeaponInstanceData* Found = WeaponInstanceMap.Find(ItemGUID);
-    if (Found)
-    {
-        OutData = *Found;
-        return true;
-    }
-    return false;
-}
-
-bool UInventoryManagerSubsystem::GetArtifactInstanceData(FGuid ItemGUID, FArtifactInstanceData& OutData) const
-{
-    const FArtifactInstanceData* Found = ArtifactInstanceMap.Find(ItemGUID);
-    if (Found)
-    {
-        OutData = *Found;
         return true;
     }
     return false;

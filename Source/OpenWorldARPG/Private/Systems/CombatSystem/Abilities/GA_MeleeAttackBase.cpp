@@ -6,6 +6,8 @@
 #include "Abilities/Tasks/AbilityTask_PlayMontageAndWait.h"
 #include "Abilities/Tasks/AbilityTask_WaitGameplayEvent.h"
 #include "Characters/PlayerCharacter/PlayerCharacter.h"
+#include "Characters/AICharacter/EnemyCharacter.h"
+#include "Systems/GameServer/GameServerSubsystem.h"
 #include "Systems/CombatSystem/Components/WeaponManagerComponent.h"
 #include "Core/PlayerControllers/GameplayPlayerController.h"
 #include "Systems/CombatSystem/Data/CharacterCombatDataAsset.h"
@@ -251,20 +253,6 @@ void UGA_MeleeAttackBase::ApplyDamageToTargets()
 {
     if (!CachedPlayer) return;
 
-    // LocalPredicted GA：伤害应用必须只在权威端（服务器）执行
-    if (!GetAvatarActorFromActorInfo()->HasAuthority()) return;
-
-    UAbilitySystemComponent* SourceASC = GetAbilitySystemComponentFromActorInfo();
-    if (!SourceASC) return;
-
-    // 优先使用节点级 DamageEffect，回退到 GA 级 DamageEffectClass
-    TSubclassOf<UGameplayEffect> EffectToApply = CurrentNode ? CurrentNode->DamageEffect : nullptr;
-    if (!EffectToApply)
-    {
-        EffectToApply = DamageEffectClass;
-    }
-    if (!EffectToApply) return;
-
     FVector ActorLoc = CachedPlayer->GetActorLocation();
     FVector ForwardDir = CachedPlayer->GetActorForwardVector();
     FVector StartLoc = ActorLoc + ForwardDir * TraceForwardOffset1;
@@ -282,27 +270,25 @@ void UGA_MeleeAttackBase::ApplyDamageToTargets()
         EDrawDebugTrace::None, OutHits, true
     );
 
+    UGameServerSubsystem* GS = CachedPlayer->GetWorld()
+        ? CachedPlayer->GetWorld()->GetGameInstance()->GetSubsystem<UGameServerSubsystem>()
+        : nullptr;
+
     for (const FHitResult& Hit : OutHits)
     {
         AActor* HitActor = Hit.GetActor();
+        if (!HitActor || HitActors.Contains(HitActor)) continue;
+        HitActors.Add(HitActor);
 
-        if (HitActor && !HitActors.Contains(HitActor))
+        // 服务器权威伤害：客户端只上报"打了哪个敌人 + 什么技能"，
+        // 不含伤害数值/暴击/击杀判定；由服务器结算并以 DamageDeal 广播，
+        // 客户端据此做血条与死亡表现。废弃本地伤害 GE 应用。
+        const AEnemyCharacter* Enemy = Cast<AEnemyCharacter>(HitActor);
+        if (!Enemy || Enemy->GetServerEnemyId() == 0) continue;
+
+        if (GS)
         {
-            HitActors.Add(HitActor);
-
-            UAbilitySystemComponent* TargetASC = UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(HitActor);
-            if (TargetASC)
-            {
-                FGameplayEffectContextHandle Context = SourceASC->MakeEffectContext();
-                Context.AddHitResult(Hit);
-                Context.AddSourceObject(this);
-
-                FGameplayEffectSpecHandle SpecHandle = SourceASC->MakeOutgoingSpec(EffectToApply, GetAbilityLevel(), Context);
-                if (SpecHandle.IsValid())
-                {
-                    SourceASC->ApplyGameplayEffectSpecToTarget(*SpecHandle.Data.Get(), TargetASC);
-                }
-            }
+            GS->SendDamageIntent(ServerSkillId, Enemy->GetServerEnemyId());
         }
     }
 }

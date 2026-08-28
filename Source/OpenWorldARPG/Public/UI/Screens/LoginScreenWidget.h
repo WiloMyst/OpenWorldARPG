@@ -14,7 +14,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnLoginButtonClicked);
 /**
  * 登录界面 (M3)
  * 按钮点击仅广播事件，服务器登录与界面流转由 AMainMenuPlayerController 统一驱动。
- * 账号/令牌优先读取蓝图绑定的输入框，缺省回退到项目设置的开发账号。
+ * 账号优先读取蓝图绑定输入框，缺省回退到项目设置开发账号；密码无缺省。
  */
 UCLASS()
 class OPENWORLDARPG_API ULoginScreenWidget : public UWindowWidgetBase
@@ -31,9 +31,9 @@ public:
     UFUNCTION(BlueprintPure, Category = "Login")
     FString GetAccountInput() const;
 
-    // 令牌输入：蓝图输入框优先，空则回退项目设置静态令牌
+    // 密码输入：蓝图输入框优先（缺省无默认密码，判空由服务器拒绝）
     UFUNCTION(BlueprintPure, Category = "Login")
-    FString GetTokenInput() const;
+    FString GetPasswordInput() const;
 
     // --- 登录状态反馈（蓝图可选实现：禁用按钮 / 显示错误提示） ---
 
@@ -49,12 +49,12 @@ protected:
     UPROPERTY(meta = (BindWidget))
     UButton* LoginButton;
 
-    // 可选输入框：蓝图未提供时自动回退默认凭据
+    // 可选输入框：蓝图未提供时自动回退默认账号
     UPROPERTY(meta = (BindWidgetOptional))
     TObjectPtr<UEditableTextBox> AccountTextBox;
 
     UPROPERTY(meta = (BindWidgetOptional))
-    TObjectPtr<UEditableTextBox> TokenTextBox;
+    TObjectPtr<UEditableTextBox> PasswordTextBox;
 
 private:
     UFUNCTION()

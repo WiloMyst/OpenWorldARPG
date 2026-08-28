@@ -75,7 +75,7 @@ void AMainMenuPlayerController::HandleOnLoginButtonClicked()
     GameServer->OnLoginResult.AddDynamic(this, &AMainMenuPlayerController::HandleServerLoginResult);
 
     LoginScreenWidget->OnLoginPending();
-    GameServer->RequestLogin(LoginScreenWidget->GetAccountInput(), LoginScreenWidget->GetTokenInput());
+    GameServer->RequestLogin(LoginScreenWidget->GetAccountInput(), LoginScreenWidget->GetPasswordInput());
     UE_LOG(LogTemp, Log, TEXT("MainMenuPlayerController: 已发起服务器登录，等待确认。"));
 }
 

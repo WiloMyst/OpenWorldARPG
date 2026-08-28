@@ -30,6 +30,9 @@ public:
 
     void InitializeFromDataObject(UObject* InDataObject);
 
+    // 服务器权威初始化: 以登录响应下发的配队列表 + 上场 index 覆盖本地配置
+    void InitializeFromServerData(const TArray<FGameplayTag>& TeamTags, int32 InActiveCharacterIndex);
+
     // --- 队伍设置 ---
 
     bool SetCurrentTeam(const TArray<FGameplayTag>& NewTeamCharacterTags, int32 NewActiveCharacterIndex);

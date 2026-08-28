@@ -1,0 +1,11 @@
+# 敌人静态配置 (Phase 3 战斗): 服务器权威属性的数据源
+# 对应客户端 AEnemyCharacter 的 AS_Enemy 属性; 伤害计算完全由服务器读取本表
+# 防御按 10% 减伤计入: 实际伤害 = 玩家攻击*技能倍率 - 敌人防御*0.1
+
+enemies:
+  - enemy_type: 1
+    name: "Mita"
+    max_hp: 100.0
+    attack: 15.0
+    defense: 5.0
+    patrol_radius: 700.0

@@ -11,7 +11,8 @@
 class APlayerCharacter;
 
 /**
- * 单个玩家的全部角色存档。用 USTRUCT 包装以支持 UPROPERTY TMap 反射。
+ * 玩家的全部角色存档（本作单玩家，队伍内含多角色）。
+ * 用 USTRUCT 包装以支持 UPROPERTY 反射。
  */
 USTRUCT()
 struct FPlayerSaveDataEntry
@@ -27,23 +28,26 @@ struct FPlayerSaveDataEntry
  * 服务器侧玩家数据管理器（挂载于 GameState）。
  *
  * 【职责】
- * 服务器权威持有每个登录玩家的角色存档数据，按 UniqueNetId 索引。
- * GameMode 在 PostLogin / 编队变更时通过本组件读取目标玩家的存档来 Spawn 角色。
+ * 服务器权威持有玩家（本作唯一玩家）的角色存档数据，作为多角色配队的存档底座。
+ * GameMode 在 PostLogin / 编队变更时通过本组件读取存档来 Spawn 角色。
  *
- * 【为什么不用 UGameInstanceSubsystem】
- * GameInstanceSubsystem 在一个 GameInstance 上只有一个实例，若直接持有 per-玩家数据，
- * 多个玩家的存档会串。本组件用 TMap<FString, FPlayerSaveDataEntry> 显式按玩家 ID 隔离。
+ * 【单玩家设计】
+ * 本作不存在多玩家并发登录：一台 Dedicated Server 上只有唯一玩家、多个上阵角色，
+ * 因此不再按 UniqueNetId 建立 per-玩家隔离索引，直接持有单份 { CharacterTag -> SaveData }
+ * 队伍存档（FPlayerSaveDataEntry）。方法签名保留 APlayerController* 仅作服务端上下文，
+ * 不参与索引。若未来演进为多玩家，再改回按玩家 ID 分桶即可。
  *
- * 【为什么不用 ULocalPlayerSubsystem】
- * Dedicated Server 上没有 ULocalPlayer，ULocalPlayerSubsystem 根本不会创建，
- * 服务器侧无法通过它读取存档数据。
+ * 【为什么不用 UGameInstanceSubsystem / ULocalPlayerSubsystem】
+ * GameInstanceSubsystem 在服务器侧跨关卡常驻，但职责聚焦单玩家存档更利于测试与独立挂载；
+ * ULocalPlayerSubsystem 在 Dedicated Server 上不存在，无法承载服务器侧存档。
+ * 故沿用 GameState 组件挂载方案。
  *
  * 【数据来源（当前：模拟）】
  * 当前项目无真实后端数据库，登录时从 UOpenWorldARPGSettings 配置的 UInitialArchiveData
- * 加载一份模拟存档给所有登录玩家。
+ * 加载一份模拟存档。
  * 【数据来源（接入真实数据库后）】
- * OnPlayerConnected 应改为按 PlayerState->GetUniqueId() 异步向后端服务请求该玩家的存档，
- * 请求返回后再触发 GameMode 的角色生成流程。具体见 .cpp 中标注的 [DB-INTEGRATION] 注释。
+ * OnPlayerConnected 应改为异步向后端服务请求玩家存档，请求返回后再触发 GameMode 的角色生成流程。
+ * 具体见 .cpp 中标注的 [DB-INTEGRATION] 注释。
  */
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class OPENWORLDARPG_API UServerPlayerDataManager : public UActorComponent
@@ -56,12 +60,12 @@ public:
     // --- 玩家存档生命周期 ---
 
     /**
-     * 玩家登录时调用。服务器权威加载该玩家的角色存档。
+     * 玩家登录时调用。服务器权威加载玩家的角色存档（单玩家）。
      * [DB-INTEGRATION] 接入真实数据库后，本函数应改为异步：
      *   1. 向后端服务发起异步请求（按 PlayerState->GetUniqueId()）
      *   2. 请求返回前挂起 GameMode 的角色生成流程
      *   3. 数据到达后回调通知 GameMode 继续生成
-     * 当前实现：从 UInitialArchiveData 同步加载一份模拟存档给该玩家。
+     * 当前实现：从 UInitialArchiveData 同步加载一份模拟存档。
      */
     void OnPlayerConnected(APlayerController* PlayerController);
 
@@ -70,24 +74,20 @@ public:
 
     // --- 存档查询（服务器侧权威） ---
 
-    /** 获取指定玩家拥有的所有角色存档。服务器专用。 */
+    /** 获取玩家拥有的所有角色存档。服务器专用。 */
     bool GetAllOwnedCharacterSaveData(APlayerController* PlayerController, TArray<FCharacterSaveData>& OutData) const;
 
-    /** 获取指定玩家某个角色的存档。服务器专用。 */
+    /** 获取玩家某个角色的存档。服务器专用。 */
     const FCharacterSaveData* GetCharacterSaveData(APlayerController* PlayerController, const FGameplayTag& CharacterTag) const;
 
-    /** 更新指定玩家某个角色的存档。服务器专用。 */
+    /** 更新玩家某个角色的存档。服务器专用。 */
     void SetCharacterSaveData(APlayerController* PlayerController, const FGameplayTag& CharacterTag, const FCharacterSaveData& NewData);
 
     /** 从角色实体收集运行时数据并回写到玩家存档。服务器专用。 */
     void CollectSaveDataFromCharacters(APlayerController* PlayerController, const TArray<APlayerCharacter*>& CharacterActors);
 
 private:
-    /** 按 UniqueNetId 索引的 per-玩家存档。 */
+    /** 单玩家队伍角色存档：按 CharacterTag 索引（无 per-玩家维度）。 */
     UPROPERTY()
-    TMap<FString, FPlayerSaveDataEntry> PlayerSaveDataMap;
-
-    /** UniqueNetId → PlayerController 反向索引（便于按 PC 查询）。 */
-    UPROPERTY()
-    TMap<FString, TWeakObjectPtr<APlayerController>> PlayerControllerMap;
+    FPlayerSaveDataEntry OwnedSaveData;
 };

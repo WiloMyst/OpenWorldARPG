@@ -1,5 +1,6 @@
 # Visual Studio 2015 user specific files
 .vs/
+.vscode/
 
 # Compiled Object files
 *.slo
@@ -93,8 +94,6 @@ Plugins/
 *.bmp
 *.exr
 *.fbx
-*.jpeg
-*.jpg
 *.mov
 *.mp3
 *.obj
@@ -131,7 +130,20 @@ VHServer/logs/
 
 # GameServer
 GameServer/build/
+GameServer/logs/
 GameServer/**/*.log
 GameServer/**/config_degraded.yaml
 GameServer/**/config_real.yaml
+GameServer/.idea/
+GameServer/.vscode/
+GameServer/.cache/
 !GameServer/CMakeLists.txt
+
+# C++/Linux dev artifacts (both backends)
+core
+core.*
+.env
+*.swp
+*~
+CMakeUserPresets.json
+compile_commands.json

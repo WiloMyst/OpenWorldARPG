@@ -2,50 +2,139 @@ syntax = "proto3";
 
 package game;
 
-// 游戏服务器主通道: 单一双向流, 消息按 oneof 类型路由
-// sequence 由客户端递增, 服务器在响应中原样回执用于请求关联
+// 游戏服务器主服务.
+// RPC 形态按业务语义收敛, 而不是把 gRPC 当裸 socket 在一条流上做消息 ID 分发:
+//   unary              : 命令型、低频、重结果、一次请求一次响应 (登录/切人/刷新/背包/对话授权)
+//   bidi-streaming     : 仅实时玩法. 高频双向上报 + 服务器主动推送 (移动/战斗结算/世界广播)
+//   server-streaming   : 一次请求、流式返回 (AI 对话逐字返回)
+// unary RPC 天然获得 gRPC 的超时/重试/独立拦截/日志, 这是单一大双向流拿不到的.
 service GameService {
-    rpc GameChannel(stream ClientMessage) returns (stream ServerMessage);
+    // ---- 命令型 (unary): 低频、重结果 ----
+    rpc Login(LoginRequest) returns (LoginResponse);
+    rpc Logout(LogoutRequest) returns (LogoutResponse);
+    // 玩家生成一个角色时上报: 按角色 Tag 在服务器建/更新独立 HP 实体. max_hp 为服务器权威持有
+    rpc RegisterCharacter(RegisterCharacterRequest) returns (RegisterCharacterResponse);
+    rpc SetActiveCharacter(SetActiveCharacterRequest) returns (SetActiveCharacterResponse);
+    // 巡逻区刷怪上报: 服务器判断是否允许 (同一巡逻区去重), 允许后经 World 流推送 EnemySpawn
+    rpc RequestEnemySpawn(EnemySpawnRequest) returns (EnemySpawnResponse);
+    rpc InventoryOp(InventoryOpRequest) returns (InventoryOpResponse);
+    // 对话授权 (信令面): 校验资格后签发短期票据, 客户端持票据直连推理流
+    rpc AuthenticateDialogue(DialogueAuthRequest) returns (DialogueAuthResult);
+
+    // ---- 实时玩法通道 (bidi-streaming): 高频双向 + 服务器权威推送 ----
+    rpc World(stream ClientWorld) returns (stream ServerWorld);
+
+    // ---- AI 对话 (server-streaming): 一次请求, 流式返回 ----
+    rpc StreamDialogue(DialogueRequest) returns (stream DialogueWord);
 }
 
-// ---------- 客户端 -> 服务器 ----------
-
+// ==================== 内部事件容器 (不进 service) ====================
+// 服务端业务层与传输层之间的统一事件规格: SessionHandler / WorldManager / CombatManager
+// 以这两个容器互通信 (对外协议 = 拆分后的各 RPC 消息; 内部事件 = 聚合复用这些消息类型),
+// 使 AOI 广播 / 战斗结算 / 世界推送在下行统一从此物下发.
+// 仅服务端内部使用, 对外不存在对这两者的任何 RPC 调用.
 message ClientMessage {
     uint64 sequence = 1;
     oneof payload {
         LoginRequest login = 2;
         Heartbeat heartbeat = 3;
-        SaveDataRequest save_data = 4;
-        LogoutRequest logout = 5;
-        InventoryOpRequest inventory_op = 6;
-        DialogueAuthRequest dialogue_auth = 7;
+        MovementUpdate movement = 4;
+        DamageIntent damage_intent = 5;
+        EnemyAttackIntent enemy_attack_intent = 6;
+        EnemySpawnRequest spawn_request = 7;
+        RegisterCharacterRequest register_character = 8;
+        SetActiveCharacterRequest set_active_character = 9;
     }
 }
 
+message ServerMessage {
+    uint64 ack_sequence = 1;
+    oneof payload {
+        LoginResponse login = 2;
+        HeartbeatAck heartbeat = 3;
+        PlayerEnter player_enter = 4;
+        PlayerLeave player_leave = 5;
+        PlayerMove player_move = 6;
+        PositionCorrection position_correction = 7;
+        EnemySpawn enemy_spawn = 8;
+        DamageDeal damage_deal = 9;
+        PlayerDamage player_damage = 10;
+        KickNotify kick = 11;
+        ErrorResponse error = 12;
+    }
+}
+
+// ==================== 命令型 RPC 消息 ====================
+
 message LoginRequest {
     string account = 1;
-    string token = 2;
+    string password = 2;   // 密码明文仅存在于本次请求生命周期内; 权威校验读 players.password_hash
 }
 
-message Heartbeat {
-    int64 client_timestamp = 1;
-}
-
-message SaveDataRequest {
-    PlayerData player_data = 1;
+message LoginResponse {
+    bool success = 1;
+    uint64 player_id = 2;
+    string session_token = 3;
+    PlayerData player_data = 4;
+    repeated ItemInstance inventory = 5;   // 登录时的权威背包快照
+    string error_msg = 6;
+    float spawn_x = 7;                     // 服务器权威出生点
+    float spawn_y = 8;
+    float spawn_z = 9;
+    float spawn_yaw = 10;
+    repeated OwnedCharacter owned_characters = 11;  // 登录时权威拥有角色快照
+    repeated TeamSlot team_slots = 12;              // 登录时权威配队快照 (含上场 index)
 }
 
 message LogoutRequest {
 }
 
+message LogoutResponse {
+    bool success = 1;
+}
+
+message RegisterCharacterRequest {
+    string character_tag = 1;        // 角色 Tag (如 Character.Fire.Lumine), 作为 HP 实体主键
+    double max_hp = 2;               // 该角色最大 HP (客户端结算初值, 服务器权威持有)
+}
+
+message RegisterCharacterResponse {
+    bool success = 1;
+    string error_msg = 2;
+    double max_hp = 3;               // 服务器登记的权威 HP 上限
+}
+
+message SetActiveCharacterRequest {
+    string character_tag = 1;
+}
+
+message SetActiveCharacterResponse {
+    bool success = 1;
+    string error_msg = 2;
+    string character_tag = 3;        // 服务器确认的当前上场角色
+}
+
+message EnemySpawnRequest {
+    int32 area_id = 1;              // 请求刷怪的巡逻区 ID
+    float x = 2;                    // 巡逻区世界坐标 (刷怪圆心)
+    float y = 3;
+    float z = 4;
+    float patrol_radius = 5;        // 巡逻半径 (客户端 AIPatrolAreaBase.PatrolRadius)
+}
+
+message EnemySpawnResponse {
+    bool granted = 1;               // 是否允许在本巡逻区刷怪
+    string reason = 2;
+    uint64 enemy_id = 3;            // 允许时服务器分配的首敌人 ID (同区批量按序递增)
+}
+
 // 背包操作: 服务器权威校验并执行, 响应携带操作后的完整背包快照
+// 业务范围收敛为拾取/丢弃 (装备/使用未实现, 字段号 reserved 防复用)
 message InventoryOpRequest {
+    reserved 3, 4, 5;
     oneof op {
         InventoryAdd add = 1;
         InventoryRemove remove = 2;
-        InventoryEquip equip = 3;
-        InventoryUnequip unequip = 4;
-        InventoryUse use = 5;
     }
 }
 
@@ -59,58 +148,103 @@ message InventoryRemove {
     int32 amount = 2;         // 堆叠物品扣减数量; 不可堆叠物品忽略
 }
 
-message InventoryEquip {
-    string item_guid = 1;
-    int32 character_id = 2;   // 目标角色, 须 >= 0
-}
-
-message InventoryUnequip {
-    string item_guid = 1;
-}
-
-message InventoryUse {
-    string item_guid = 1;
-    int32 target_character_id = 2;  // 可选, 物品配置要求选择目标时必填
-    int32 amount = 3;               // 堆叠物品使用数量
+message InventoryOpResponse {
+    bool success = 1;
+    string error_msg = 2;
+    repeated ItemInstance items = 3;   // 操作后的权威背包快照
 }
 
 // 对话授权请求 (信令面): 服务器校验玩家资格后签发短期票据,
-// 客户端持票据直连 VHServer 推理流 (数据面)
+// 客户端持票据直连推理流 (数据面)
 message DialogueAuthRequest {
-    int32 npc_id = 1;               // 绑定进票据, VHServer 侧可校验用途
+    int32 npc_id = 1;               // 绑定进票据, 推理侧可校验用途
 }
 
-// ---------- 服务器 -> 客户端 ----------
+// 对话授权结果: 携带短期票据, 过期后客户端须重新申请
+message DialogueAuthResult {
+    bool ok = 1;
+    string reason = 2;
+    string dialogue_token = 3;         // HMAC-SHA256 签名票据
+    int64 expires_at = 4;              // epoch ms
+}
 
-message ServerMessage {
-    uint64 ack_sequence = 1;
+// AI 对话 (server-streaming): 客户端携带已授权票据请求流式回复
+message DialogueRequest {
+    string dialogue_token = 1;         // AuthenticateDialogue 签发的票据
+    int32 npc_id = 2;
+    string text = 3;                   // 玩家输入
+}
+
+message DialogueWord {
+    string text = 1;                   // 单次吐出的文本片段
+    bool last = 2;                     // 是否为最后一个分片
+    string error = 3;                  // 非空表示中途出错, 终止流
+}
+
+// ==================== 实时玩法通道 (World 双向流) ====================
+
+// 客户端 -> 服务器. 仅承载需要"高频持续上报"的实时玩法消息.
+message ClientWorld {
+    uint64 sequence = 1;               // 客户端递增, 服务器在 ack_sequence 原样回执用于请求关联
+    string session_token = 7;          // 会话令牌: 由首帧携带, 服务器据此兑换进入 World
+                                        // (TurboLink 双向流初始 metadata 不可达, 故改走消息体)
     oneof payload {
-        LoginResponse login = 2;
-        HeartbeatAck heartbeat = 3;
-        SaveDataResponse save_data = 4;
-        KickNotify kick = 5;
-        ErrorResponse error = 6;
-        InventoryOpResponse inventory_op = 7;
-        DialogueAuthResult dialogue_auth_result = 8;
+        Heartbeat heartbeat = 2;       // 保活
+        MovementUpdate movement = 3;   // 位置/朝向上报
+        DamageIntent damage_intent = 4;   // 玩家命中敌人上报 (伤害由服务器裁决)
+        EnemyAttackIntent enemy_attack_intent = 5;  // 敌人命中玩家上报
     }
 }
 
-message LoginResponse {
-    bool success = 1;
-    uint64 player_id = 2;
-    string session_token = 3;
-    PlayerData player_data = 4;
-    repeated ItemInstance inventory = 5;   // 登录时的权威背包快照
-    string error_msg = 6;
+// 服务器 -> 客户端. 世界广播 + 权威推送 (AOI / 战斗结算 / 位置校正).
+message ServerWorld {
+    uint64 ack_sequence = 1;
+    oneof payload {
+        HeartbeatAck heartbeat = 2;
+        PlayerEnter player_enter = 3;
+        PlayerLeave player_leave = 4;
+        PlayerMove player_move = 5;
+        PositionCorrection position_correction = 6;
+        EnemySpawn enemy_spawn = 7;
+        DamageDeal damage_deal = 8;
+        PlayerDamage player_damage = 9;
+        KickNotify kick = 10;
+        ErrorResponse error = 11;
+    }
+}
+
+message Heartbeat {
+    int64 client_timestamp = 1;
 }
 
 message HeartbeatAck {
     int64 server_timestamp = 1;
 }
 
-message SaveDataResponse {
-    bool success = 1;
-    string error_msg = 2;
+// 移动上报: 客户端以固定频率上报, 服务器权威校验后广播
+// 服务器校验: 速度上限 / 单次位移(防瞬移) / 时间戳单调与时钟偏差
+message MovementUpdate {
+    float x = 1;
+    float y = 2;
+    float z = 3;
+    float yaw = 4;
+    int64 client_timestamp = 5;     // epoch ms, 用于乱序与时钟偏差校验
+}
+
+// 攻击命中上报: 客户端只上报"打了哪个敌人+什么技能", 不含伤害数值.
+// 伤害完全由服务器按属性/技能配置表裁决, 结果以 DamageDeal 广播.
+message DamageIntent {
+    int32 skill_id = 1;             // 攻击技能 ID (对齐服务器 skills.yaml)
+    uint64 attacker_player_id = 2;  // 攻击者玩家 ID
+    uint64 target_enemy_id = 3;     // 命中目标 enemy_id
+    int64 client_timestamp = 4;     // epoch ms
+}
+
+// 敌人攻击命中上报: 客户端敌人 AI 本地命中 active 玩家后上报, 不含伤害数值.
+// 由服务器对会话内 active 角色裁决伤害, 结果以 PlayerDamage 广播, 覆盖其 ASC HP.
+message EnemyAttackIntent {
+    uint64 enemy_id = 1;             // 攻击者 enemy_id (须为服务器已刷出的敌人)
+    int64 client_timestamp = 2;      // epoch ms
 }
 
 // 服务器主动下线通知: duplicate_login / heartbeat_timeout / login_timeout
@@ -124,21 +258,98 @@ message ErrorResponse {
     string message = 2;
 }
 
-message InventoryOpResponse {
-    bool success = 1;
-    string error_msg = 2;
-    repeated ItemInstance items = 3;   // 操作后的权威背包快照
+// ---------- 世界同步 (AOI 广播) ----------
+
+// 视野内玩家进入: 客户端据此生成远程玩家实体
+message PlayerEnter {
+    uint64 player_id = 1;
+    string account = 2;
+    float x = 3;
+    float y = 4;
+    float z = 5;
+    float yaw = 6;
 }
 
-// 对话授权结果: 携带短期票据, 过期后客户端须重新申请
-message DialogueAuthResult {
-    bool ok = 1;
-    string reason = 2;
-    string dialogue_token = 3;         // HMAC-SHA256 签名票据
-    int64 expires_at = 4;              // epoch ms
+// 视野内玩家离开: 客户端据此销毁远程玩家实体
+message PlayerLeave {
+    uint64 player_id = 1;
 }
 
-// ---------- 共享数据结构 ----------
+// 视野内玩家移动广播: 服务器权威位置
+message PlayerMove {
+    uint64 player_id = 1;
+    float x = 2;
+    float y = 3;
+    float z = 4;
+    float yaw = 5;
+}
+
+// 服务器位置校正: 客户端上报被拒绝(瞬移/超速/乱序)时回执权威位置
+message PositionCorrection {
+    float x = 1;
+    float y = 2;
+    float z = 3;
+    float yaw = 4;
+}
+
+// ---------- 战斗 (敌人刷新 + 伤害) ----------
+
+// 服务器命令某巡逻区刷怪: 客户端 AIPatrolAreaBase 收到后在其旁生成敌人并绑定巡逻
+message EnemySpawn {
+    uint64 enemy_id = 1;             // 服务器分配的唯一敌人 ID
+    int32 area_id = 2;               // 目标 AIPatrolAreaBase 的 ID
+    int32 enemy_type = 3;            // 敌人类型 (对齐 enemies.yaml)
+    int32 count = 4;                 // 生成数量
+    float spawn_x = 5;               // 生成基准位置 (服务器权威)
+    float spawn_y = 6;
+    float spawn_z = 7;
+    int32 max_hp = 8;                // 服务器权威的敌人 HP 上限
+    int32 patrol_radius = 9;         // 巡逻半径
+}
+
+// 服务器权威伤害结算广播: 客户端只据此做血条/死亡/飘字表现
+message DamageDeal {
+    uint64 attacker_player_id = 1;
+    uint64 target_enemy_id = 2;
+    int32 skill_id = 3;
+    float damage = 4;                // 服务器计算的伤害值
+    double target_current_hp = 5;    // 扣血后剩余 HP
+    double target_max_hp = 6;
+    bool target_killed = 7;          // 是否死亡
+    bool is_critical = 8;            // 是否暴击 (服务器判定, 用于飘字)
+}
+
+// 服务器权威玩家角色 HP 广播: 客户端按 character_tag 找到对应 PlayerCharacter,
+// 写入其 ASC (UAS_Player.SetHealth/SetMaxHealth), 客户端不做本地扣血/暴击/击杀判定.
+message PlayerDamage {
+    string character_tag = 1;        // 血条归属的角色 Tag
+    uint64 attacker_enemy_id = 2;    // 来源敌人 (表现/调试)
+    float damage = 3;                // 服务器计算的伤害值
+    double current_hp = 4;           // 扣血后剩余 HP
+    double max_hp = 5;               // 该角色 HP 上限 (服务器权威)
+    bool killed = 6;                 // 是否死亡 (服务器判定)
+    bool is_critical = 7;            // 是否暴击 (服务器判定, 用于飘字)
+}
+
+// ==================== 业务快照 (LoginResponse 携带) ====================
+
+// 玩家拥有角色快照 (登录响应携带, 服务器权威)
+message OwnedCharacter {
+    string character_tag = 1;   // 角色 Tag (如 Character.Fire.Lumine)
+    int32 level = 2;
+    int64 exp = 3;
+    bool is_active = 4;         // 是否当前上场角色
+    int64 acquired_time = 5;    // 获取时间 epoch ms
+}
+
+// 玩家配队槽位快照 (登录响应携带, 服务器权威; is_active 表达上场 index)
+message TeamSlot {
+    int32 slot_index = 1;       // 配队顺序 (0-based)
+    string character_tag = 2;
+    bool is_active = 3;         // 当前上场槽位
+}
+
+// ==================== 共享数据结构 ====================
 
 message PlayerData {
     string account = 1;
@@ -146,36 +357,13 @@ message PlayerData {
     int64 exp = 3;
 }
 
-// 背包物品实例, 对齐客户端 FItemInstance
+// 背包物品实例, 对齐客户端 FItemInstance (仅动态数据; 静态表现经 item_id 查客户端 DT)
 message ItemInstance {
     string item_guid = 1;
     int32 item_id = 2;
     int32 count = 3;
-    int32 equipped_character_id = 4;   // -1 表示未装备
+    reserved 4;                        // 原装备位 equipped_character_id, 业务收敛后移除
     int64 acquired_time = 5;           // epoch ms
-    string category = 6;               // weapon/artifact/material/food/quest
-    WeaponInstanceData weapon_data = 7;      // 仅武器物品填充
-    ArtifactInstanceData artifact_data = 8;  // 仅圣遗物物品填充
-}
-
-// 对齐客户端 FWeaponInstanceData
-message WeaponInstanceData {
-    int32 level = 1;
-    int32 ascension_level = 2;
-    int32 refinement_level = 3;
-}
-
-// 对齐客户端 FArtifactInstanceData
-message ArtifactInstanceData {
-    int32 set_id = 1;
-    string slot = 2;             // flower/plume/sands/goblet/circlet
-    string main_stat = 3;
-    float main_stat_value = 4;
-    repeated ArtifactSubStat sub_stats = 5;
-}
-
-message ArtifactSubStat {
-    string stat_type = 1;
-    float stat_value = 2;
-    int32 upgrade_count = 3;
+    string category = 6;               // weapon/artifact/material/food/quest (容量校验与测试用)
+    reserved 7, 8;                     // 原武器/圣遗物实例数据, 业务收敛后移除
 }

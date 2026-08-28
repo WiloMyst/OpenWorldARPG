@@ -14,10 +14,7 @@
  * 静态字段 (ItemCategory, bIsStackable, ItemName, ItemIcon 等) 统一通过 ItemID
  * 查询 FItemData 获取，避免存档膨胀和数据冗余。
  *
- * 类型专属数据 (武器/圣遗物) 采用外键存储方案：
- * - 武器实例数据：通过 UInventoryManagerSubsystem::WeaponInstanceMap (TMap<FGuid, FWeaponInstanceData>) 查询
- * - 圣遗物实例数据：通过 UInventoryManagerSubsystem::ArtifactInstanceMap (TMap<FGuid, FArtifactInstanceData>) 查询
- * 这样普通材料/消耗品不会产生 FWeaponInstanceData/FArtifactInstanceData 的内存浪费。
+ * 业务范围收敛为拾取/丢弃，与服务器 proto ItemInstance 一一对应。
  */
 USTRUCT(BlueprintType)
 struct FItemInstance
@@ -39,12 +36,6 @@ struct FItemInstance
     /** 当前堆叠数量 */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
     int32 Count = 0;
-
-    // --- 装备状态 ---
-
-    /** 装备的角色ID (-1 表示未装备) */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
-    int32 EquippedCharacterID = -1;
 
     // --- 时间戳 ---
 

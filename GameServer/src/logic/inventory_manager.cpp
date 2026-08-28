@@ -95,7 +95,6 @@ OpResult InventoryManager::Add(int32_t item_id, int32_t amount) {
             item.guid = NewGuid();
             item.item_id = item_id;
             item.count = put;
-            item.equipped_character_id = kUnequipped;
             item.acquired_time = infra::NowMs();
             items_.push_back(std::move(item));
             remaining -= put;
@@ -113,23 +112,7 @@ OpResult InventoryManager::Add(int32_t item_id, int32_t amount) {
     item.guid = NewGuid();
     item.item_id = item_id;
     item.count = 1;
-    item.equipped_character_id = kUnequipped;
     item.acquired_time = infra::NowMs();
-
-    if (cfg->has_artifact) {
-        // 圣遗物实例: 静态配置生成主属性, 副属性 M2 暂不投放
-        item.has_artifact = true;
-        item.artifact_set_id = cfg->artifact_set_id;
-        item.artifact_slot = cfg->artifact_slot;
-        item.artifact_main_stat = cfg->artifact_main_stat;
-        item.artifact_main_stat_value = cfg->artifact_main_stat_base;
-    } else {
-        // 武器/其他不可堆叠物品: 初始成长数据
-        item.has_weapon = (cfg->category == "weapon");
-        item.weapon_level = 1;
-        item.weapon_ascension = 0;
-        item.weapon_refinement = 1;
-    }
     items_.push_back(std::move(item));
     return {true, ""};
 }
@@ -138,11 +121,6 @@ OpResult InventoryManager::Remove(const std::string& guid, int32_t amount) {
     data::InvItem* item = FindByGuid(guid);
     if (!item) return {false, "Item not found"};
 
-    // 与客户端一致: 已装备物品不允许丢弃
-    if (item->equipped_character_id != kUnequipped) {
-        return {false, "Item is equipped, unequip first"};
-    }
-
     if (item->count > 1) {
         if (amount <= 0) return {false, "Amount must be positive"};
         if (amount > item->count) return {false, "Not enough count"};
@@ -155,88 +133,6 @@ OpResult InventoryManager::Remove(const std::string& guid, int32_t amount) {
         return {true, ""};
     }
 
-    items_.erase(std::remove_if(items_.begin(), items_.end(),
-                                [&](const data::InvItem& i) { return i.guid == guid; }),
-                 items_.end());
-    return {true, ""};
-}
-
-OpResult InventoryManager::Equip(const std::string& guid, int32_t character_id) {
-    if (character_id < 0) return {false, "Invalid character id"};
-
-    data::InvItem* item = FindByGuid(guid);
-    if (!item) return {false, "Item not found"};
-    if (item->equipped_character_id != kUnequipped) {
-        return {false, "Item already equipped"};
-    }
-
-    const ItemConfig* cfg = item_db_->Find(item->item_id);
-    if (!cfg) return {false, "Unknown item config"};
-
-    if (cfg->category == "weapon") {
-        // 武器互斥: 该角色已有武器先卸下
-        for (auto& other : items_) {
-            if (other.equipped_character_id == character_id && other.guid != guid) {
-                const ItemConfig* other_cfg = item_db_->Find(other.item_id);
-                if (other_cfg && other_cfg->category == "weapon") {
-                    other.equipped_character_id = kUnequipped;
-                    break;
-                }
-            }
-        }
-    } else if (cfg->category == "artifact") {
-        // 圣遗物部位互斥: 同部位已有先卸下
-        for (auto& other : items_) {
-            if (other.equipped_character_id != character_id || other.guid == guid) continue;
-            const ItemConfig* other_cfg = item_db_->Find(other.item_id);
-            if (other_cfg && other_cfg->category == "artifact" &&
-                other_cfg->artifact_slot == cfg->artifact_slot) {
-                other.equipped_character_id = kUnequipped;
-                break;
-            }
-        }
-    } else {
-        return {false, "Item is not equippable"};
-    }
-
-    item->equipped_character_id = character_id;
-    return {true, ""};
-}
-
-OpResult InventoryManager::Unequip(const std::string& guid) {
-    data::InvItem* item = FindByGuid(guid);
-    if (!item) return {false, "Item not found"};
-    if (item->equipped_character_id == kUnequipped) {
-        return {false, "Item is not equipped"};
-    }
-    item->equipped_character_id = kUnequipped;
-    return {true, ""};
-}
-
-OpResult InventoryManager::Use(const std::string& guid, int32_t target_character_id, int32_t amount) {
-    data::InvItem* item = FindByGuid(guid);
-    if (!item) return {false, "Item not found"};
-
-    const ItemConfig* cfg = item_db_->Find(item->item_id);
-    if (!cfg) return {false, "Unknown item config"};
-    if (cfg->use_target == "none") return {false, "Item is not usable"};
-    if (cfg->use_target == "select_character" && target_character_id < 0) {
-        return {false, "Item requires a target character"};
-    }
-
-    if (item->count > 1) {
-        if (amount <= 0) return {false, "Amount must be positive"};
-        if (amount > item->count) return {false, "Not enough count"};
-        item->count -= amount;
-        if (item->count <= 0) {
-            items_.erase(std::remove_if(items_.begin(), items_.end(),
-                                        [&](const data::InvItem& i) { return i.guid == guid; }),
-                         items_.end());
-        }
-        return {true, ""};
-    }
-
-    // 不可堆叠物品 (count==1): 使用即消耗整个实例
     items_.erase(std::remove_if(items_.begin(), items_.end(),
                                 [&](const data::InvItem& i) { return i.guid == guid; }),
                  items_.end());

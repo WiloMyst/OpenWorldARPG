@@ -1,0 +1,79 @@
+server:
+  host: "0.0.0.0"
+  port: 50061
+  worker_threads: 4
+  max_queue_size: 1000
+
+session:
+  heartbeat_timeout_sec: 30      # 在线会话超过该时长无任何消息则踢出
+  login_timeout_sec: 15          # 连接建立后未完成登录的清理时长
+  check_interval_sec: 5          # 会话扫描间隔
+
+auth:
+  # 对话票据签名密钥 (信令面): 须与 VHServer config.yaml 的 auth.dialogue_secret 完全一致
+  # 生产环境优先用环境变量 DIALOGUE_SECRET 注入并删除此行
+  dialogue_secret: "dev-dialogue-secret-2026"
+  dialogue_token_ttl_sec: 30     # 票据有效期 (秒), 过期后客户端须重新申请
+
+items:
+  config_path: "../data/items.yaml"   # 相对 build 目录运行
+
+# 新玩家初始存档 (方案 B): 镜像客户端 UInitialArchiveData, 首次登录由服务器直接落库
+archive:
+  config_path: "../data/initial_archive.yaml"
+
+# 战斗静态配置 (Phase 3): 服务器权威伤害计算的数据源
+combat:
+  enemy_config_path: "../data/enemies.yaml"
+  skill_config_path: "../data/skills.yaml"
+  default_player_attack: 30.0   # 客户端 AS_Player 只有 HP, 玩家攻击由服务器持
+  initial_enemy_count: 3        # 服务器启动时对默认巡逻区刷怪数量
+
+mysql:
+  # WSL -> Docker Desktop MySQL (my-mysql): NAT 模式下需用 Windows 网关 IP (ip route show default)
+  # 直连本机 MySQL 时改回 127.0.0.1
+  host: "172.28.80.1"
+  port: 3306
+  user: "game"
+  # 密码优先读环境变量 GAME_DB_PASSWORD, 此处为开发环境兜底值
+  password: "game_pass_2026"
+  database: "game_server"
+  connect_timeout_ms: 3000
+
+redis:
+  # WSL -> Docker Desktop Redis (my-redis-stack): 宿主机 7000 -> 容器 6379
+  # 可选依赖: 连接失败自动降级 (无缓存/内存频控), 不阻断启动
+  host: "172.28.80.1"
+  port: 7000
+  # 密码优先读环境变量 REDIS_PASSWORD, 空串 = 无认证 (开发环境)
+  password: ""
+  connect_timeout_ms: 2000
+  player_cache_ttl_sec: 300   # 玩家数据 Cache-Aside 读缓存 TTL
+
+world:
+  # 状态同步 + AOI (Phase 1): 九宫格视野 + 服务器权威移动校验
+  # 坐标单位 = UE 厘米 (cm), 与客户端 GetActorLocation / 场景 PlayerStart / combat 刷怪一致
+  grid_size: 2000.0          # AOI 格子边长 (cm), 20m = 2000cm
+  view_radius_cells: 1       # 视野半径 (格), 1 = 九宫格
+  max_move_speed: 2500.0     # 移动速度上限 (cm/s), 25m/s, 覆盖跑动/冲刺/跳跃 z 变化
+  speed_tolerance: 2.0       # 速度校验容差系数 (容忍网络抖动)
+  teleport_threshold: 10000.0  # 单次位移硬上限 (cm), 100m = 10000cm, 超过直接判定瞬移
+  max_timestamp_skew_ms: 5000  # 客户端时间戳与服务器最大偏差 (ms)
+  spawn_x: -5380.0           # 服务器权威出生点 (cm) = LP_CartoonCity PlayerStart
+  spawn_y: -2200.0
+  spawn_z: 82.0
+  spawn_yaw: 0.0
+
+# VHServer 控制面联动: 玩家会话终结 (登出/踢出/断线/心跳超时) 时通知 VHServer 吊销
+# 该账号已建立的对话流 (尽力而为, 票据 TTL 兜底).
+# admin_endpoint 须与 VHServer config.yaml 的 admin.host:port 一致, secret 同 admin.secret;
+# 生产环境优先用环境变量 ADMIN_SECRET 注入并删除 secret 行
+vhserver:
+  admin_endpoint: "127.0.0.1:50053"
+  admin_secret: "dev-admin-secret-2026"
+
+logging:
+  level: "info"
+  file_path: "logs/game_server.log"
+  max_file_size_mb: 10
+  max_files: 3

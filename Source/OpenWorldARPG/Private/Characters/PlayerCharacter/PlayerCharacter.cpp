@@ -14,6 +14,8 @@
 #include "Systems/CombatSystem/Components/WeaponManagerComponent.h"
 #include "Systems/InteractionSystem/Components/InteractionComponent.h"
 #include "Systems/InteractionSystem/Components/TargetingComponent.h"
+#include "Systems/GameServer/PlayerMovementReportComponent.h"
+#include "Systems/GameServer/GameServerSubsystem.h"
 #include "UI/Extension/PlayerUIExtensionComponent.h"
 #include "Systems/VehicleSystem/Pawns/VehiclePawnBase.h"
 
@@ -71,6 +73,7 @@ APlayerCharacter::APlayerCharacter(const FObjectInitializer& ObjectInitializer)
 	TargetingComponent = CreateDefaultSubobject<UTargetingComponent>(TEXT("TargetingComponent"));
 	MotionWarpingComp = CreateDefaultSubobject<UMotionWarpingComponent>(TEXT("MotionWarpingComp"));
 	PlayerUIExtensionComp = CreateDefaultSubobject<UPlayerUIExtensionComponent>(TEXT("PlayerUIExtensionComp"));
+	MovementReportComponent = CreateDefaultSubobject<UPlayerMovementReportComponent>(TEXT("MovementReportComponent"));
 
 	AbilitySystemComponent = CreateDefaultSubobject<UAbilitySystemComponent>(TEXT("AbilitySystemComponent"));
 	AbilitySystemComponent->SetIsReplicated(true);
@@ -92,6 +95,8 @@ void APlayerCharacter::InitializeCharacter(const FCharacterSaveData& InSaveData,
 	RuntimeData = InSaveData;
 	VisualDataAsset = InVisualData;
 	CombatDataAsset = InCombatData;
+	// 服务器主键角色 Tag: 取注册表 CharacterTag (队伍 Tag), 与服务器 HP 实体键一致
+	ServerCharacterTag = InRegistryRow.CharacterTag;
 
 	if (AbilitySystemComponent)
 	{
@@ -223,6 +228,21 @@ void APlayerCharacter::InitializeCharacter(const FCharacterSaveData& InSaveData,
 		{
 			AbilitySystemComponent->RegisterGameplayTagEvent(FastSwimmingStateTag, EGameplayTagEventType::NewOrRemoved)
 				.AddUObject(this, &APlayerCharacter::OnSwimmingTagChanged);
+		}
+	}
+
+	// 服务器权威战斗: 上报本角色 HP 实体 (初值取结算后的 MaxHealth)。
+	// 服务器持有该值并裁决后续受击扣血, 客户端本地不再结算.
+	if (ServerCharacterTag.IsValid() && AbilitySystemComponent)
+	{
+		if (UGameServerSubsystem* GS = GetGameInstance() ? GetGameInstance()->GetSubsystem<UGameServerSubsystem>() : nullptr)
+		{
+			const double MaxHp = static_cast<double>(AttributeSet->GetMaxHealth());
+			if (GS->SendRegisterCharacter(ServerCharacterTag, MaxHp))
+			{
+				UE_LOG(LogTemp, Log, TEXT("[PlayerCharacter] 角色 HP 实体已上报 [tag=%s, maxHp=%.0f]"),
+				       *ServerCharacterTag.ToString(), MaxHp);
+			}
 		}
 	}
 
@@ -417,6 +437,15 @@ void APlayerCharacter::ApplyStandbyMode(bool bNewStandbyState)
 	}
 	else
 	{
+		// 切人成为 active: 上报当前角色 Tag, 服务器据此切换其受击对象 (HP 实体裁决口径)
+		if (ServerCharacterTag.IsValid())
+		{
+			if (UGameServerSubsystem* GS = GetGameInstance() ? GetGameInstance()->GetSubsystem<UGameServerSubsystem>() : nullptr)
+			{
+				GS->SendSetActiveCharacter(ServerCharacterTag);
+			}
+		}
+
 		if (UCapsuleComponent* Capsule = GetCapsuleComponent())
 		{
 			Capsule->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
@@ -740,6 +769,19 @@ UPlayerCharacterMovementComponent* APlayerCharacter::GetCustomMovementComponent_
 }
 
 // --- GAS 回调 ---
+
+void APlayerCharacter::ApplyServerPlayerDamage(const FGrpcGamePlayerDamage& Damage)
+{
+    if (!AttributeSet) return;
+
+    // 纯表现: 只写入服务器裁决的权威 HP, 不做任何本地扣血/暴击/死亡判定;
+    // 死亡由 SetHealth 触发 OnHealthAttributeChanged (HP<=0) 驱动
+    UAS_Player* PlayerAS = Cast<UAS_Player>(AttributeSet);
+    if (!PlayerAS) return;
+
+    PlayerAS->SetMaxHealth((float)Damage.MaxHp.Value);
+    PlayerAS->SetHealth((float)Damage.CurrentHp.Value);
+}
 
 void APlayerCharacter::OnHealthAttributeChanged(const FOnAttributeChangeData& Data)
 {

@@ -28,17 +28,17 @@ FString ULoginScreenWidget::GetAccountInput() const
     return UOpenWorldARPGSettings::Get().GameServerDefaultAccount;
 }
 
-FString ULoginScreenWidget::GetTokenInput() const
+FString ULoginScreenWidget::GetPasswordInput() const
 {
-    if (TokenTextBox)
+    if (PasswordTextBox)
     {
-        const FString Input = TokenTextBox->GetText().ToString().TrimStartAndEnd();
+        const FString Input = PasswordTextBox->GetText().ToString();
         if (!Input.IsEmpty())
         {
             return Input;
         }
     }
-    return UOpenWorldARPGSettings::Get().GameServerStaticToken;
+    return FString();
 }
 
 void ULoginScreenWidget::HandleLoginButtonClicked()

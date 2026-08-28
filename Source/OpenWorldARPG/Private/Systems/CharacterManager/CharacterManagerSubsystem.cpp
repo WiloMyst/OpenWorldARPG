@@ -52,6 +52,22 @@ void UCharacterManagerSubsystem::InitializeFromDataObject(UObject* InDataObject)
 	UE_LOG(LogTemp, Log, TEXT("InitializeFromDataObject: 成功填充 OwnedCharactersSaveData，数量为 %d"), OwnedCharactersSaveData.Num());
 }
 
+void UCharacterManagerSubsystem::InitializeFromServerData(const TArray<FCharacterSaveData>& ServerOwned)
+{
+	OwnedCharactersSaveData.Empty();
+	OwnedCharactersSaveData.Reserve(ServerOwned.Num());
+
+	for (const FCharacterSaveData& SaveData : ServerOwned)
+	{
+		if (SaveData.CharacterTag.IsValid())
+		{
+			OwnedCharactersSaveData.Add(SaveData.CharacterTag, SaveData);
+		}
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("InitializeFromServerData: 成功填充 OwnedCharactersSaveData，数量为 %d"), OwnedCharactersSaveData.Num());
+}
+
 TArray<FCharacterSaveData> UCharacterManagerSubsystem::GetAllOwnedCharacterSaveData() const
 {
 	TArray<FCharacterSaveData> Result;

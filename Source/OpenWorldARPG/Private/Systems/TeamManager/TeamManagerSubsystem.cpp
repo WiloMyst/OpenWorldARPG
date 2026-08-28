@@ -53,6 +53,11 @@ void UTeamManagerSubsystem::InitializeFromDataObject(UObject* InDataObject)
     SetCurrentTeam(ConfigData->InitialTeamTags, ConfigData->InitialActiveCharacterIndex);
 }
 
+void UTeamManagerSubsystem::InitializeFromServerData(const TArray<FGameplayTag>& TeamTags, int32 InActiveCharacterIndex)
+{
+    SetCurrentTeam(TeamTags, InActiveCharacterIndex);
+}
+
 bool UTeamManagerSubsystem::SetCurrentTeam(const TArray<FGameplayTag>& NewTeamCharacterTags, int32 NewActiveCharacterIndex)
 {
     if (!CharacterManager || NewTeamCharacterTags.IsEmpty()) return false;

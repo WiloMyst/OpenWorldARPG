@@ -99,7 +99,7 @@ void AGameplayGameModeBase::GeneratePlayerCharacters(APlayerController* PlayerCo
     {
         const FGameplayTag& CharacterTag = TeamTags[TeamIndex];
 
-        // per-玩家存档：从服务器侧数据管理器读取
+        // 玩家队伍存档：从服务器侧数据管理器读取（单玩家，按角色 Tag）
         const FCharacterSaveData* SaveDataPtr = PlayerDataManager->GetCharacterSaveData(PlayerController, CharacterTag);
         if (!SaveDataPtr) continue;
 
@@ -209,7 +209,7 @@ void AGameplayGameModeBase::ApplyPlayerTeamChanges(AGameplayPlayerController* Pl
         const FGameplayTag& CharacterTag = NewTeamTags[TeamIndex];
         if (!CharacterTag.IsValid()) continue;
 
-        // per-玩家存档：从服务器侧数据管理器读取
+        // 玩家队伍存档：从服务器侧数据管理器读取（单玩家，按角色 Tag）
         const FCharacterSaveData* SaveDataPtr = PlayerDataManager->GetCharacterSaveData(PlayerController, CharacterTag);
         if (!SaveDataPtr) continue;
 

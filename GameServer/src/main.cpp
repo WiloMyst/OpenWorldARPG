@@ -1,8 +1,8 @@
-#include <csignal>
+﻿#include <csignal>
 
-#include "game/infra/logger_setup.hpp"
-#include "game/infra/config_manager.hpp"
-#include "game/core/grpc_server.h"
+#include "game/infra/logger_setup.h"
+#include "game/infra/config_manager.h"
+#include "game/net/grpc_server.h"
 
 using namespace game::infra;
 
@@ -16,7 +16,7 @@ int main() {
     spdlog::info("====================================");
 
     try {
-        AppConfig config = LoadConfig("../config.yaml");
+        AppConfig config = LoadConfig("../config/config.yaml");
 
         spdlog::drop("GameServer");
         InitLogger(config.log_level, config.log_file_path,
@@ -29,7 +29,7 @@ int main() {
                      config.session_check_interval_sec);
 
         // 阻塞运行, 直到收到关闭信号
-        game::core::GrpcServer server;
+        game::net::GrpcServer server;
         server.Run(config);
 
     } catch (const std::exception& e) {

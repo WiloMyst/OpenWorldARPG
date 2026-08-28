@@ -5,6 +5,8 @@
 #include "AbilitySystemBlueprintLibrary.h"
 #include "Abilities/Tasks/AbilityTask_WaitGameplayEvent.h"
 #include "Characters/PlayerCharacter/PlayerCharacter.h"
+#include "Characters/AICharacter/EnemyCharacter.h"
+#include "Systems/GameServer/GameServerSubsystem.h"
 #include "Systems/CombatSystem/Components/WeaponManagerComponent.h"
 #include "Systems/CombatSystem/Weapons/GunBase.h"
 #include "Camera/CameraComponent.h"
@@ -88,16 +90,13 @@ void UGA_FireBase::PerformSingleShot()
         Gun->PlayShootFX();
     }
 
-    // 结算射线判定与伤害
+    // 结算射线判定与上报伤害
     ApplyDamage();
 }
 
 void UGA_FireBase::ApplyDamage()
 {
     if (!CachedPlayer || !CachedWeapon) return;
-
-    // LocalPredicted GA：伤害应用必须只在权威端（服务器）执行
-    if (!GetAvatarActorFromActorInfo()->HasAuthority()) return;
 
     AGunBase* Gun = Cast<AGunBase>(CachedWeapon);
     UCameraComponent* FollowCamera = CachedPlayer->GetFollowCamera();
@@ -130,28 +129,16 @@ void UGA_FireBase::ApplyDamage()
     FHitResult MuzzleHitResult;
     bool bMuzzleHit = GetWorld()->LineTraceSingleByChannel(MuzzleHitResult, MuzzleLoc, MuzzleTraceEnd, TraceChannel, Params);
 
-    // 第三步：结算伤害 (GAS 核心流程)
-    if (bMuzzleHit)
+    // 第三步：命中敌人时上报 DamageIntent, 伤害由服务器权威裁决并广播 (废弃本地伤害 GE)
+    if (!bMuzzleHit) return;
+
+    const AEnemyCharacter* Enemy = Cast<AEnemyCharacter>(MuzzleHitResult.GetActor());
+    if (!Enemy || Enemy->GetServerEnemyId() == 0) return;
+
+    UGameServerSubsystem* GS = GetWorld() ? GetWorld()->GetGameInstance()->GetSubsystem<UGameServerSubsystem>() : nullptr;
+    if (GS)
     {
-        AActor* HitActor = MuzzleHitResult.GetActor();
-        if (HitActor)
-        {
-            UAbilitySystemComponent* TargetASC = UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(HitActor);
-            UAbilitySystemComponent* SourceASC = GetAbilitySystemComponentFromActorInfo();
-
-            if (TargetASC && SourceASC && DamageEffectClass)
-            {
-                FGameplayEffectContextHandle Context = SourceASC->MakeEffectContext();
-                Context.AddHitResult(MuzzleHitResult);
-                Context.AddSourceObject(this);
-
-                FGameplayEffectSpecHandle SpecHandle = SourceASC->MakeOutgoingSpec(DamageEffectClass, GetAbilityLevel(), Context);
-                if (SpecHandle.IsValid())
-                {
-                    SourceASC->ApplyGameplayEffectSpecToTarget(*SpecHandle.Data.Get(), TargetASC);
-                }
-            }
-        }
+        GS->SendDamageIntent(ServerSkillId, Enemy->GetServerEnemyId());
     }
 }
 

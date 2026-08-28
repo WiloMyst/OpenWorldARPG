@@ -1,7 +1,9 @@
 // Copyright 2025 WiloMyst. All Rights Reserved.
 
 #include "Characters/AICharacter/EnemyCharacter.h"
+#include "Characters/PlayerCharacter/PlayerCharacter.h"
 #include "Systems/AbilitySystem/AttributeSets/AS_Enemy.h"
+#include "Systems/GameServer/GameServerSubsystem.h"
 #include "Components/WidgetComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetSystemLibrary.h"
@@ -169,10 +171,7 @@ void AEnemyCharacter::OnMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 
 void AEnemyCharacter::ApplyDamage()
 {
-    // 伤害结算必须服务器权威，否则客户端会非法施加 GameplayEffect
-    if (!HasAuthority()) return;
-
-    TArray<AActor*> LocalHitActors;
+    if (bIsDead) return;
 
     FVector StartLoc = GetActorLocation() + GetActorForwardVector() * DamageTraceForwardStartOffset;
     FVector EndLoc = GetActorLocation() + GetActorForwardVector() * DamageTraceForwardEndOffset;
@@ -189,26 +188,55 @@ void AEnemyCharacter::ApplyDamage()
         EDrawDebugTrace::None, OutHits, true
     );
 
+    // 命中本地玩家才上报攻击意图: 伤害结算完全交给服务器 (损坏 GE 已废弃)
+    const AActor* LocalPlayer = UGameplayStatics::GetPlayerCharacter(this, 0);
+    if (!LocalPlayer) return;
+
+    bool bHitLocalPlayer = false;
     for (const FHitResult& Hit : OutHits)
     {
         AActor* HitActor = Hit.GetActor();
-        if (HitActor && !LocalHitActors.Contains(HitActor))
+        if (HitActor && HitActor == LocalPlayer)
         {
-            LocalHitActors.Add(HitActor);
-
-            UAbilitySystemComponent* TargetASC = UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(HitActor);
-            if (TargetASC && DamageEffectClass)
-            {
-                FGameplayEffectContextHandle EffectContext = AbilitySystemComponent->MakeEffectContext();
-                EffectContext.AddSourceObject(this);
-
-                FGameplayEffectSpecHandle SpecHandle = AbilitySystemComponent->MakeOutgoingSpec(DamageEffectClass, 1.0f, EffectContext);
-                if (SpecHandle.IsValid())
-                {
-                    TargetASC->ApplyGameplayEffectSpecToSelf(*SpecHandle.Data.Get());
-                }
-            }
+            bHitLocalPlayer = true;
+            break;
         }
+    }
+    if (!bHitLocalPlayer) return;
+
+    if (UGameServerSubsystem* GS = GetGameInstance() ? GetGameInstance()->GetSubsystem<UGameServerSubsystem>() : nullptr)
+    {
+        GS->SendEnemyAttackIntent(GetServerEnemyId());
+    }
+}
+
+void AEnemyCharacter::ConfigureFromServer(uint64 EnemyId, int32 MaxHp, AAIPatrolAreaBase* Area)
+{
+    ServerEnemyId = EnemyId;
+    PatrolArea = Area;
+
+    // 服务器权威初始化: 满血刷出, 血条直接以服务器 HP 为准
+    if (AttributeSet)
+    {
+        AttributeSet->SetMaxHealth((float)MaxHp);
+        AttributeSet->SetHealth((float)MaxHp);
+    }
+    UpdateHealthBar();
+}
+
+void AEnemyCharacter::ApplyServerDamage(const FGrpcGameDamageDeal& Deal)
+{
+    if (!AttributeSet) return;
+
+    // 纯表现: 只把服务器裁决的 HP 写入血条, 客户端不做任何本地扣血/概率/击杀判定
+    AttributeSet->SetMaxHealth((float)Deal.TargetMaxHp.Value);
+    AttributeSet->SetHealth((float)Deal.TargetCurrentHp.Value);
+    UpdateHealthBar();
+
+    // 死亡由服务器 killed 标志驱动, 避免客户端自行判定导致前后端不一致
+    if (Deal.TargetKilled && !bIsDead)
+    {
+        OnDead();
     }
 }
 
@@ -271,6 +299,15 @@ void AEnemyCharacter::DestroyEnemy()
     if (AbilitySystemComponent && CancelTagsOnDeath.IsValid())
     {
         AbilitySystemComponent->CancelAbilities(&CancelTagsOnDeath);
+    }
+
+    // 释放服务器权威敌人登记, 避免 DamageDeal 命中已销毁实体
+    if (ServerEnemyId != 0)
+    {
+        if (UGameServerSubsystem* GS = GetGameInstance() ? GetGameInstance()->GetSubsystem<UGameServerSubsystem>() : nullptr)
+        {
+            GS->UnregisterEnemy(ServerEnemyId);
+        }
     }
 
     if (EnemyWeapon)

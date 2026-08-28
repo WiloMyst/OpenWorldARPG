@@ -1,0 +1,38 @@
+# 服务器权威物品规则表: 字段只含服务器裁决所需 (堆叠/分类容量)
+# 表现层 (名称/图标/描述) 在客户端 DT_ItemDataInfo, 两表经 item_id 对应, 字段不重复维护
+# 写法约定: 未写的字段 = loader 默认值 (stackable=false, max_stack=9999), 非默认才显式声明
+items:
+  # ---- 客户端表对应物品 (M3 联调用) ----
+  - item_id: 1
+    category: "weapon"
+  - item_id: 2
+    category: "weapon"
+  - item_id: 3
+    category: "artifact"
+
+  # ---- test_client 集成测试夹具 (服务器专属, 客户端表无此行) ----
+  - item_id: 1001
+    category: "material"
+    stackable: true
+  - item_id: 1002
+    category: "material"
+    stackable: true
+    max_stack: 99
+  - item_id: 2001
+    category: "weapon"
+  - item_id: 2002
+    category: "weapon"
+  - item_id: 3001
+    category: "artifact"
+  - item_id: 3002
+    category: "artifact"
+  - item_id: 3003
+    category: "artifact"
+  - item_id: 4001
+    category: "food"
+    stackable: true
+    max_stack: 99
+  - item_id: 5001
+    category: "quest"
+    stackable: true
+    max_stack: 99

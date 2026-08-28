@@ -21,20 +21,6 @@ ItemDatabase ItemDatabase::LoadFromYaml(const std::string& path) {
         cfg.category = node["category"].as<std::string>();
         cfg.stackable = node["stackable"].as<bool>(false);
         cfg.max_stack = node["max_stack"].as<int32_t>(9999);
-        cfg.use_target = node["use_target"].as<std::string>("none");
-
-        if (cfg.category == "artifact") {
-            const YAML::Node& art = node["artifact"];
-            if (!art) {
-                spdlog::critical("[ItemDatabase] artifact item {} missing 'artifact' section", cfg.item_id);
-                throw std::runtime_error("ItemDatabase load failed");
-            }
-            cfg.has_artifact = true;
-            cfg.artifact_set_id = art["set_id"].as<int32_t>(0);
-            cfg.artifact_slot = art["slot"].as<std::string>();
-            cfg.artifact_main_stat = art["main_stat"].as<std::string>();
-            cfg.artifact_main_stat_base = art["main_stat_base"].as<float>(0.f);
-        }
 
         db.items_.emplace(cfg.item_id, std::move(cfg));
     }

@@ -1,0 +1,9 @@
+Begin Object Class=/Script/Engine.DataTable Name="DT_ItemDataInfo" ExportPath="/Script/Engine.DataTable'/Game/_Core/Data/DT_ItemDataInfo.DT_ItemDataInfo'"
+   Begin Object Class=/Script/Engine.AssetImportData Name="AssetImportData" ExportPath="/Script/Engine.AssetImportData'/Game/_Core/Data/DT_ItemDataInfo.DT_ItemDataInfo:AssetImportData'"
+   End Object
+   Begin Object Name="AssetImportData" ExportPath="/Script/Engine.AssetImportData'/Game/_Core/Data/DT_ItemDataInfo.DT_ItemDataInfo:AssetImportData'"
+   End Object
+   RowStruct="/Script/CoreUObject.ScriptStruct'/Script/OpenWorldARPG.ItemData'"
+   AssetImportData="/Script/Engine.AssetImportData'AssetImportData'"
+   RowStructPathName="/Script/OpenWorldARPG.ItemData"
+End Object

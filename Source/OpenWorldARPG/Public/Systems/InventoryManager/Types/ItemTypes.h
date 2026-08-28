@@ -26,15 +26,6 @@ enum class EItemRarity : uint8
 };
 
 UENUM(BlueprintType)
-enum class EItemUseTarget : uint8
-{
-    None            UMETA(DisplayName = "不可使用"),
-    Self            UMETA(DisplayName = "自身"),
-    SelectCharacter UMETA(DisplayName = "选择角色"),
-    World           UMETA(DisplayName = "世界中使用")
-};
-
-UENUM(BlueprintType)
 enum class EItemSortMode : uint8
 {
     ByRarity        UMETA(DisplayName = "按稀有度"),

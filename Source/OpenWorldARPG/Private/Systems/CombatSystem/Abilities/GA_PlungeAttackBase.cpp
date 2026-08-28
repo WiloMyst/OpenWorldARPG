@@ -7,6 +7,8 @@
 #include "Abilities/Tasks/AbilityTask_WaitGameplayEvent.h"
 #include "Abilities/Tasks/AbilityTask_WaitMovementModeChange.h"
 #include "Characters/PlayerCharacter/PlayerCharacter.h"
+#include "Characters/AICharacter/EnemyCharacter.h"
+#include "Systems/GameServer/GameServerSubsystem.h"
 #include "Systems/CombatSystem/Components/WeaponManagerComponent.h"
 #include "Systems/CombatSystem/Data/CharacterCombatDataAsset.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -221,10 +223,6 @@ void UGA_PlungeAttackBase::OnDamageEventReceived(FGameplayEventData Payload)
 void UGA_PlungeAttackBase::ApplyDamageToTargets()
 {
     if (!CachedPlayer) return;
-    if (!GetAvatarActorFromActorInfo()->HasAuthority()) return;
-
-    UAbilitySystemComponent* SourceASC = GetAbilitySystemComponentFromActorInfo();
-    if (!SourceASC || !DamageEffectClass) return;
 
     FVector ActorLoc = CachedPlayer->GetActorLocation();
     TArray<AActor*> ActorsToIgnore;
@@ -239,28 +237,25 @@ void UGA_PlungeAttackBase::ApplyDamageToTargets()
         EDrawDebugTrace::None, OutHits, true
     );
 
+    UGameServerSubsystem* GS = CachedPlayer->GetWorld()
+        ? CachedPlayer->GetWorld()->GetGameInstance()->GetSubsystem<UGameServerSubsystem>()
+        : nullptr;
+
     TArray<AActor*> HitActors;
 
     for (const FHitResult& Hit : OutHits)
     {
         AActor* HitActor = Hit.GetActor();
-        if (HitActor && !HitActors.Contains(HitActor))
+        if (!HitActor || HitActors.Contains(HitActor)) continue;
+        HitActors.Add(HitActor);
+
+        // 服务器权威伤害：客户端只上报命中, 伤害由服务器裁决并广播 (废弃本地伤害 GE)
+        const AEnemyCharacter* Enemy = Cast<AEnemyCharacter>(HitActor);
+        if (!Enemy || Enemy->GetServerEnemyId() == 0) continue;
+
+        if (GS)
         {
-            HitActors.Add(HitActor);
-
-            UAbilitySystemComponent* TargetASC = UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(HitActor);
-            if (TargetASC)
-            {
-                FGameplayEffectContextHandle Context = SourceASC->MakeEffectContext();
-                Context.AddHitResult(Hit);
-                Context.AddSourceObject(this);
-
-                FGameplayEffectSpecHandle SpecHandle = SourceASC->MakeOutgoingSpec(DamageEffectClass, GetAbilityLevel(), Context);
-                if (SpecHandle.IsValid())
-                {
-                    SourceASC->ApplyGameplayEffectSpecToTarget(*SpecHandle.Data.Get(), TargetASC);
-                }
-            }
+            GS->SendDamageIntent(ServerSkillId, Enemy->GetServerEnemyId());
         }
     }
 }

@@ -20,7 +20,7 @@ struct FCharacterRegistryRow;
  * 【职责变更】
  * 原本此子系统同时承担：
  *   1. 全局注册表查询（Tag→RowName）—— 已迁移至 UCharacterRegistrySubsystem (UGameInstanceSubsystem)
- *   2. per-玩家存档数据持有 —— 服务器侧已迁移至 UServerPlayerDataManager (GameState 组件)
+ *   2. 玩家存档数据持有 —— 服务器侧已迁移至 UServerPlayerDataManager (GameState 组件)
  * 现在此子系统仅作为**客户端本地缓存**，供 UI 查询角色存档快照。
  *
  * 【数据来源】
@@ -47,6 +47,10 @@ public:
 	// 注意：InitializeFromDataObject 仅用于单机/ListenServer 场景的模拟数据初始化。
 	// [SYNC-TODO] 远程客户端应改为接收服务器 RPC 同步的存档数据。
 	void InitializeFromDataObject(UObject* InDataObject);
+
+	// 服务器权威初始化: 以登录响应下发的拥有角色为准 (服务器权威拥有/等级/经验,
+	// 细节字段已由 GameServerSubsystem 用本地资产兜底合并), 覆盖本地缓存.
+	void InitializeFromServerData(const TArray<FCharacterSaveData>& ServerOwned);
 
 	// --- SaveData 查询（客户端缓存） ---
 

@@ -21,18 +21,7 @@ pkg_check_modules(GRPC REQUIRED grpc++)
 pkg_check_modules(PROTOBUF REQUIRED protobuf)
 pkg_check_modules(MYSQL REQUIRED mysqlclient)
 
-# hiredis: 优先系统包; 无 root 环境回退到本地解包目录 (~/hiredis-local/root,
-# 由 scripts/setup_hiredis_local.sh 生成: apt-get download + dpkg -x)
-pkg_check_modules(HIREDIS hiredis)
-if(NOT HIREDIS_FOUND)
-    set(HIREDIS_ROOT "$ENV{HOME}/hiredis-local/root")
-    find_path(HIREDIS_INCLUDE_DIR hiredis/hiredis.h
-              HINTS "${HIREDIS_ROOT}/usr/include" REQUIRED)
-    find_library(HIREDIS_LIBRARY NAMES hiredis
-                 HINTS "${HIREDIS_ROOT}/usr/lib/x86_64-linux-gnu" REQUIRED)
-    set(HIREDIS_INCLUDE_DIRS "${HIREDIS_INCLUDE_DIR}")
-    set(HIREDIS_LIBRARIES "${HIREDIS_LIBRARY}")
-endif()
+pkg_check_modules(HIREDIS REQUIRED hiredis)
 
 # 2. Protobuf 代码生成
 set(PROTO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/protos")
@@ -51,6 +40,21 @@ add_custom_command(
          -I "${PROTO_DIR}"
          "${PROTO_DIR}/game.proto"
     DEPENDS "${PROTO_DIR}/game.proto"
+)
+
+# 控制面 (GameServer -> VHServer 服务间): 对话流吊销
+add_custom_command(
+    OUTPUT "${GENERATED_DIR}/admin.pb.cc"
+           "${GENERATED_DIR}/admin.pb.h"
+           "${GENERATED_DIR}/admin.grpc.pb.cc"
+           "${GENERATED_DIR}/admin.grpc.pb.h"
+    COMMAND ${PROTOC_EXECUTABLE}
+    ARGS --cpp_out="${GENERATED_DIR}"
+         --grpc_out="${GENERATED_DIR}"
+         --plugin=protoc-gen-grpc=${GRPC_CPP_PLUGIN_EXECUTABLE}
+         -I "${PROTO_DIR}"
+         "${PROTO_DIR}/admin.proto"
+    DEPENDS "${PROTO_DIR}/admin.proto"
 )
 
 # 3. 公共编译配置
@@ -77,16 +81,25 @@ set(GAME_LIBS
 # 4. 服务器
 add_executable(game_server
     src/main.cpp
-    src/core/grpc_server.cpp
-    src/core/player_session.cpp
+    src/net/grpc_server.cpp
+    src/net/player_session.cpp
+    src/net/unary_call.cpp
+    src/net/dialogue_revoker.cpp
     src/session/session_manager.cpp
+    src/session/session_handler.cpp
     src/logic/game_logic.cpp
     src/logic/item_database.cpp
     src/logic/inventory_manager.cpp
+    src/logic/initial_archive_loader.cpp
     src/storage/mysql_store.cpp
     src/storage/redis_store.cpp
+    src/world/aoi_manager.cpp
+    src/world/world_manager.cpp
+    src/combat/combat_manager.cpp
     "${GENERATED_DIR}/game.pb.cc"
     "${GENERATED_DIR}/game.grpc.pb.cc"
+    "${GENERATED_DIR}/admin.pb.cc"
+    "${GENERATED_DIR}/admin.grpc.pb.cc"
 )
 target_include_directories(game_server PRIVATE ${GAME_INCLUDES})
 target_link_libraries(game_server PRIVATE ${GAME_LIBS})
@@ -108,3 +121,40 @@ add_executable(token_probe
 )
 target_include_directories(token_probe PRIVATE ${GAME_INCLUDES})
 target_link_libraries(token_probe PRIVATE ${GAME_LIBS})
+
+# 7. Phase 1 状态同步 + AOI 集成测试
+add_executable(test_aoi
+    tests/test_aoi.cpp
+    "${GENERATED_DIR}/game.pb.cc"
+    "${GENERATED_DIR}/game.grpc.pb.cc"
+)
+target_include_directories(test_aoi PRIVATE ${GAME_INCLUDES})
+target_link_libraries(test_aoi PRIVATE ${GAME_LIBS})
+
+# 8. 测试数据清理工具 (替代 mysql CLI: WSL 无 root 装不了 mysql-client)
+add_executable(cleanup_test_data
+    tools/cleanup_test_data.cpp
+)
+target_include_directories(cleanup_test_data PRIVATE ${MYSQL_INCLUDE_DIRS})
+target_link_libraries(cleanup_test_data PRIVATE ${MYSQL_LIBRARIES})
+
+# 9. Phase 2 自定义 TCP 协议集成测试 已随 TCP 移除
+# 10. Phase 3 服务器权威战斗单测 (配置加载/刷怪/伤害结算/击杀判定)
+# 战斗管理器广播依赖 SessionManager, 故一并链接会话/世界实现 (测试不注入会话, 广播走空分支)
+add_executable(test_combat
+    tests/test_combat.cpp
+    src/combat/combat_manager.cpp
+    src/session/session_manager.cpp
+    src/world/world_manager.cpp
+    src/world/aoi_manager.cpp
+    "${GENERATED_DIR}/game.pb.cc"
+)
+target_include_directories(test_combat PRIVATE ${GAME_INCLUDES})
+target_link_libraries(test_combat PRIVATE
+    ${GRPC_LIBRARIES}
+    ${PROTOBUF_LIBRARIES}
+    spdlog::spdlog
+    yaml-cpp
+    nlohmann_json::nlohmann_json
+    pthread
+)

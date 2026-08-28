@@ -18,6 +18,13 @@ struct AppConfig {
     // 为空则放行所有请求 (离线调试模式), 生产环境必须配置
     std::string dialogue_secret;
 
+    // Admin (控制面, 可选): GameServer -> VHServer 服务间管理端口, 供对话流吊销联动.
+    // port <= 0 或 secret 为空时关闭; secret 须与 GameServer config.yaml 的
+    // vhserver.admin_secret 一致, 生产环境用环境变量 ADMIN_SECRET 注入
+    std::string admin_host = "127.0.0.1";
+    int admin_port = 50053;
+    std::string admin_secret;
+
     // AI Brain — LLM (Cloud API)
     std::string llm_api_base_url;
     std::string llm_api_key;
@@ -74,6 +81,18 @@ inline AppConfig LoadConfig(const std::string& filepath) {
             } else {
                 config.dialogue_secret = node["auth"]["dialogue_secret"].as<std::string>("");
             }
+        }
+
+        if (node["admin"]) {
+            // 环境变量 ADMIN_SECRET 优先, 避免密钥明文进配置文件
+            const char* env_admin = std::getenv("ADMIN_SECRET");
+            if (env_admin != nullptr && *env_admin != '\0') {
+                config.admin_secret = env_admin;
+            } else {
+                config.admin_secret = node["admin"]["secret"].as<std::string>("");
+            }
+            config.admin_host = node["admin"]["host"].as<std::string>(config.admin_host);
+            config.admin_port = node["admin"]["port"].as<int>(config.admin_port);
         }
 
         if (node["ai_brain"]) {

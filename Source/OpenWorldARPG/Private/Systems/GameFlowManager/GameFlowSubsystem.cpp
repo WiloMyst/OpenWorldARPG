@@ -5,6 +5,7 @@
 #include "Systems/GameFlowManager/GameAssetManagerSubsystem.h"
 #include "Systems/CharacterManager/CharacterManagerSubsystem.h"
 #include "Systems/TeamManager/TeamManagerSubsystem.h"
+#include "Systems/GameServer/GameServerSubsystem.h"
 #include "Core/Data/InitialArchiveData.h"
 #include "Core/OpenWorldARPGSettings.h"
 #include "Engine/GameInstance.h"
@@ -53,23 +54,32 @@ void UGameFlowSubsystem::RequestTravelFromMainMenu(TSoftObjectPtr<UWorld> Target
 
 void UGameFlowSubsystem::InitializeTeamData()
 {
-    // 从项目设置加载初始存档数据（UInitialArchiveData）
-    const TSoftObjectPtr<UInitialArchiveData>& ArchiveSoftPtr = UOpenWorldARPGSettings::Get().InitialArchiveData;
-    if (ArchiveSoftPtr.IsNull())
-    {
-        UE_LOG(LogTemp, Error, TEXT("GameFlow: OpenWorldARPGSettings.InitialArchiveData 未配置！无法初始化队伍数据。"));
-        return;
-    }
-
-    UInitialArchiveData* ArchiveData = ArchiveSoftPtr.LoadSynchronous();
-    if (!ArchiveData)
-    {
-        UE_LOG(LogTemp, Error, TEXT("GameFlow: InitialArchiveData 同步加载失败！"));
-        return;
-    }
-
     UGameInstance* GI = GetGameInstance();
     if (!GI) return;
+
+    // 服务器权威存档优先 (B 方案): 登录响应已携带拥有角色/配队/上场 index,
+    // 客户端据此初始化本地队伍/角色缓存, 不再依赖本地 UInitialArchiveData.
+    UGameServerSubsystem* GameServer = GI->GetSubsystem<UGameServerSubsystem>();
+    const bool bUseServerArchive = GameServer && GameServer->HasServerArchive();
+
+    UInitialArchiveData* ArchiveData = nullptr;
+    if (!bUseServerArchive)
+    {
+        // 兜底: 未登录/无服务器存档时, 从项目设置加载本地初始存档
+        const TSoftObjectPtr<UInitialArchiveData>& ArchiveSoftPtr = UOpenWorldARPGSettings::Get().InitialArchiveData;
+        if (ArchiveSoftPtr.IsNull())
+        {
+            UE_LOG(LogTemp, Error, TEXT("GameFlow: OpenWorldARPGSettings.InitialArchiveData 未配置！无法初始化队伍数据。"));
+            return;
+        }
+
+        ArchiveData = ArchiveSoftPtr.LoadSynchronous();
+        if (!ArchiveData)
+        {
+            UE_LOG(LogTemp, Error, TEXT("GameFlow: InitialArchiveData 同步加载失败！"));
+            return;
+        }
+    }
 
     for (int32 i = 0; i < GI->GetNumLocalPlayers(); ++i)
     {
@@ -78,13 +88,28 @@ void UGameFlowSubsystem::InitializeTeamData()
             UCharacterManagerSubsystem* CharManager = LocalPlayer->GetSubsystem<UCharacterManagerSubsystem>();
             UTeamManagerSubsystem* TeamManager = LocalPlayer->GetSubsystem<UTeamManagerSubsystem>();
 
-            if (CharManager)
+            if (bUseServerArchive)
             {
-                CharManager->InitializeFromDataObject(ArchiveData);
+                if (CharManager)
+                {
+                    CharManager->InitializeFromServerData(GameServer->GetServerOwnedCharacters());
+                }
+                if (TeamManager)
+                {
+                    TeamManager->InitializeFromServerData(GameServer->GetServerTeamTags(),
+                                                         GameServer->GetServerActiveCharacterIndex());
+                }
             }
-            if (TeamManager)
+            else
             {
-                TeamManager->InitializeFromDataObject(ArchiveData);
+                if (CharManager)
+                {
+                    CharManager->InitializeFromDataObject(ArchiveData);
+                }
+                if (TeamManager)
+                {
+                    TeamManager->InitializeFromDataObject(ArchiveData);
+                }
             }
         }
     }

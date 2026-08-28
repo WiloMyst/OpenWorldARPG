@@ -5,9 +5,9 @@
 #include "Characters/PlayerCharacter/Data/CharacterSaveData.h"
 #include "Core/Data/InitialArchiveData.h"
 #include "Core/OpenWorldARPGSettings.h"
-#include "GameFramework/PlayerState.h"
+#include "Systems/GameServer/GameServerSubsystem.h"
 #include "GameFramework/PlayerController.h"
-#include "Net/UnrealNetwork.h"
+#include "Engine/GameInstance.h"
 
 // 辅助：判断当前组件所在是否为服务器权威
 static bool HasServerAuthority(const UActorComponent* Comp)
@@ -15,16 +15,10 @@ static bool HasServerAuthority(const UActorComponent* Comp)
     return Comp && Comp->GetOwnerRole() == ROLE_Authority;
 }
 
-// 辅助：从 PlayerController 获取 per-玩家索引键
-// 用 PlayerName 作为 key（避免引入 OnlineSubsystem 模块依赖）
-// [DB-INTEGRATION] 接入真实数据库后应改用 UniqueNetId 索引
-static FString GetPlayerKey(APlayerController* PC)
+// 单玩家判定：本作只有唯一玩家，PC 仅作服务端上下文，不参与存档索引。
+static bool IsServerContext(const UActorComponent* Comp, APlayerController* PC)
 {
-    if (APlayerState* PS = PC ? PC->GetPlayerState<APlayerState>() : nullptr)
-    {
-        return PS->GetPlayerName();
-    }
-    return TEXT("LocalPlayer_Fallback");
+    return HasServerAuthority(Comp) && PC != nullptr;
 }
 
 UServerPlayerDataManager::UServerPlayerDataManager()
@@ -35,37 +29,59 @@ UServerPlayerDataManager::UServerPlayerDataManager()
 
 void UServerPlayerDataManager::OnPlayerConnected(APlayerController* PlayerController)
 {
-    if (!HasServerAuthority(this) || !PlayerController) return;
+    if (!IsServerContext(this, PlayerController)) return;
 
-    // 用 UniqueNetId 字符串作为 per-玩家索引键
-    const FString PlayerKey = GetPlayerKey(PlayerController);
-    if (PlayerKey == TEXT("LocalPlayer_Fallback"))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("[ServerPlayerData] OnPlayerConnected: PlayerController 无有效 UniqueNetId，使用 fallback 键。"));
-    }
-
-    // [DB-INTEGRATION] 接入真实数据库后，此处应改为：
-    //   1. 调用异步后端请求：BackendService->RequestPlayerSaveData(UniqueId,
-    //        FOnSaveDataReceived::CreateWeakLambda(this, [this, PlayerController](const TArray<FCharacterSaveData>& Data)
-    //        {
-    //            TMap<FGameplayTag, FCharacterSaveData>& PlayerData = PlayerSaveDataMap.Add(UniqueIdStr);
-    //            for (const FCharacterSaveData& Item : Data) { PlayerData.Add(Item.CharacterTag, Item); }
-    //            PlayerControllerMap.Add(UniqueIdStr, PlayerController);
-    //            OnPlayerDataReady.Broadcast(PlayerController); // 通知 GameMode 继续生成角色
-    //        }));
+    // [DB-INTEGRATION] 接入真实数据库后，此处应改为异步：
+    //   BackendService->RequestPlayerSaveData(
+    //       FOnSaveDataReceived::CreateWeakLambda(this, [this, PlayerController](const TArray<FCharacterSaveData>& Data)
+    //       {
+    //           for (const FCharacterSaveData& Item : Data)
+    //           {
+    //               if (Item.CharacterTag.IsValid())
+    //               {
+    //                   OwnedSaveData.CharacterSaveDataMap.Add(Item.CharacterTag, Item);
+    //               }
+    //           }
+    //           OnPlayerDataReady.Broadcast(PlayerController); // 通知 GameMode 继续生成角色
+    //       }));
     //   2. 在数据到达前，GameMode 的 PostLogin 应挂起，等待 OnPlayerDataReady 回调
     //   3. 失败重试、超时、断线重连等逻辑也在此处处理
     //
-    // 当前实现：从 UInitialArchiveData 同步加载一份模拟存档给该玩家。
-    // 这份存档对所有玩家相同（因为来自项目设置），仅用于单机/测试场景。
+    // 当前实现：从 UInitialArchiveData 同步加载一份模拟存档（单玩家共享）。
 
-    if (PlayerSaveDataMap.Contains(PlayerKey))
+    if (OwnedSaveData.CharacterSaveDataMap.Num() > 0)
     {
-        UE_LOG(LogTemp, Log, TEXT("[ServerPlayerData] OnPlayerConnected: 玩家 %s 已有存档，跳过初始化。"), *PlayerKey);
+        UE_LOG(LogTemp, Log, TEXT("[ServerPlayerData] OnPlayerConnected: 玩家存档已初始化，跳过。"));
         return;
     }
 
-    // 从项目设置加载初始存档（模拟数据库读取）
+    // 服务器权威存档优先 (B 方案): 登录响应已携带拥有角色 (细节字段已由 GameServerSubsystem
+    // 用本地资产兜底合并), 直接采用, 不再从本地 UInitialArchiveData 模拟加载.
+    if (UWorld* World = GetWorld())
+    {
+        if (UGameInstance* GI = World->GetGameInstance())
+        {
+            if (UGameServerSubsystem* GameServer = GI->GetSubsystem<UGameServerSubsystem>())
+            {
+                if (GameServer->HasServerArchive())
+                {
+                    for (const FCharacterSaveData& SaveData : GameServer->GetServerOwnedCharacters())
+                    {
+                        if (SaveData.CharacterTag.IsValid())
+                        {
+                            OwnedSaveData.CharacterSaveDataMap.Add(SaveData.CharacterTag, SaveData);
+                        }
+                    }
+
+                    UE_LOG(LogTemp, Log, TEXT("[ServerPlayerData] OnPlayerConnected: 采用服务器权威存档，角色数=%d"),
+                        OwnedSaveData.CharacterSaveDataMap.Num());
+                    return;
+                }
+            }
+        }
+    }
+
+    // 兜底: 未登录/无服务器存档时, 从项目设置加载初始存档（模拟数据库读取）
     const TSoftObjectPtr<UInitialArchiveData>& ArchiveSoftPtr = UOpenWorldARPGSettings::Get().InitialArchiveData;
     if (ArchiveSoftPtr.IsNull())
     {
@@ -80,102 +96,70 @@ void UServerPlayerDataManager::OnPlayerConnected(APlayerController* PlayerContro
         return;
     }
 
-    // 将初始拥有角色数据存入 per-玩家 Map（以 UniqueNetId 为键）
-    FPlayerSaveDataEntry& PlayerData = PlayerSaveDataMap.Add(PlayerKey);
+    // 将初始拥有角色数据填入单玩家队伍存档（按 CharacterTag 索引）
     for (const FCharacterSaveData& SaveData : ArchiveData->InitialOwnedCharacters)
     {
         if (SaveData.CharacterTag.IsValid())
         {
-            PlayerData.CharacterSaveDataMap.Add(SaveData.CharacterTag, SaveData);
+            OwnedSaveData.CharacterSaveDataMap.Add(SaveData.CharacterTag, SaveData);
         }
     }
 
-    PlayerControllerMap.Add(PlayerKey, PlayerController);
-
-    UE_LOG(LogTemp, Log, TEXT("[ServerPlayerData] OnPlayerConnected: 玩家 %s 存档初始化完成，角色数=%d"),
-        *PlayerKey, PlayerData.CharacterSaveDataMap.Num());
+    UE_LOG(LogTemp, Log, TEXT("[ServerPlayerData] OnPlayerConnected: 玩家存档初始化完成，角色数=%d"),
+        OwnedSaveData.CharacterSaveDataMap.Num());
 }
 
 void UServerPlayerDataManager::OnPlayerDisconnected(APlayerController* PlayerController)
 {
     if (!PlayerController) return;
 
-    const FString PlayerKey = GetPlayerKey(PlayerController);
-
-    // [DB-INTEGRATION] 接入真实数据库后，此处应先异步写回该玩家的存档：
-    //   BackendService->SavePlayerData(UniqueId, PlayerSaveDataMap[PlayerKey],
-    //       FOnSaveComplete::CreateWeakLambda(this, [this, PlayerKey](bool bSuccess)
+    // [DB-INTEGRATION] 接入真实数据库后，此处应先异步写回存档：
+    //   BackendService->SavePlayerData(OwnedSaveData.CharacterSaveDataMap,
+    //       FOnSaveComplete::CreateWeakLambda(this, [this](bool bSuccess)
     //       {
-    //           if (bSuccess) { PlayerSaveDataMap.Remove(PlayerKey); PlayerControllerMap.Remove(PlayerKey); }
+    //           if (bSuccess) { OwnedSaveData.CharacterSaveDataMap.Empty(); }
     //           else { UE_LOG(...); /* 重试或保留内存等待下次保存 */ }
     //       }));
     // 当前实现：直接从内存清理。
 
-    if (PlayerSaveDataMap.Remove(PlayerKey) > 0)
-    {
-        UE_LOG(LogTemp, Log, TEXT("[ServerPlayerData] OnPlayerDisconnected: 玩家 %s 存档已从内存清理。"), *PlayerKey);
-    }
-    PlayerControllerMap.Remove(PlayerKey);
+    OwnedSaveData.CharacterSaveDataMap.Empty();
+    UE_LOG(LogTemp, Log, TEXT("[ServerPlayerData] OnPlayerDisconnected: 玩家存档已从内存清理。"));
 }
 
 bool UServerPlayerDataManager::GetAllOwnedCharacterSaveData(APlayerController* PlayerController, TArray<FCharacterSaveData>& OutData) const
 {
-    if (!HasServerAuthority(this) || !PlayerController) return false;
+    if (!IsServerContext(this, PlayerController)) return false;
 
-    const FString PlayerKey = GetPlayerKey(PlayerController);
-
-    const FPlayerSaveDataEntry* Found = PlayerSaveDataMap.Find(PlayerKey);
-    if (!Found) return false;
-
-    Found->CharacterSaveDataMap.GenerateValueArray(OutData);
-    return true;
+    OwnedSaveData.CharacterSaveDataMap.GenerateValueArray(OutData);
+    return OutData.Num() > 0;
 }
 
 const FCharacterSaveData* UServerPlayerDataManager::GetCharacterSaveData(APlayerController* PlayerController, const FGameplayTag& CharacterTag) const
 {
-    if (!HasServerAuthority(this) || !PlayerController) return nullptr;
+    if (!IsServerContext(this, PlayerController)) return nullptr;
 
-    const FString PlayerKey = GetPlayerKey(PlayerController);
-
-    const FPlayerSaveDataEntry* Found = PlayerSaveDataMap.Find(PlayerKey);
-    if (!Found) return nullptr;
-
-    return Found->CharacterSaveDataMap.Find(CharacterTag);
+    return OwnedSaveData.CharacterSaveDataMap.Find(CharacterTag);
 }
 
 void UServerPlayerDataManager::SetCharacterSaveData(APlayerController* PlayerController, const FGameplayTag& CharacterTag, const FCharacterSaveData& NewData)
 {
-    if (!HasServerAuthority(this) || !PlayerController) return;
+    if (!IsServerContext(this, PlayerController)) return;
 
-    const FString PlayerKey = GetPlayerKey(PlayerController);
-
-    FPlayerSaveDataEntry* Found = PlayerSaveDataMap.Find(PlayerKey);
-    if (!Found)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("[ServerPlayerData] SetCharacterSaveData: 玩家 %s 无存档记录，跳过更新。"), *PlayerKey);
-        return;
-    }
-
-    FCharacterSaveData* ExistingData = Found->CharacterSaveDataMap.Find(CharacterTag);
+    FCharacterSaveData* ExistingData = OwnedSaveData.CharacterSaveDataMap.Find(CharacterTag);
     if (ExistingData)
     {
         *ExistingData = NewData;
     }
     else
     {
-        UE_LOG(LogTemp, Warning, TEXT("[ServerPlayerData] SetCharacterSaveData: 角色 Tag [%s] 不在玩家 %s 的存档中。"),
-            *CharacterTag.ToString(), *PlayerKey);
+        UE_LOG(LogTemp, Warning, TEXT("[ServerPlayerData] SetCharacterSaveData: 角色 Tag [%s] 不在玩家存档中。"),
+            *CharacterTag.ToString());
     }
 }
 
 void UServerPlayerDataManager::CollectSaveDataFromCharacters(APlayerController* PlayerController, const TArray<APlayerCharacter*>& CharacterActors)
 {
-    if (!HasServerAuthority(this) || !PlayerController) return;
-
-    const FString PlayerKey = GetPlayerKey(PlayerController);
-
-    FPlayerSaveDataEntry* Found = PlayerSaveDataMap.Find(PlayerKey);
-    if (!Found) return;
+    if (!IsServerContext(this, PlayerController)) return;
 
     // 从角色实体收集运行时数据并回写到对应存档
     for (APlayerCharacter* Character : CharacterActors)
@@ -183,7 +167,7 @@ void UServerPlayerDataManager::CollectSaveDataFromCharacters(APlayerController* 
         if (!IsValid(Character)) continue;
 
         const FCharacterSaveData& RuntimeData = Character->GetRuntimeData();
-        FCharacterSaveData* Data = Found->CharacterSaveDataMap.Find(RuntimeData.CharacterTag);
+        FCharacterSaveData* Data = OwnedSaveData.CharacterSaveDataMap.Find(RuntimeData.CharacterTag);
         if (Data)
         {
             *Data = RuntimeData;
@@ -191,7 +175,6 @@ void UServerPlayerDataManager::CollectSaveDataFromCharacters(APlayerController* 
     }
 
     // [DB-INTEGRATION] 接入真实数据库后，此处应触发异步写回：
-    //   BackendService->SavePlayerData(UniqueId, Found->CharacterSaveDataMap);
+    //   BackendService->SavePlayerData(OwnedSaveData.CharacterSaveDataMap);
     // 当前实现：数据仅在内存中，不持久化。
 }
-

@@ -24,8 +24,11 @@ class UPlayerCharacterMovementComponent;
 class UInteractionComponent;
 class UTargetingComponent;
 class UPlayerUIExtensionComponent;
+class UPlayerMovementReportComponent;
 class UGameplayAbility;
 class AWeaponBase;
+
+struct FGrpcGamePlayerDamage;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnPlayerMovementInput, float, InputX, float, InputY);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnHealthUpdated);
@@ -56,6 +59,12 @@ public:
 
 	void InitializeCharacter(const FCharacterSaveData& InSaveData, UCharacterVisualDataAsset* InVisualData, UCharacterCombatDataAsset* InCombatData, const FCharacterRegistryRow& InRegistryRow);
 	void SetStandbyMode(bool bNewStandbyState);
+
+	// --- 服务器权威战斗 (Phase 3) ---
+
+	// 服务器裁决的玩家受击表现: 只把权威 HP 写入 ASC (纯表现), 不参与任何本地扣血;
+	// 死亡由 HP<=0 触发 ASC 属性变更回调驱动
+	void ApplyServerPlayerDamage(const FGrpcGamePlayerDamage& Damage);
 
 	// --- 输入处理 ---
 
@@ -128,6 +137,9 @@ public:
 	const FTalentConfig* GetTalentConfig(const FGameplayTag& TalentTag) const { return CombatDataAsset ? CombatDataAsset->CharacterTalents.Find(TalentTag) : nullptr; }
 	int32 GetCharacterLevel() const { return RuntimeData.CharacterLevel; }
 	int32 GetConstellationLevel() const { return RuntimeData.ConstellationLevel; }
+
+	// 服务器权威战斗 (Phase 3): 队伍主键角色 Tag, 服务器据此识别本角色的 HP 实体
+	FGameplayTag GetServerCharacterTag() const { return ServerCharacterTag; }
 
 	// 运行时数据
 	FCharacterSaveData& GetRuntimeDataRef() { return RuntimeData; }
@@ -206,6 +218,9 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlayerCharacter|UI")
 	TObjectPtr<UPlayerUIExtensionComponent> PlayerUIExtensionComp;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlayerCharacter|Movement")
+	TObjectPtr<UPlayerMovementReportComponent> MovementReportComponent;
+
 	// --- GAS ---
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "PlayerCharacter|GAS")
@@ -227,6 +242,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_CharacterIdentityTags, Category = "PlayerCharacter|Data")
 	FGameplayTagContainer CharacterIdentityTags;
+
+	// 服务器权威战斗 (Phase 3): 队伍主键角色 Tag (来自注册表 CharacterTag), 本地不复制
+	FGameplayTag ServerCharacterTag;
 
 	// --- 输入缓存 ---
 

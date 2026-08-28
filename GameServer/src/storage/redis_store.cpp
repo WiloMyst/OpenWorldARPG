@@ -1,5 +1,5 @@
 ﻿#include "game/storage/redis_store.h"
-#include "game/infra/config_manager.hpp"
+#include "game/infra/config_manager.h"
 
 #include <hiredis/hiredis.h>
 #include <spdlog/spdlog.h>

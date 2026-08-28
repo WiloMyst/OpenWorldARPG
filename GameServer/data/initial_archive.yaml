@@ -1,0 +1,42 @@
+# 新玩家初始存档 (方案 B): 镜像客户端 UInitialArchiveData 资产 (DA_InitialArchiveData)
+# 数据源: GameServer/data/DA_InitialArchiveData.T3D (UE 导出)
+# 注意: 客户端 FCharacterSaveData 中的战斗属性 (MaxHealth/Attack/Defense) 不在此表——
+# 服务器侧战斗属性由客户端 RegisterCharacter 上报、CombatManager 权威持有, 初始存档只管拥有/等级/经验/配队.
+# 三样数据与客户端资产一一对应, 新玩家首次登录由服务器直接落库:
+#   initial_owned_characters            -> owned_characters 表 (拥有角色全集)
+#   initial_team_tags                   -> team_slots 表 (配队列表)
+#   initial_active_character_index      -> team_slots.is_active (配队内上场 index)
+# 注意: 拥有全集包含配队子集; 保持与客户端 DA_InitialArchiveData 一致, 新增角色时双端同步.
+initial_owned_characters:
+  - character_tag: "Character.Playable.Stelle"
+    level: 20
+    exp: 20
+  - character_tag: "Character.Playable.Lumine"
+    level: 10
+    exp: 10
+  - character_tag: "Character.Playable.YiXuan"
+    level: 40
+    exp: 40
+  - character_tag: "Character.Playable.Saber"
+    level: 30
+    exp: 30
+  - character_tag: "Character.Playable.Carlotta"
+    level: 25
+    exp: 25
+  - character_tag: "Character.Playable.GongSunLi"
+    level: 35
+    exp: 35
+  - character_tag: "Character.Playable.Manageress"
+    level: 15
+    exp: 15
+  - character_tag: "Character.Playable.Mita"
+    level: 5
+    exp: 5
+
+initial_team_tags:
+  - "Character.Playable.Saber"
+  - "Character.Playable.Carlotta"
+  - "Character.Playable.GongSunLi"
+  - "Character.Playable.YiXuan"
+
+initial_active_character_index: 0

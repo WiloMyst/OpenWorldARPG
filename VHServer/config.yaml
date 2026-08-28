@@ -10,6 +10,16 @@ server:
 auth:
   dialogue_secret: "dev-dialogue-secret-2026"
 
+# 控制面管理端口 (GameServer -> VHServer 服务间 RPC): 踢人/登出联动吊销对话流.
+# 数据面票据只在流建立时校验, 已建流的终止须由 GameServer 经此端口主动下发;
+# 与数据面 (50051) 分端口部署, 仅内网/本机可达, 不对客户端开放.
+# secret 须与 GameServer config.yaml 的 vhserver.admin_secret 一致, 为空则控制面整体关闭
+admin:
+  host: "127.0.0.1"
+  port: 50053
+  # 生产环境优先用环境变量 ADMIN_SECRET 注入并删除此行
+  secret: "dev-admin-secret-2026"
+
 ai_brain:
   llm_api_base_url: "https://api.deepseek.com"
   llm_api_key: "sk-xxxx"
