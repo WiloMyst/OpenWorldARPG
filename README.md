@@ -246,7 +246,7 @@ gRPC 双向流式服务。一次对话的链路是"LLM 流式生成 → 标点�
 - 音频由 USynthComponent 子类在渲染线程消费无锁 PCM 队列，消费计数即音频时钟；表情按音频进度对齐取帧并做帧间插值，云端 30FPS 平滑到端侧渲染帧率。开播前设 0.5s 起播水位，用少量首响延迟换开场阶段抗抖动。
 - NPC 角色挂载流式组件并实现交互接口，玩家输入文本即触发 VHServer 推理链路。
 
-<img src="D:\Triton\OpenWorldARPG\assets\Image01.jpg" alt="Image01" style="zoom:25%;" />
+<img src="assets\Image01.jpg" alt="Image01" style="zoom:100%;" />
 
 ### 三、客户端玩法（UE5.7）
 
