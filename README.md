@@ -259,7 +259,7 @@ gRPC 双向流式服务。一次对话的链路是"LLM 流式生成 → 标点�
 - UI 栈式管理 + GameplayTag 路由解耦；两阶段异步关卡加载（关卡 + 队伍角色资源），加载完成后分帧释放 StreamableHandle 避免集中 GC。
 - 敌人 AI 行为树 + AI Perception 驱动巡逻/追踪/攻击，敌人持独立 ASC，攻击与死亡同样走 GA。
 
-<img src="assets\Image02.jpg" alt="Image02" style="zoom:100%;" /><img src="assets\Image03.jpg" alt="Image03" style="zoom:100%;" /><img src="assets\Image04.jpg" alt="Image04" style="zoom:100%;" /><img src="assets\Image05.jpg" alt="Image05" style="zoom:100%;" />
+<img src="assets\Image02.jpg" alt="Image02" style="zoom:100%;" />
 
 ## 技术栈
 
