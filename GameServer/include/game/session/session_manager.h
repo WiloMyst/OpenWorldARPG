@@ -22,7 +22,7 @@ namespace session {
 class ISession;
 
 // 会话管理器: 统一登记 gRPC 会话, 维护账号 -> 会话绑定
-// 职责: 同账号重复登录踢旧 / 心跳超时踢出 / 登录超时清理
+// 职责: 同账号重复登录踢旧 / 心跳超时踢出 / 登录超时清理 / 断线重连保留
 // 线程模型: 登记与解绑来自 gRPC 回调线程与 worker 线程, 超时扫描由独立后台线程执行
 class SessionManager {
 public:
@@ -54,11 +54,16 @@ public:
     // unary 鉴权: 令牌已登记且对应账号当前在线 (已挂载 World 流), 输出账号
     bool AuthenticateUnary(const std::string& token, std::string* account);
 
-    // 会话关闭回调 (正常退出/断连/被踢), 由会话实现调用
-    // 只解绑仍指向该会话的账号, 避免误删重复登录后的新绑定
+    // 会话关闭回调 (正常退出/登出/断连/心跳超时), 由会话实现调用
+    // 只需绑仍指向该会话的账号, 避免误删重复登录后的新绑定.
+    // 断线(非显式登出)登记重连保留窗口, 业务态暂不清理; 显式登出立即完整释放
     void OnSessionClosed(std::shared_ptr<ISession> session);
 
-    // 按账号断开在线会话 (unary Logout 用): 登出后关闭其 World 流
+    // 断线重连接管: 账号处于重连保留窗口且世界实体仍存 -> 消费窗口返回 true,
+    // 由调用方 (SessionHandler::EnterWorld) 走 PlayerResume 接管实体而非重建. 返回 false = 全新进入
+    bool TakeReconnect(const std::string& account);
+
+    // 按账号断开在线会话 (unary Logout 用): 标记显式登出后关闭其 World 流
     void CloseByAccount(const std::string& account);
 
     // 向在线账号推送服务器消息 (AOI 广播等); 未在线/会话不存在则静默丢弃
@@ -85,12 +90,11 @@ public:
 
 private:
     void CheckLoop();
-    void ForceResumeTimeout(const std::string& account, std::shared_ptr<ISession> session);
 
     // ---- 配置 ----
     int64_t heartbeat_timeout_ms_;
     int64_t login_timeout_ms_;
-    int64_t resume_grace_ms_;
+    int64_t reconnect_grace_ms_;
     int64_t check_interval_ms_;
 
     // ---- 后台扫描线程 ----
@@ -101,11 +105,19 @@ private:
     std::mutex mtx_;
     std::unordered_map<uint64_t, std::weak_ptr<ISession>> sessions_;
     std::unordered_map<std::string, std::weak_ptr<ISession>> account_map_;
-    // 重连等待中的会话: 持强引用保活 (gRPC 单通道恒空, 兼容保留)
-    std::unordered_map<std::string, std::shared_ptr<ISession>> resume_hold_;
     // unary Login 签发的待挂载令牌: token -> 登录上下文 (account/player_id/出生点);
     // World 流凭此兑换在线会话, 并供后续 unary 以 Bearer 令牌鉴权
     std::unordered_map<std::string, PendingLogin> login_pending_;
+
+    // ---- 断线重连保留 (gRPC 会话壳随流终结销毁, 故保留账号业务态而非会话对象) ----
+    // 断线(非登出/被踢)时: 暂不清理该账号的世界实体/战斗态/token/对话流, 登记到此表,
+    // 窗口内 (reconnect_grace_ms_) 客户端重连经 TakeReconnect + PlayerResume 无缝接管;
+    // 窗口超时由 CheckLoop 消费兜底 (PlayerLeave + UnregisterPlayer + 清token + 吊销对话)
+    struct ReconnectHold {
+        uint64_t session_id = 0;   // 断线方会话 id, 供超时按协放世界实体 (PlayerLeave 需匹配)
+        int64_t deadline_ms = 0;   // 保留截止时刻 (ms)
+    };
+    std::unordered_map<std::string, ReconnectHold> reconnect_hold_;  // account -> 保留状态
 
     // ---- 世界同步联动 ----
     world::WorldManager* world_ = nullptr;

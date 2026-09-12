@@ -14,7 +14,7 @@ namespace session {
 SessionManager::SessionManager(const infra::AppConfig& config)
     : heartbeat_timeout_ms_(static_cast<int64_t>(config.heartbeat_timeout_sec) * 1000),
       login_timeout_ms_(static_cast<int64_t>(config.login_timeout_sec) * 1000),
-      resume_grace_ms_(10000),   // 断线重连保留时长已随自定义 TCP 移除; 扫描骨架保留兼容但 gRPC 不触发
+      reconnect_grace_ms_(static_cast<int64_t>(config.reconnect_grace_sec) * 1000),
       check_interval_ms_(static_cast<int64_t>(config.session_check_interval_sec) * 1000) {}
 
 SessionManager::~SessionManager() {
@@ -25,9 +25,9 @@ void SessionManager::Start() {
     stopped_.store(false);
     check_thread_ = std::thread(&SessionManager::CheckLoop, this);
     spdlog::info("[SessionManager] Started [heartbeat_timeout={}s, login_timeout={}s, "
-                 "resume_grace={}s]",
+                 "reconnect_grace={}s]",
                  heartbeat_timeout_ms_ / 1000, login_timeout_ms_ / 1000,
-                 resume_grace_ms_ / 1000);
+                 reconnect_grace_ms_ / 1000);
 }
 
 void SessionManager::Stop() {
@@ -76,31 +76,24 @@ void SessionManager::CloseByAccount(const std::string& account) {
         auto it = account_map_.find(account);
         if (it != account_map_.end()) session = it->second.lock();
     }
-    if (session) session->RequestClose("logout", false);
+    if (session) {
+        // 显式登出: 标记后关闭, 供 OnSessionClosed 走完整释放 (而非断线重连保留)
+        session->MarkCleanLogout();
+        session->RequestClose("logout", false);
+    }
 }
 
 bool SessionManager::BindAccount(const std::string& account,
                                  std::shared_ptr<ISession> session,
-                                 const std::string& resume_token) {
+                                 const std::string& /*resume_token*/) {
     std::lock_guard<std::mutex> lock(mtx_);
     auto it = account_map_.find(account);
     if (it != account_map_.end()) {
         if (auto old = it->second.lock()) {
             if (old.get() == session.get()) return false;
 
-            // 断线重连 (曾服务于自定义 TCP): 旧会话处于重连等待且令牌匹配 -> 移交账号绑定.
-            // 现仅 gRPC 通道且 resumable() 恒 false, 该分支不会触发, 保留扫描骨架兼容
-            if (old->state() == SessionState::RECONNECTING &&
-                !resume_token.empty() && resume_token == old->resume_token()) {
-                spdlog::info("[SessionManager] Resume [account={}, old_id={}, new_id={}]",
-                             account, old->session_id(), session->session_id());
-                resume_hold_.erase(account);
-                account_map_[account] = session;
-                session->MarkOnline(account);
-                old->RequestClose("resumed", false);
-                return true;
-            }
-
+            // 断线重连接管不在此处: 客户端重连经 TakeReconnect 判定并交由 EnterWorld
+            // 走 PlayerResume; 此处处理的是真正的同账号重复登录 (新登录顶替旧会话)
             spdlog::warn("[SessionManager] Duplicate login [account={}], kicking old session [id={}]",
                          account, old->session_id());
             old->RequestClose("duplicate_login", true);
@@ -126,18 +119,22 @@ void SessionManager::OnSessionClosed(std::shared_ptr<ISession> session) {
             auto bound = it->second.lock();
             if (!bound || bound.get() != session.get()) return;
 
-            // 断线重连等待 (曾服务于自定义 TCP): gRPC 会话 resumable() 恒 false 不会触发
-            if (session->state() == SessionState::ONLINE && session->resumable() &&
-                !session->clean_logout()) {
-                session->MarkReconnecting(resume_grace_ms_);
-                resume_hold_[account] = session;
+            // 断线 (非显式登出): 暂不清理业务态, 进入重连保留窗口.
+            // gRPC 会话壳随流终结销毁, 无法保活, 但该账号的世界实体/战斗态/token/对话流
+            // 均独立于会话壳存续. 窗口内保留, 供客户端重连经 TakeReconnect + PlayerResume
+            // 无缝接管 (不重复广播 enter/leave、不重刷怪); 窗口超时由 CheckLoop 兜底释放
+            if (session->state() == SessionState::ONLINE && !session->clean_logout()) {
+                account_map_.erase(it);
+                ReconnectHold hold;
+                hold.session_id = session->session_id();
+                hold.deadline_ms = infra::NowMs() + reconnect_grace_ms_;
+                reconnect_hold_[account] = hold;
                 spdlog::info("[SessionManager] Player reconnecting [account={}, id={}, grace={}ms]",
-                             account, session->session_id(), resume_grace_ms_);
+                             account, session->session_id(), reconnect_grace_ms_);
                 return;
             }
 
             account_map_.erase(it);
-            resume_hold_.erase(account);
             // 清理该账号的待挂载令牌 (注销后令牌失效, 后续 unary/Bearer 鉴权拒绝)
             for (auto pit = login_pending_.begin(); pit != login_pending_.end();) {
                 if (pit->second.account == account) {
@@ -160,6 +157,15 @@ void SessionManager::OnSessionClosed(std::shared_ptr<ISession> session) {
 
     // 锁外联动: 通知 VHServer 吊销该账号对话流 (尽力而为, 不阻塞会话收尾)
     if (should_leave && dialogue_revoke_cb_) dialogue_revoke_cb_(account);
+}
+
+bool SessionManager::TakeReconnect(const std::string& account) {
+    std::lock_guard<std::mutex> lock(mtx_);
+    auto it = reconnect_hold_.find(account);
+    if (it == reconnect_hold_.end()) return false;
+    reconnect_hold_.erase(it);
+    spdlog::info("[SessionManager] Reconnect taken [account={}]", account);
+    return true;
 }
 
 void SessionManager::SendToAccount(const std::string& account,
@@ -205,6 +211,8 @@ void SessionManager::CheckLoop() {
         if (stopped_.load()) break;
 
         std::vector<KickItem> to_kick;
+        // 重连保留窗口超时: 断线方未在窗口内重连, 在此正式离线 (完整释放业务态)
+        std::vector<std::pair<std::string, uint64_t>> expired_reconnect;  // account -> 旧会话 id
         const int64_t now = infra::NowMs();
 
         {
@@ -226,11 +234,22 @@ void SessionManager::CheckLoop() {
                 ++it;
             }
 
-            // 重连等待超时: 清理保留的会话, 玩家正式离线
-            for (auto it = resume_hold_.begin(); it != resume_hold_.end();) {
-                if (it->second->resume_expired()) {
-                    to_kick.push_back({it->second, "resume_timeout"});
-                    it = resume_hold_.erase(it);
+            // 重连窗口超时: 回收保留的账号业务态 (世界实体/战斗态/token/对话流)
+            for (auto it = reconnect_hold_.begin(); it != reconnect_hold_.end();) {
+                const std::string account = it->first;
+                const uint64_t session_id = it->second.session_id;
+                if (now >= it->second.deadline_ms) {
+                    it = reconnect_hold_.erase(it);
+                    for (auto pit = login_pending_.begin(); pit != login_pending_.end();) {
+                        if (pit->second.account == account) {
+                            pit = login_pending_.erase(pit);
+                        } else {
+                            ++pit;
+                        }
+                    }
+                    expired_reconnect.emplace_back(account, session_id);
+                    spdlog::info("[SessionManager] Reconnect window expired, player offline [account={}]",
+                                 account);
                 } else {
                     ++it;
                 }
@@ -241,8 +260,15 @@ void SessionManager::CheckLoop() {
         for (const auto& item : to_kick) {
             spdlog::warn("[SessionManager] Kick [id={}, account={}, reason={}]",
                          item.session->session_id(), item.session->account(), item.reason);
-            item.session->RequestClose(item.reason,
-                                       item.reason != "resume_timeout");
+            item.session->RequestClose(item.reason, true);
+        }
+
+        // 窗口超时离线: 锁外释放业务态, 与 OnSessionClosed 的 should_leave 释放路径一致
+        // (世界锁 -> 会话锁 全局锁序, 避免 ABBA)
+        for (const auto& [account, session_id] : expired_reconnect) {
+            if (world_) world_->PlayerLeave(account, session_id);
+            if (combat_) combat_->UnregisterPlayer(account);
+            if (dialogue_revoke_cb_) dialogue_revoke_cb_(account);
         }
     }
 }

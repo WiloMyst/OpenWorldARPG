@@ -135,9 +135,25 @@ bool SessionHandler::PrepareLogin(const game::LoginRequest& req, std::string* ac
 void SessionHandler::EnterWorld(const std::shared_ptr<ISession>& session,
                                 const std::string& account, uint64_t player_id,
                                 const float spawn[4]) {
-    // 绑定账号 (内部置 ONLINE; 同账号旧连接被踢下线)
+    // 先消费重连保留窗口: 账号断线且在窗口内重连时, 消费标志返回 true,
+    // 若世界实体仍存则走 PlayerResume 无缝接管 (不重复 enter/leave 广播、不重刷怪);
+    // 未消费 = 全新登录
+    const bool resuming = session_manager_->TakeReconnect(account);
+
+    // 绑定账号 (内部置 ONLINE)
     session_manager_->BindAccount(account, session, "");
-    // 进入世界 (AOI 登记与广播)
+
+    if (resuming) {
+        float x, y, z, yaw;
+        if (world_->PlayerResume(account, session->session_id(), &x, &y, &z, &yaw)) {
+            spdlog::info("[Session] Player resumed into world [account={}]", account);
+            return;  // 已接管; combat/对话流在断线窗口内被保留, 无需重建
+        }
+        // 窗口内竞态 (窗口刚过期被 CheckLoop 释放实体): 退化为全新进入
+        spdlog::warn("[Session] Resume missed, fallback to fresh enter [account={}]", account);
+    }
+
+    // 全新进入世界 (AOI 登记与广播)
     world_->PlayerEnter(account, player_id, session->session_id(), spawn);
 }
 

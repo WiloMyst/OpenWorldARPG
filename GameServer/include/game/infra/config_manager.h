@@ -50,6 +50,7 @@ struct AppConfig {
     int heartbeat_timeout_sec = 30;
     int login_timeout_sec = 15;
     int session_check_interval_sec = 5;
+    int reconnect_grace_sec = 10;   // 断线重连保留窗口(秒): 断线后账号业务态保留时长, 窗口内重连无缝接管; 须小于心跳超时
 
     // 对话票据签名密钥: 与 VHServer 共享, 环境变量 DIALOGUE_SECRET 优先; 为空则拒绝签发
     std::string dialogue_secret;
@@ -108,6 +109,8 @@ inline AppConfig LoadConfig(const std::string& filepath) {
                 node["session"]["login_timeout_sec"].as<int>(config.login_timeout_sec);
             config.session_check_interval_sec =
                 node["session"]["check_interval_sec"].as<int>(config.session_check_interval_sec);
+            config.reconnect_grace_sec =
+                node["session"]["reconnect_grace_sec"].as<int>(config.reconnect_grace_sec);
         }
 
         if (node["auth"]) {

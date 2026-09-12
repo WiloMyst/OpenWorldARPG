@@ -60,8 +60,10 @@ public:
     bool resumable() const override { return false; }
     std::string resume_token() const override { return ""; }
     void SetResumeToken(const std::string&) override {}
-    bool clean_logout() const override { return true; }
-    void MarkCleanLogout() override {}
+    // 显式登出标记: 默认 false (断线/被踢/心跳超时都视为非登出断连, 进入重连保留窗口);
+    // 仅玩家主动 Logout (CloseByAccount) 置位, 走完整释放
+    bool clean_logout() const override { return clean_logout_.load(std::memory_order_acquire); }
+    void MarkCleanLogout() override { clean_logout_.store(true, std::memory_order_release); }
     void MarkReconnecting(int64_t) override {}
     bool resume_expired() const override { return false; }
 
@@ -98,6 +100,7 @@ private:
     std::atomic<session::SessionState> state_{session::SessionState::ACCEPTING};
     mutable std::mutex state_mtx_;
     std::string account_;
+    std::atomic<bool> clean_logout_{false};  // 显式登出标记 (OnSessionClosed 判定断线保留)
     int64_t connect_ms_ = 0;
     std::atomic<int64_t> last_active_ms_{0};
 

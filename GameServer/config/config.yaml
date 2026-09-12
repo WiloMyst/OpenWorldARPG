@@ -8,6 +8,8 @@ session:
   heartbeat_timeout_sec: 30      # 在线会话超过该时长无任何消息则踢出
   login_timeout_sec: 15          # 连接建立后未完成登录的清理时长
   check_interval_sec: 5          # 会话扫描间隔
+  reconnect_grace_sec: 10        # 断线重连保留窗口: 断线(非登出/被踢)后账号业务态保留时长, 窗口内重连无缝接管
+                                 #  世界实体/战斗态/token/对话流在此窗口内暂不清理; 窗口必须小于 heartbeat_timeout
 
 auth:
   # 对话票据签名密钥 (信令面): 须与 VHServer config.yaml 的 auth.dialogue_secret 完全一致
