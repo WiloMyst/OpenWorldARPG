@@ -22,7 +22,7 @@ admin:
 
 ai_brain:
   llm_api_base_url: "https://api.deepseek.com"
-  llm_api_key: "sk-xxxx"
+  llm_api_key: "sk-xxx"
   llm_model_name: "deepseek-chat"
   tts_model_path: "../models/zh_CN-huayan-medium.onnx"
   v2f_model_path: "../models/v2f_audio2face.onnx"
